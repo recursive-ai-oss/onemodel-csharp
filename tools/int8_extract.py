@@ -38,6 +38,11 @@ if a.dq:
     target = dq.output[0]
 tmp = os.path.join(a.out, "cut.onnx")
 onnx.utils.extract_model(a.model, tmp, inputs, [target])
+cut = onnx.load(tmp)
+cut.graph.node.append(h.make_node("Identity", [target], ["out0"]))
+del cut.graph.output[:]
+cut.graph.output.append(h.make_tensor_value_info("out0", onnx.TensorProto.FLOAT, None))
+onnx.save(cut, tmp)
 shutil.copy(tmp, os.path.join(a.out, "model.onnx"))
 shutil.copytree(os.path.join(a.ref, "inputs"), os.path.join(a.out, "ref", "inputs"), dirs_exist_ok=True)
 feeds = {os.path.basename(f)[:-4]: np.load(f) for f in glob.glob(os.path.join(a.ref, "inputs", "*.npy"))}
@@ -47,7 +52,6 @@ sess = ort.InferenceSession(tmp, so, providers=["CPUExecutionProvider"])
 outs = sess.run(None, feeds)
 so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
 outs_d = ort.InferenceSession(tmp, so, providers=["CPUExecutionProvider"]).run(None, feeds)
-name = sess.get_outputs()[0].name
-np.save(os.path.join(a.out, "ref", "outputs", name.replace("/", "_") + ".npy"), outs[0])
+np.save(os.path.join(a.out, "ref", "outputs", "out0.npy"), outs[0])
 d = np.abs(outs[0] - outs_d[0])
 print("ORT ALL vs DISABLE: differing elements", int((d > 0).sum()), "of", d.size, "max", float(d.max()))
