@@ -63,7 +63,7 @@ A plan is immutable after creation and is shared by any number of concurrent run
 ## 4. Sessions
 
 - **Creation** (`Session.Create(IrModel, options, ct)`, `Session.Load(path|stream, options, ct)`): resolves every operator and reports *all* missing ones together (`UnsupportedOperator`, with `Operators` listing `Type (opset N)`), checks the mode, copies weights out of the model (the `IrModel` can be disposed afterwards), picks the kernel path once from the hardware checks (`KernelPaths.Best`). The token is checked between operators and while importing.
-- **Options.** `Mode` (`Fast` default, `Exact`), `IntraOpThreads` (0 = one per logical core, up to 256; changes speed only), `OptimizationLevel` (only `None`), `MaxCachedPlans`.
+- **Options.** `Mode` (`Fast` default, `Exact`), `IntraOpThreads` (0 = one per logical core, up to 256; changes speed only), `OptimizationLevel` (`None`, `Basic`, `All`; default `All`), `MaxCachedPlans`.
 - **`Run`** has two forms. The tensor form takes names and tensors for every input and the outputs wanted; empty output tensors are allocated for the caller, others are checked and overwritten. The span form (single-input models) copies the input into the plan's staging area and the output out of the result and returns the output shape. Inputs are never modified or kept. Non-contiguous input tensors are copied first.
 - **Errors** are `SessionException` with a `Kind`: `UnsupportedOperator`, `ExactModeUnavailable`, `InvalidModel`, `Unsupported`, `InvalidInput`, `Disposed`, and the node name where there is one. Input validation (unknown name, wrong element type, wrong rank or fixed extent, short output buffer) happens before anything runs.
 - **Threads.** `Run` may be called from any number of threads. The plan cache is a copy-on-write array read without locks; building a plan takes a lock. Each run takes a `RunState` from its plan's idle list (at most 8 kept), so concurrent runs share weights and plan but nothing mutable. `Dispose` waits for nothing: runs in progress finish, and the weights are freed when the last one leaves.
@@ -85,9 +85,13 @@ A plan whose slab would exceed 2 GiB is refused (`Unsupported`).
 
 Checked builds poison each block as soon as its last value dies, so a stale read shows up as garbage in the tests; freed arena memory is poisoned too.
 
-## 6. Bits
+## 6. Graph passes
 
-- Plans, scheduling, buffer reuse, constant evaluation and views are bit-preserving: they change where and when a result is computed, never how.
+Between operator lookup and the first plan, `CompiledGraph` runs the **graph passes** the session's `OptimizationLevel` and mode select (details: [graph-passes.md](graph-passes.md)). A pass is an internal `IGraphPass` (`Graph/Passes/GraphPass.cs`) with a name, a `MinLevel`, a `PreservesBits` flag and `Run(PassGraph, ct)`. The `PassGraph` it edits is mutable and shape-free: the node list (kept in dependency order), value ids with names and constants, and the graph's output ids. A pass may replace nodes, add values and constants (`AddValue`, `SetConstant`; the graph owns and disposes them) and add kernels (`Own`; disposed with the session). A fused node reuses the `NodeInfo` of the node it replaces, so errors still name an operator the model contains. Passes run in the order of the table `GraphPasses.s_all`; nodes nothing reads are removed after each pass. A pass that does not preserve bits is skipped in exact mode. Nothing a pass does may depend on input shapes: shape-dependent work stays in plans. To add a pass, write a class in `Graph/Passes/` and add it to the table.
+
+## 7. Bits
+
+- Plans, scheduling, buffer reuse, constant evaluation (in plans and in the `constant-fold` pass) and views are bit-preserving: they change where and when a result is computed, never how.
 - Element-wise add and multiply are single correctly rounded operations, so fast and exact give the same bits for the same inputs except for NaN payloads, which exact mode rewrites to `0x7FC00000`. Relu is a compare and select; `-0` becomes `+0`; a NaN passes through.
 - Gemm and MatMul follow `kernels-gemm.md`. Gemm's `alpha` and `beta` epilogue is separate multiplies and an add, never fused, in both modes.
 - Exact-mode status of the operators so far: Add, Mul, Relu, MatMul, Gemm, Reshape, Identity, Constant are exact for float32; the integer and double paths of Add, Mul, Relu and MatMul are exact by construction (wrap-around integer arithmetic; doubles use the same single operations).

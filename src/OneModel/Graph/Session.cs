@@ -78,7 +78,7 @@ public sealed class Session : IDisposable
         KernelPath chosen = path ?? KernelPaths.Best();
         int threads = options.IntraOpThreads == 0 ? ParallelFor.DefaultThreads : options.IntraOpThreads;
         var env = new SessionEnv(options.Mode, chosen, threads, BufferPool.Shared);
-        CompiledGraph graph = CompiledGraph.Create(model.Graph, registry, options.Mode, cancellationToken);
+        CompiledGraph graph = CompiledGraph.Create(model.Graph, registry, options.Mode, options.OptimizationLevel, chosen, threads, cancellationToken);
         return new Session(graph, options, env);
     }
 

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using RecursiveAI.OneModel.Graph.Passes;
+using RecursiveAI.OneModel.Kernels;
 using RecursiveAI.OneModel.Tensors;
 
 namespace RecursiveAI.OneModel.Graph.Runtime;
@@ -27,7 +29,7 @@ internal sealed class CompiledNode
 
 /// <summary>
 /// A graph with its operators resolved and its weights loaded: everything about a model that does not depend on input shapes.
-/// Immutable after <see cref="Create"/>; an <see cref="ExecutionPlan"/> adds the shape-dependent part.
+/// Immutable after the Create methods; an <see cref="ExecutionPlan"/> adds the shape-dependent part.
 /// </summary>
 internal sealed class CompiledGraph : IDisposable
 {
@@ -62,12 +64,17 @@ internal sealed class CompiledGraph : IDisposable
     /// Resolves operators, checks the mode, and loads initializers.
     /// </summary>
     /// <exception cref="SessionException">An operator is missing, or exact mode lacks a kernel, or the model is malformed.</exception>
-    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ExecutionMode mode, CancellationToken ct)
+    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ExecutionMode mode, CancellationToken ct) =>
+        Create(graph, registry, mode, OptimizationLevel.None, KernelPath.Scalar, 1, ct);
+
+    /// <summary>As above, then runs the graph passes the level and mode select (Graph/Passes) for a session on <paramref name="path"/>.</summary>
+    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ExecutionMode mode, OptimizationLevel level, KernelPath path, int threads,
+        CancellationToken ct)
     {
         var g = new CompiledGraph();
         try
         {
-            g.Build(graph, registry, mode, ct);
+            g.Build(graph, registry, mode, level, path, threads, ct);
             return g;
         }
         catch
@@ -79,7 +86,7 @@ internal sealed class CompiledGraph : IDisposable
 
     private readonly List<OpKernel> _kernels = [];
 
-    private void Build(IrGraph graph, OpRegistry registry, ExecutionMode mode, CancellationToken ct)
+    private void Build(IrGraph graph, OpRegistry registry, ExecutionMode mode, OptimizationLevel level, KernelPath path, int threads, CancellationToken ct)
     {
         var ids = new Dictionary<IrValue, int>(ReferenceEqualityComparer.Instance);
         ValueNames = new string[graph.Values.Length];
@@ -250,6 +257,58 @@ internal sealed class CompiledGraph : IDisposable
                 }
 
                 Constants[id] = init.ToTensor();
+            }
+        }
+
+        RunPasses(nodes, level, mode, path, threads, ct);
+    }
+
+    // Graph passes (Graph/Passes): they edit the node list, add values and constants, and may add kernels. Whatever happens, the
+    // arrays this graph disposes from are rebuilt from what the pass graph holds, so nothing leaks if a pass throws.
+    private void RunPasses(List<CompiledNode> nodes, OptimizationLevel level, ExecutionMode mode, KernelPath path, int threads, CancellationToken ct)
+    {
+        if (level == OptimizationLevel.None)
+        {
+            return;
+        }
+
+        var pg = new PassGraph(nodes, [.. ValueNames], [.. Constants], InputIds, OutputIds, _kernels, mode, path, threads);
+        try
+        {
+            GraphPasses.Run(pg, level, ct);
+        }
+        finally
+        {
+            ValueNames = [.. pg.Names];
+            Constants = [.. pg.Constants];
+            ValueCount = ValueNames.Length;
+            Nodes = [.. nodes];
+        }
+
+        // Constants that no kept node or output reads any more (folded inputs, replaced weights) are released now.
+        var used = new bool[ValueCount];
+        foreach (CompiledNode n in Nodes)
+        {
+            foreach (int id in n.Inputs)
+            {
+                if (id >= 0)
+                {
+                    used[id] = true;
+                }
+            }
+        }
+
+        foreach (int id in OutputIds)
+        {
+            used[id] = true;
+        }
+
+        for (int i = 0; i < Constants.Length; i++)
+        {
+            if (!used[i] && !Constants[i].IsEmpty)
+            {
+                Constants[i].Dispose();
+                Constants[i] = default;
             }
         }
     }

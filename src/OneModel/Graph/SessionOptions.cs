@@ -21,8 +21,18 @@ public enum ExecutionMode
 /// <summary>How much the graph is rewritten before it is planned.</summary>
 public enum OptimizationLevel
 {
-    /// <summary>The graph runs as imported (apart from evaluating constant subgraphs when a plan is made). The only level so far.</summary>
+    /// <summary>The graph runs as imported (apart from evaluating constant subgraphs when a plan is made).</summary>
     None = 0,
+
+    /// <summary>Rewrites that never change a result: constant subgraphs are evaluated once when the session is created.</summary>
+    Basic = 1,
+
+    /// <summary>
+    /// The default. Everything in <see cref="Basic"/>, plus constant weights packed once for the matrix kernels and operator fusion
+    /// (bias and activation applied to each finished tile, Gelu and attention patterns, convolution with its batch normalization).
+    /// In <see cref="ExecutionMode.Exact"/> only the passes that keep every bit run; see docs/graph-passes.md.
+    /// </summary>
+    All = 2,
 }
 
 /// <summary>Settings fixed when a <see cref="Session"/> is created.</summary>
@@ -37,8 +47,8 @@ public sealed class SessionOptions
     /// </summary>
     public int IntraOpThreads { get; init; }
 
-    /// <summary>Graph rewriting level. Default and only value: <see cref="OptimizationLevel.None"/>.</summary>
-    public OptimizationLevel OptimizationLevel { get; init; } = OptimizationLevel.None;
+    /// <summary>Graph rewriting level. Default <see cref="OptimizationLevel.All"/>.</summary>
+    public OptimizationLevel OptimizationLevel { get; init; } = OptimizationLevel.All;
 
     /// <summary>
     /// How many execution plans (one per distinct set of input shapes) a session keeps. When more distinct shapes arrive, the least
@@ -58,9 +68,9 @@ public sealed class SessionOptions
             throw new ArgumentOutOfRangeException(nameof(IntraOpThreads), IntraOpThreads, "Threads must be between 0 and 256.");
         }
 
-        if (OptimizationLevel != OptimizationLevel.None)
+        if (!Enum.IsDefined(OptimizationLevel))
         {
-            throw new ArgumentOutOfRangeException(nameof(OptimizationLevel), OptimizationLevel, "Only OptimizationLevel.None exists so far.");
+            throw new ArgumentOutOfRangeException(nameof(OptimizationLevel), OptimizationLevel, "Unknown optimization level.");
         }
 
         if (MaxCachedPlans < 1)

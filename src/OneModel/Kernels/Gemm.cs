@@ -43,9 +43,11 @@ internal static unsafe class Gemm
     /// <param name="c">C, row-major, row stride <paramref name="ldc"/> (at least n). Must not overlap A or B.</param>
     /// <param name="ldc">Row stride of C.</param>
     /// <param name="threads">Upper bound on threads, at least 1. Changes speed only.</param>
+    /// <param name="epilogue">Optional work applied to each finished tile of C while it is still in cache; see <see cref="IGemmEpilogue"/>.</param>
     public static void Run(
         KernelMode mode, KernelPath path, int m, int n, int k,
-        ReadOnlySpan<float> a, int lda, ReadOnlySpan<float> b, int ldb, Span<float> c, int ldc, int threads)
+        ReadOnlySpan<float> a, int lda, ReadOnlySpan<float> b, int ldb, Span<float> c, int ldc, int threads,
+        IGemmEpilogue? epilogue = null)
     {
         if (m < 0 || n < 0 || k < 0)
         {
@@ -82,7 +84,107 @@ internal static unsafe class Gemm
 
         fixed (float* pa = a, pb = b, pc = c)
         {
-            RunCore(mode, path, m, n, k, pa, lda, pb, ldb, pc, ldc, threads);
+            RunCore(mode, path, m, n, k, pa, lda, pb, ldb, pc, ldc, threads, null, epilogue);
+        }
+    }
+
+    /// <summary>Floats needed to hold B (k x n) packed for <paramref name="path"/>: n rounded up to whole strips, times k.</summary>
+    public static long PackedBLength(KernelPath path, int n, int k)
+    {
+        if (n < 0 || k < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(n), "Matrix dimensions must not be negative.");
+        }
+
+        int nr = GetBlocking(path).Nr;
+        return (long)((n + nr - 1) / nr) * nr * k;
+    }
+
+    /// <summary>
+    /// Packs B (k x n, row stride <paramref name="ldb"/>) once into the panel layout <see cref="RunPacked"/> reads: for each block of
+    /// Kc rows of B, strips of nr columns, each strip holding its kc x nr panel contiguously (Goto and van de Geijn 2008, section 4).
+    /// The layout depends on the path's nr and on nothing else. Copies only.
+    /// </summary>
+    /// <param name="path">The instruction set the packed copy is for.</param>
+    /// <param name="b">B, row-major.</param>
+    /// <param name="ldb">Row stride of B (at least n).</param>
+    /// <param name="n">Columns of B.</param>
+    /// <param name="k">Rows of B.</param>
+    /// <param name="dst">At least <see cref="PackedBLength"/> floats.</param>
+    public static void PackB(KernelPath path, ReadOnlySpan<float> b, int ldb, int n, int k, Span<float> dst)
+    {
+        if (n < 0 || k < 0 || (k > 0 && n > 0 && (ldb < n || (long)(k - 1) * ldb + n > b.Length)))
+        {
+            throw new ArgumentException("B is smaller than k x n with its row stride.", nameof(b));
+        }
+
+        if (dst.Length < PackedBLength(path, n, k))
+        {
+            throw new ArgumentException("The destination is smaller than PackedBLength.", nameof(dst));
+        }
+
+        if (n == 0 || k == 0)
+        {
+            return;
+        }
+
+        Blocking blk = GetBlocking(path);
+        int nStrips = (n + blk.Nr - 1) / blk.Nr;
+        fixed (float* pb = b, pd = dst)
+        {
+            for (int pc = 0; pc < k; pc += Kc)
+            {
+                int kc = Math.Min(Kc, k - pc);
+                GemmPack.PackBStrips(pb + ((long)pc * ldb), ldb, kc, n, blk.Nr, 0, nStrips, pd + ((long)pc * nStrips * blk.Nr));
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Run"/> with B already packed by <see cref="PackB"/> for the same path, n and k. Gives the same bits as
+    /// <see cref="Run"/> on the unpacked B: only the copy is skipped.
+    /// </summary>
+    public static void RunPacked(
+        KernelMode mode, KernelPath path, int m, int n, int k,
+        ReadOnlySpan<float> a, int lda, ReadOnlySpan<float> packedB, Span<float> c, int ldc, int threads,
+        IGemmEpilogue? epilogue = null)
+    {
+        if (m < 0 || n < 0 || k < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(m), "Matrix dimensions must not be negative.");
+        }
+
+        if (!KernelPaths.IsSupported(path))
+        {
+            throw new PlatformNotSupportedException($"Kernel path {path} is not supported on this machine.");
+        }
+
+        if (m == 0 || n == 0)
+        {
+            return;
+        }
+
+        if (ldc < n || (long)(m - 1) * ldc + n > c.Length)
+        {
+            throw new ArgumentException("C is smaller than m x n with its row stride.", nameof(c));
+        }
+
+        if (k > 0)
+        {
+            if (lda < k || (long)(m - 1) * lda + k > a.Length)
+            {
+                throw new ArgumentException("A is smaller than m x k with its row stride.", nameof(a));
+            }
+
+            if (packedB.Length < PackedBLength(path, n, k))
+            {
+                throw new ArgumentException("The packed B is smaller than PackedBLength for this path, n and k.", nameof(packedB));
+            }
+        }
+
+        fixed (float* pa = a, pb = packedB, pc = c)
+        {
+            RunCore(mode, path, m, n, k, pa, lda, null, 0, pc, ldc, threads, pb, epilogue);
         }
     }
 
@@ -92,7 +194,7 @@ internal static unsafe class Gemm
     /// </summary>
     internal static void RunCore(
         KernelMode mode, KernelPath path, int m, int n, int k,
-        float* a, nint lda, float* b, nint ldb, float* c, nint ldc, int threads)
+        float* a, nint lda, float* b, nint ldb, float* c, nint ldc, int threads, float* prepackedB = null, IGemmEpilogue? epilogue = null)
     {
         if (k == 0)
         {
@@ -101,15 +203,31 @@ internal static unsafe class Gemm
                 new Span<float>(c + (i * ldc), n).Clear();
             }
 
+            if (epilogue is not null)
+            {
+                epilogue.Apply(c, ldc, 0, 0, m, n, mode);
+            }
+
             return;
         }
 
         Blocking blk = GetBlocking(path);
         int nStrips = (n + blk.Nr - 1) / blk.Nr;
         int kBlocks = (k + Kc - 1) / Kc;
-        float* packedB = Scratch.Get(Scratch.PackB, (long)nStrips * blk.Nr * k);
+        float* packedB = prepackedB;
+        if (packedB is null)
+        {
+            packedB = Scratch.Get(Scratch.PackB, (long)nStrips * blk.Nr * k);
+            PackAll(b, ldb, n, k, blk, nStrips, kBlocks, packedB, threads);
+        }
 
-        // Phase 1: pack all of B. Chunks are (k block, group of strips), fixed by the shape.
+        // Phase 2: compute tiles of C.
+        RunTiles(mode, path, m, n, k, a, lda, packedB, nStrips, c, ldc, blk, threads, epilogue);
+    }
+
+    // Phase 1: pack all of B. Chunks are (k block, group of strips), fixed by the shape.
+    private static void PackAll(float* b, nint ldb, int n, int k, Blocking blk, int nStrips, int kBlocks, float* packedB, int threads)
+    {
         int stripGroups = (nStrips + PackStripsPerChunk - 1) / PackStripsPerChunk;
         // The job objects are kept per thread and refilled, so a steady-state call allocates nothing; a call finishes with its jobs
         // before it returns, so the next call on the thread can reuse them.
@@ -123,8 +241,12 @@ internal static unsafe class Gemm
         packJob.Groups = stripGroups;
         packJob.Dst = packedB;
         ParallelFor.Run(packJob, kBlocks * stripGroups, threads);
+    }
 
-        // Phase 2: compute tiles of C.
+    private static void RunTiles(
+        KernelMode mode, KernelPath path, int m, int n, int k, float* a, nint lda, float* packedB, int nStrips, float* c, nint ldc,
+        Blocking blk, int threads, IGemmEpilogue? epilogue)
+    {
         int tilesM = (m + blk.Mc - 1) / blk.Mc;
         int tilesN = (n + blk.Nc - 1) / blk.Nc;
         TileJob job = t_tileJob ??= new TileJob();
@@ -142,7 +264,9 @@ internal static unsafe class Gemm
         job.Ldc = ldc;
         job.TilesN = tilesN;
         job.Micro = SelectMicro(mode, path);
+        job.Epilogue = epilogue;
         ParallelFor.Run(job, tilesM * tilesN, threads);
+        job.Epilogue = null;
     }
 
     /// <summary>The register tile and cache blocks of a path.</summary>
@@ -229,6 +353,7 @@ internal static unsafe class Gemm
         public nint Ldc;
         public int TilesN;
         public delegate*<int, float*, float*, float*, nint, int, void> Micro;
+        public IGemmEpilogue? Epilogue;
 
         public override void RunChunk(int chunk)
         {
@@ -293,6 +418,9 @@ internal static unsafe class Gemm
             {
                 CanonicalizeNaN(C + (i0 * Ldc) + j0, Ldc, mc, nc);
             }
+
+            // The finished tile is still in cache: bias and activation are applied here instead of in a second pass over C.
+            Epilogue?.Apply(C + (i0 * Ldc) + j0, Ldc, i0, j0, mc, nc, Mode);
         }
     }
 
