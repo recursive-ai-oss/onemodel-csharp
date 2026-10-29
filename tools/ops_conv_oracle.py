@@ -230,7 +230,8 @@ def pool_cases(g, count):
     for shape in [(1, 3, 7, 7), (2, 4, 5), (1, 2, 3, 4, 5), (3, 5, 1, 1), (0, 3, 4, 4)]:
         x = g.r(*shape, special=len(shape) > 3 and shape[0] > 0)
         g.case("globalavg", "GlobalAveragePool", [(x, False)], 1, 17)
-        g.case("globalmax", "GlobalMaxPool", [(x, False)], 1, 17)
+        xm = g.r(*shape, special="nonan" if len(shape) > 3 and shape[0] > 0 else False)  # ORT's NaN handling differs by CPU
+        g.case("globalmax", "GlobalMaxPool", [(xm, False)], 1, 17)
     g.case("maxpool_uint8", "MaxPool", [(rng.randint(0, 255, size=(1, 2, 6, 6)).astype(np.uint8), False)], 1, 12, kernel_shape=[2, 2], strides=[2, 2])
     g.case("maxpool_int8", "MaxPool", [(rng.randint(-128, 127, size=(1, 2, 6, 6)).astype(np.int8), False)], 1, 12, kernel_shape=[3, 3], pads=[1, 1, 1, 1])
 

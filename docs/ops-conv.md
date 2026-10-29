@@ -64,7 +64,8 @@ All loops run window taps in depth, height, width order, one scalar at a time. O
   Runtime in 48 of the 54 probes (propagating NaN would agree in 6), and it is the same as oneocr's. Generated comparison
   cases therefore carry infinities and `-0` but no NaN for MaxPool.
 * **GlobalMaxPool:** the maximum starting from the lowest float and replaced by strictly greater values, so NaNs are ignored and a
-  plane of NaNs or of `-inf` gives `-3.4028235e38` (ONNX Runtime's output for those planes).
+  plane of NaNs or of `-inf` gives `-3.4028235e38`. That is what ONNX Runtime 1.31.1 does on x64; on arm64 it propagates a NaN
+  instead (the same generated case gave NaN there), so the NaN behaviour of its max operators is a property of the CPU it runs on.
 * **MaxPool Indices:** the flat index of the chosen element over the whole input tensor (`((n * C + c) * D + d) * H * W + ...` for
   `storage_order` 0); for `storage_order` 1 each plane is flattened with the first spatial axis fastest (for 2-D: `c * plane + w * H + h`).
   Confirmed on a 2x2x3x3 input.
