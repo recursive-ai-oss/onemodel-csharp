@@ -39,7 +39,7 @@ internal static unsafe class AttentionDriver
         int scratchLen = Attention.ScratchLength(s.HeadDim);
         Attention.Compute(exact, IsaOf(path), s, q, k, v, mask, o, 0, 0, new Span<float>(Scratch.Get(Scratch.Attention, scratchLen), scratchLen));
 
-        fixed (float* pq = q, pk = k, pv = v, pm = mask, po = o)
+        fixed (float* pq = q, pk = k, pv = v, pmask = mask, po = o)
         {
             ItemJob job = t_job ??= new ItemJob();
             job.Exact = exact;
@@ -51,7 +51,7 @@ internal static unsafe class AttentionDriver
             job.KLen = k.Length;
             job.V = pv;
             job.VLen = v.Length;
-            job.Mask = pm;
+            job.Mask = pmask;
             job.MaskLen = mask.Length;
             job.O = po;
             job.OLen = o.Length;
