@@ -23,6 +23,11 @@ internal static class Program
             return Spike.Run(args[1..]);
         }
 
+        if (args.Length > 0 && args[0] == "attention-spike")
+        {
+            return AttentionSpike.Run(args[1..]);
+        }
+
         BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
         return 0;
     }
