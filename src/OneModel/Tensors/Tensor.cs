@@ -72,6 +72,24 @@ public readonly partial struct Tensor : IDisposable
     /// <summary>Allocates a zero-filled contiguous tensor.</summary>
     public static Tensor Zeros(DType dtype, Shape shape, BufferPool? pool = null) => Create(dtype, shape, pool, zero: true);
 
+    /// <summary>
+    /// A contiguous tensor over part of an existing buffer, starting <paramref name="byteOffset"/> bytes in. The execution plan uses it
+    /// to carve the values of one run out of a single slab; the slab, not the tensor, owns the storage.
+    /// </summary>
+    /// <exception cref="TensorShapeException">The offset is not a multiple of the element size, or the tensor would reach past the buffer.</exception>
+    internal static Tensor Over(TensorBuffer buffer, long byteOffset, DType dtype, Shape shape)
+    {
+        DTypes.ThrowIfNotStorable(dtype);
+        int size = DTypes.SizeOf(dtype);
+        if (byteOffset < 0 || byteOffset % size != 0 || (byteOffset / size) > int.MaxValue ||
+            byteOffset + ((long)shape.Length * size) > buffer.Length)
+        {
+            throw new TensorShapeException($"A {dtype}{shape} tensor at byte {byteOffset} does not fit in a {buffer.Length}-byte buffer.");
+        }
+
+        return new Tensor(buffer, buffer.Generation, (int)(byteOffset / size), shape, shape.ContiguousStrides(), dtype, 0, null);
+    }
+
     /// <summary>Allocates a tensor holding a copy of <paramref name="data"/> (row-major).</summary>
     /// <exception cref="ArgumentException"><paramref name="data"/> does not have exactly <paramref name="shape"/>'s element count.</exception>
     public static Tensor FromSpan<T>(ReadOnlySpan<T> data, Shape shape, BufferPool? pool = null) where T : unmanaged

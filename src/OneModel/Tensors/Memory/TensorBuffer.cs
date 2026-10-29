@@ -129,6 +129,20 @@ public sealed unsafe class TensorBuffer
         Volatile.Write(ref _live, 1);
     }
 
+#if CHECKED
+    // The execution plan reuses ranges of one buffer for many values; a range whose value is dead is overwritten so a stale read
+    // shows up as garbage. The caller passes a range inside this buffer.
+    internal void PoisonRange(long offset, long size)
+    {
+        if (offset < 0 || size < 0 || offset + size > _length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(offset), "The range lies outside the buffer.");
+        }
+
+        Unsafe.InitBlockUnaligned(_ptr + offset, PoisonByte, (uint)size);
+    }
+#endif
+
     internal void Rebind(byte* ptr, long length)
     {
         _ptr = ptr;

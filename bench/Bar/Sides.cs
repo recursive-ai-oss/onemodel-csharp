@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.ML.OnnxRuntime;
 
 namespace OneModel.Bar;
@@ -90,23 +91,71 @@ internal sealed class OrtSide : ISide
     }
 }
 
-/// <summary>Placeholder for this library's session; wired up when the session exists.</summary>
+/// <summary>This library through its session: the same model file and inputs, intra-op threads as given, no other tuning.</summary>
 internal sealed class OursSide : ISide
 {
+    private readonly RecursiveAI.OneModel.Graph.ExecutionMode _mode;
+    private RecursiveAI.OneModel.Graph.Session? _session;
+    private string[] _inputNames = [];
+    private string[] _outputNames = [];
+    private RecursiveAI.OneModel.Tensors.Tensor[] _inputs = [];
+    private RecursiveAI.OneModel.Tensors.Tensor[] _outputs = [];
+
+    public OursSide(string mode)
+    {
+        _mode = mode switch
+        {
+            "fast" => RecursiveAI.OneModel.Graph.ExecutionMode.Fast,
+            "exact" => RecursiveAI.OneModel.Graph.ExecutionMode.Exact,
+            _ => throw new ArgumentException($"unknown mode {mode} (fast or exact)"),
+        };
+    }
+
     public string Name => "ours";
 
-    public string Version => "unavailable";
+    public string Version => typeof(RecursiveAI.OneModel.Graph.Session).Assembly.GetName().Version?.ToString() ?? "unknown";
 
-    public void Load(string modelPath, int threads) =>
-        throw new NotSupportedException("the library's session is not implemented yet; use --side ort");
+    public void Load(string modelPath, int threads)
+    {
+        _session = RecursiveAI.OneModel.Graph.Session.Load(modelPath,
+            new RecursiveAI.OneModel.Graph.SessionOptions { Mode = _mode, IntraOpThreads = threads });
+        _outputNames = [.. _session.Outputs.Select(o => o.Name)];
+        _outputs = new RecursiveAI.OneModel.Tensors.Tensor[_outputNames.Length];
+    }
 
-    public void Bind(IReadOnlyDictionary<string, NpyArray> inputs) => throw new NotSupportedException();
+    public void Bind(IReadOnlyDictionary<string, NpyArray> inputs)
+    {
+        _inputNames = [.. _session!.Inputs.Select(i => i.Name)];
+        _inputs = new RecursiveAI.OneModel.Tensors.Tensor[_inputNames.Length];
+        for (int i = 0; i < _inputs.Length; i++)
+        {
+            NpyArray a = inputs[_inputNames[i]];
+            var shape = RecursiveAI.OneModel.Tensors.Shape.Create(a.Shape);
+            _inputs[i] = a.F32 is not null
+                ? RecursiveAI.OneModel.Tensors.Tensor.FromSpan<float>(a.F32, shape)
+                : RecursiveAI.OneModel.Tensors.Tensor.FromSpan<long>(a.I64!, shape);
+        }
+    }
 
-    public void Run() => throw new NotSupportedException();
+    /// <summary>The first run allocates the output tensors; later runs overwrite them in place, so only compute is timed.</summary>
+    public void Run() => _session!.Run(_inputNames, _inputs, _outputNames, _outputs);
 
-    public float[]? Output(string name) => null;
+    public float[]? Output(string name)
+    {
+        int i = Array.IndexOf(_outputNames, name);
+        return i < 0 || _outputs[i].IsEmpty ? null : _outputs[i].ToArray<float>();
+    }
 
     public void Dispose()
     {
+        foreach (var t in _inputs.Concat(_outputs))
+        {
+            if (!t.IsEmpty)
+            {
+                t.Dispose();
+            }
+        }
+
+        _session?.Dispose();
     }
 }

@@ -111,18 +111,37 @@ internal static unsafe class Gemm
 
         // Phase 1: pack all of B. Chunks are (k block, group of strips), fixed by the shape.
         int stripGroups = (nStrips + PackStripsPerChunk - 1) / PackStripsPerChunk;
-        var packJob = new PackBJob { B = b, Ldb = ldb, N = n, K = k, Nr = blk.Nr, NStrips = nStrips, Groups = stripGroups, Dst = packedB };
+        // The job objects are kept per thread and refilled, so a steady-state call allocates nothing; a call finishes with its jobs
+        // before it returns, so the next call on the thread can reuse them.
+        PackBJob packJob = t_packJob ??= new PackBJob();
+        packJob.B = b;
+        packJob.Ldb = ldb;
+        packJob.N = n;
+        packJob.K = k;
+        packJob.Nr = blk.Nr;
+        packJob.NStrips = nStrips;
+        packJob.Groups = stripGroups;
+        packJob.Dst = packedB;
         ParallelFor.Run(packJob, kBlocks * stripGroups, threads);
 
         // Phase 2: compute tiles of C.
         int tilesM = (m + blk.Mc - 1) / blk.Mc;
         int tilesN = (n + blk.Nc - 1) / blk.Nc;
-        var job = new TileJob
-        {
-            Mode = mode, Path = path, Blk = blk, M = m, N = n, K = k,
-            A = a, Lda = lda, PackedB = packedB, NStrips = nStrips, C = c, Ldc = ldc, TilesN = tilesN,
-            Micro = SelectMicro(mode, path),
-        };
+        TileJob job = t_tileJob ??= new TileJob();
+        job.Mode = mode;
+        job.Path = path;
+        job.Blk = blk;
+        job.M = m;
+        job.N = n;
+        job.K = k;
+        job.A = a;
+        job.Lda = lda;
+        job.PackedB = packedB;
+        job.NStrips = nStrips;
+        job.C = c;
+        job.Ldc = ldc;
+        job.TilesN = tilesN;
+        job.Micro = SelectMicro(mode, path);
         ParallelFor.Run(job, tilesM * tilesN, threads);
     }
 
@@ -162,6 +181,12 @@ internal static unsafe class Gemm
             _ => &FastGemmScalar.Kernel,
         };
     }
+
+    [ThreadStatic]
+    private static PackBJob? t_packJob;
+
+    [ThreadStatic]
+    private static TileJob? t_tileJob;
 
     private sealed class PackBJob : ChunkJob
     {

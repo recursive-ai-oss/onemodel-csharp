@@ -53,7 +53,7 @@ internal static class Program
     private static int Usage()
     {
         Console.Error.WriteLine(
-            "usage: Bar run --model FILE --ref DIR --model-name N --variant V --batch B --threads T [--side ort|ours]\n" +
+            "usage: Bar run --model FILE --ref DIR --model-name N --variant V --batch B --threads T [--side ort|ours] [--mode fast|exact]\n" +
             "               [--reps 3] [--warmup 3] [--target-ms 1000] --row-out FILE [--sdk X] [--lock-label L]\n" +
             "       Bar emit --row FILE --rss-mb X [--csv FILE] [--md FILE]");
         return 2;
@@ -87,7 +87,7 @@ internal static class Program
         using ISide side = o.GetValueOrDefault("side", "ort") switch
         {
             "ort" => new OrtSide(),
-            "ours" => new OursSide(),
+            "ours" => new OursSide(o.GetValueOrDefault("mode", "fast")),
             var s => throw new ArgumentException($"unknown side {s}"),
         };
 

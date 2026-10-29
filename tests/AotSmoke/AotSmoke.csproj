@@ -8,8 +8,16 @@
     <TrimmerSingleWarn>false</TrimmerSingleWarn>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(IlcInstructionSet)' == '' and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">
+    <!-- A NativeAOT binary targets the x86-64 baseline unless told otherwise, and then runs the 4-lane kernels. Applications that
+         want the AVX2 kernels set this (x86-64-v3, or native for the machine they publish on); the smoke app checks it took effect. -->
+    <IlcInstructionSet>x86-64-v3</IlcInstructionSet>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+    <EmbeddedResource Include="../../testdata/graphs/mlp.onnx" LogicalName="mlp.onnx" />
+    <EmbeddedResource Include="../../testdata/graphs/reference.json" LogicalName="reference.json" />
   </ItemGroup>
 
 </Project>
