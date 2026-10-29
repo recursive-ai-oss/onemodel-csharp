@@ -16,5 +16,17 @@ internal static class OpTable
         ReshapeOp.Def,
         IdentityOp.Def,
         ConstantOp.Def,
+
+        // Convolution and pooling family.
+        ConvOp.Def,
+        ConvTransposeOp.Def,
+        MaxPoolOp.Def,
+        AveragePoolOp.Def,
+        GlobalAveragePoolOp.Def,
+        GlobalMaxPoolOp.Def,
+        BatchNormalizationOp.Def,
+        ResizeOp.Def10,
+        ResizeOp.Def,
+        ResizeOp.UpsampleDef,
     ];
 }
