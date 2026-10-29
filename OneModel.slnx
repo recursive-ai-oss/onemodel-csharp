@@ -1,0 +1,21 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Release" />
+    <BuildType Name="Checked" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/OneModel/OneModel.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OneModel.Tests/OneModel.Tests.csproj" />
+    <Project Path="tests/AotSmoke/AotSmoke.csproj" />
+    <Project Path="tests/WasmSmoke/WasmSmoke.csproj" />
+  </Folder>
+  <Folder Name="/bench/">
+    <Project Path="bench/Micro/Micro.csproj" />
+  </Folder>
+  <Folder Name="/fuzz/">
+    <Project Path="fuzz/OneModel.Fuzz/OneModel.Fuzz.csproj" />
+  </Folder>
+</Solution>
