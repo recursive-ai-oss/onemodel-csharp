@@ -1,3 +1,5 @@
+using RecursiveAI.OneModel.Graph.Operators.Elementwise;
+
 namespace RecursiveAI.OneModel.Graph.Operators;
 
 /// <summary>
@@ -21,5 +23,45 @@ internal static class OpTable
         LstmOp.Def,
         GruOp.Def,
         RnnOp.Def,
+
+        // Element-wise, activations, comparisons, logic, Where and Cast.
+        SubOp.Def,
+        DivOp.Def,
+        FmodOp.Def,
+        PowOp.Def,
+        Variadics.Max,
+        Variadics.Min,
+        Variadics.Sum,
+        Variadics.Mean,
+        FloatFunctions.Exp,
+        FloatFunctions.Log,
+        FloatFunctions.Tanh,
+        FloatFunctions.Sigmoid,
+        FloatFunctions.Erf,
+        FloatFunctions.HardSigmoid,
+        FloatFunctions.HardSwish,
+        FloatFunctions.Gelu,
+        FloatFunctions.LeakyRelu,
+        NumericFunctions.Neg,
+        NumericFunctions.Abs,
+        NumericFunctions.Sign,
+        NumericFunctions.Reciprocal,
+        NumericFunctions.Sqrt,
+        NumericFunctions.Floor,
+        NumericFunctions.Ceil,
+        NumericFunctions.Round,
+        ClipOp.Def,
+        Comparisons.Equal,
+        Comparisons.Less,
+        Comparisons.Greater,
+        Comparisons.LessOrEqual,
+        Comparisons.GreaterOrEqual,
+        Logic.And,
+        Logic.Or,
+        Logic.Xor,
+        NotOp.Def,
+        WhereOp.Def,
+        CastOp.Def,
+        CastLikeOp.Def,
     ];
 }
