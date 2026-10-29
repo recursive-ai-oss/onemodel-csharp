@@ -177,6 +177,7 @@ internal static class GraphPasses
         new ConvBatchNormFoldPass(),
         new ConstantFoldPass(),
         new GeluFusionPass(),
+        new AttentionFusionPass(),
         new LinearFusionPass(),
         new ConvActivationFusionPass(),
     ];
