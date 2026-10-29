@@ -19,6 +19,48 @@ internal static class OpTable
         IdentityOp.Def,
         ConstantOp.Def,
 
+        // Convolution and pooling family.
+        ConvOp.Def,
+        ConvTransposeOp.Def,
+        MaxPoolOp.Def,
+        AveragePoolOp.Def,
+        GlobalAveragePoolOp.Def,
+        GlobalMaxPoolOp.Def,
+        BatchNormalizationOp.Def,
+        ResizeOp.Def10,
+        ResizeOp.Def,
+        ResizeOp.UpsampleDef,
+
+        // Shape and indexing family: views, copies, gathers, scatters, generators.
+        ShapeOp.Def,
+        SizeOp.Def,
+        SqueezeOp.Def,
+        UnsqueezeOp.Def,
+        FlattenOp.Def,
+        DropoutOp.Def,
+        TransposeOp.Def,
+        ConcatOp.Def,
+        SplitOp.Def,
+        SliceOp.Def,
+        ExpandOp.Def,
+        TileOp.Def,
+        GatherOp.Def,
+        GatherElementsOp.Def,
+        GatherNDOp.Def,
+        ScatterNDOp.Def,
+        PadOp.Def,
+        ConstantOfShapeOp.Def,
+        RangeOp.Def,
+        OneHotOp.Def,
+        TriluOp.Def,
+        NonZeroOp.Def,
+        TopKOp.Def,
+
+        // Recurrent family: RNN, GRU, LSTM.
+        LstmOp.Def,
+        GruOp.Def,
+        RnnOp.Def,
+
         // Element-wise, activations, comparisons, logic, Where and Cast.
         SubOp.Def,
         DivOp.Def,

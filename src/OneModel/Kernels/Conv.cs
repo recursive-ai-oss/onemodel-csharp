@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 using RecursiveAI.OneModel.Kernels.Exact;
 using RecursiveAI.OneModel.Kernels.Fast;
 using RecursiveAI.OneModel.Threading;
@@ -44,12 +45,13 @@ internal static unsafe class Conv
 
     /// <summary>
     /// Computes the convolution of <paramref name="input"/> (N x Cin x H x W) with <paramref name="weights"/>
-    /// (Cout x Cin/Groups x KH x KW) into <paramref name="output"/> (N x Cout x OutH x OutW). No bias.
+    /// (Cout x Cin/Groups x KH x KW) into <paramref name="output"/> (N x Cout x OutH x OutW). When <paramref name="bias"/> is not
+    /// empty (Cout values) it is added to each output channel after the taps, as one rounded addition per output.
     /// </summary>
     /// <exception cref="ArgumentException">A dimension is not positive, groups do not divide the channels, the output would be empty, or a buffer is too small.</exception>
     public static void Run(
         KernelMode mode, KernelPath path, in ConvShape s,
-        ReadOnlySpan<float> input, ReadOnlySpan<float> weights, Span<float> output, int threads)
+        ReadOnlySpan<float> input, ReadOnlySpan<float> weights, Span<float> output, int threads, ReadOnlySpan<float> bias = default)
     {
         Validate(s);
         long inLen = (long)s.N * s.Cin * s.H * s.W;
@@ -70,12 +72,17 @@ internal static unsafe class Conv
             throw new ArgumentException("The output is smaller than N x Cout x OutH x OutW.", nameof(output));
         }
 
+        if (!bias.IsEmpty && bias.Length < s.Cout)
+        {
+            throw new ArgumentException("The bias is smaller than Cout.", nameof(bias));
+        }
+
         if (!KernelPaths.IsSupported(path))
         {
             throw new PlatformNotSupportedException($"Kernel path {path} is not supported on this machine.");
         }
 
-        fixed (float* pin = input, pw = weights, pout = output)
+        fixed (float* pin = input, pw = weights, pout = output, pbias = bias)
         {
             if (s.IsDepthwise)
             {
@@ -84,6 +91,80 @@ internal static unsafe class Conv
             else
             {
                 ViaGemm(mode, path, s, pin, pw, pout, threads);
+            }
+
+            if (!bias.IsEmpty)
+            {
+                AddChannelBias(mode == KernelMode.Exact, pbias, pout, s.N, s.Cout, s.OutH * s.OutW, threads);
+            }
+        }
+    }
+
+    [ThreadStatic]
+    private static BiasJob? t_biasJob;
+
+    [ThreadStatic]
+    private static Im2ColJob? t_im2colJob;
+
+    /// <summary>
+    /// output[n, c, :] += bias[c] for every plane, in place. One rounded addition per element, so fast and exact agree (exact mode
+    /// also rewrites NaN results as the canonical NaN). Planes per chunk is fixed, not derived from the thread count.
+    /// </summary>
+    /// <remarks>Bounds: <c>output</c> covers n * channels * plane floats and <c>bias</c> covers channels, both checked by the callers.</remarks>
+    internal static void AddChannelBias(bool canonicalNaN, float* bias, float* output, int n, int channels, int plane, int threads)
+    {
+        BiasJob job = t_biasJob ??= new BiasJob();
+        job.Bias = bias;
+        job.Output = output;
+        job.Channels = channels;
+        job.Plane = plane;
+        job.Canonical = canonicalNaN;
+        job.Planes = n * channels;
+        ParallelFor.Run(job, (job.Planes + PlanesPerChunk - 1) / PlanesPerChunk, threads);
+    }
+
+    private sealed class BiasJob : ChunkJob
+    {
+        public float* Bias;
+        public float* Output;
+        public int Channels;
+        public int Plane;
+        public int Planes;
+        public bool Canonical;
+
+        public override void RunChunk(int chunk)
+        {
+            int qEnd = Math.Min(Planes, (chunk + 1) * PlanesPerChunk);
+            for (int q = chunk * PlanesPerChunk; q < qEnd; q++)
+            {
+                float* p = Output + ((long)q * Plane);
+                float b = Bias[q % Channels];
+                int i = 0;
+                if (Vector128.IsHardwareAccelerated)
+                {
+                    var vb = Vector128.Create(b);
+                    for (; i + 4 <= Plane; i += 4)
+                    {
+                        Vector128.Store(Vector128.Add(Vector128.Load(p + i), vb), p + i);
+                    }
+                }
+
+                for (; i < Plane; i++)
+                {
+                    p[i] += b;
+                }
+
+                if (Canonical)
+                {
+                    uint* bits = (uint*)p;
+                    for (int j = 0; j < Plane; j++)
+                    {
+                        if ((bits[j] & 0x7FFFFFFFu) > 0x7F800000u)
+                        {
+                            bits[j] = 0x7FC00000u;
+                        }
+                    }
+                }
             }
         }
     }
@@ -137,7 +218,14 @@ internal static unsafe class Conv
                 float* b = src;
                 if (!pointwise)
                 {
-                    var job = new Im2ColJob { Src = src, Dst = cols, S = s, CinG = cinG, OutH = outH, OutW = outW };
+                    // Kept per thread and refilled: a steady-state call allocates nothing (the call is done with it before it returns).
+                    Im2ColJob job = t_im2colJob ??= new Im2ColJob();
+                    job.Src = src;
+                    job.Dst = cols;
+                    job.S = s;
+                    job.CinG = cinG;
+                    job.OutH = outH;
+                    job.OutW = outW;
                     ParallelFor.Run(job, (k + Im2ColRowsPerChunk - 1) / Im2ColRowsPerChunk, threads);
                     b = cols;
                 }
@@ -213,12 +301,12 @@ internal static unsafe class Conv
         bool four = path is KernelPath.Neon or KernelPath.Portable128;
         ChunkJob job = (exact, wide, four) switch
         {
-            (true, true, _) => new DepthwiseJob<ExactLanes8, ExactLanes1>(s, input, weights, output, true),
-            (true, _, true) => new DepthwiseJob<ExactLanes4, ExactLanes1>(s, input, weights, output, true),
-            (true, _, _) => new DepthwiseJob<ExactLanes1, ExactLanes1>(s, input, weights, output, true),
-            (_, true, _) => new DepthwiseJob<FastLanes8, FastLanes1>(s, input, weights, output, false),
-            (_, _, true) => new DepthwiseJob<FastLanes4, FastLanes1>(s, input, weights, output, false),
-            _ => new DepthwiseJob<FastLanes1, FastLanes1>(s, input, weights, output, false),
+            (true, true, _) => DepthwiseJob<ExactLanes8, ExactLanes1>.Get(s, input, weights, output, true),
+            (true, _, true) => DepthwiseJob<ExactLanes4, ExactLanes1>.Get(s, input, weights, output, true),
+            (true, _, _) => DepthwiseJob<ExactLanes1, ExactLanes1>.Get(s, input, weights, output, true),
+            (_, true, _) => DepthwiseJob<FastLanes8, FastLanes1>.Get(s, input, weights, output, false),
+            (_, _, true) => DepthwiseJob<FastLanes4, FastLanes1>.Get(s, input, weights, output, false),
+            _ => DepthwiseJob<FastLanes1, FastLanes1>.Get(s, input, weights, output, false),
         };
         ParallelFor.Run(job, chunks, threads);
     }
@@ -232,19 +320,25 @@ internal static unsafe class Conv
         where TV : struct, ILanes<TV>
         where TS : struct, ILanes<TS>
     {
-        private readonly ConvShape _s;
-        private readonly float* _input;
-        private readonly float* _weights;
-        private readonly float* _output;
-        private readonly bool _canonicalNaN;
+        [ThreadStatic]
+        private static DepthwiseJob<TV, TS>? t_job;
 
-        public DepthwiseJob(in ConvShape s, float* input, float* weights, float* output, bool canonicalNaN)
+        private ConvShape _s;
+        private float* _input;
+        private float* _weights;
+        private float* _output;
+        private bool _canonicalNaN;
+
+        /// <summary>The calling thread's job object, refilled: a steady-state call allocates nothing.</summary>
+        public static DepthwiseJob<TV, TS> Get(in ConvShape s, float* input, float* weights, float* output, bool canonicalNaN)
         {
-            _s = s;
-            _input = input;
-            _weights = weights;
-            _output = output;
-            _canonicalNaN = canonicalNaN;
+            DepthwiseJob<TV, TS> job = t_job ??= new DepthwiseJob<TV, TS>();
+            job._s = s;
+            job._input = input;
+            job._weights = weights;
+            job._output = output;
+            job._canonicalNaN = canonicalNaN;
+            return job;
         }
 
         public override void RunChunk(int chunk)

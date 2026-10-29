@@ -14,4 +14,8 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 | ONNX import: protobuf reading, tensors, graph resolution, external data, errors | [onnx-import.md](onnx-import.md) |
 | Operator contract, plans, sessions, memory reuse | [graph-runtime.md](graph-runtime.md) |
 | Reference models: method, operators used, results | [reference-models.md](reference-models.md) |
+| Convolution, pooling, normalisation and resize operators: supported cases, edge rules, bits | [ops-conv.md](ops-conv.md) |
+| Shape and indexing operators: semantics, ONNX Runtime findings | [ops-shape-indexing.md](ops-shape-indexing.md) |
+| Recurrent operators (RNN, GRU, LSTM): order of operations, open choices | [ops-recurrent.md](ops-recurrent.md) |
+| CTC decoding: greedy and prefix beam search, confidences | [ctc.md](ctc.md) |
 | Element-wise operators, activations, comparisons, Where, Cast | [ops-elementwise.md](ops-elementwise.md) |
