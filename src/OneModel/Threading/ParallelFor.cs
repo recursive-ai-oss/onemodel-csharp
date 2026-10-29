@@ -23,6 +23,7 @@ internal static class ParallelFor
 {
     private const int MaxThreads = 256;
     private const int SpinsBeforeSleep = 2000;
+    private const int SpinsBeforeYield = 4000;
 
     private static readonly object s_gate = new();
     private static readonly Thread?[] s_workers = new Thread?[MaxThreads];
@@ -115,10 +116,19 @@ internal static class ParallelFor
 
             // Wait for the chunks to finish, not for the helpers to arrive: a helper that was descheduled and never joined must not
             // hold the caller up.
-            var wait = new SpinWait();
+            // Spin, and give the core away if a chunk is slow: SpinWait.SpinOnce would sleep for a whole millisecond or more after a few
+            // spins, which is longer than most operators take.
+            int spins = 0;
             while (Volatile.Read(ref s_done) != chunks)
             {
-                wait.SpinOnce();
+                if (++spins < SpinsBeforeYield)
+                {
+                    Thread.SpinWait(16);
+                }
+                else
+                {
+                    Thread.Yield();
+                }
             }
 
             s_job = null;
