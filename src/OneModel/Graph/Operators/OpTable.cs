@@ -1,4 +1,5 @@
 using RecursiveAI.OneModel.Graph.Operators.Elementwise;
+using RecursiveAI.OneModel.Graph.Operators.Quant;
 
 namespace RecursiveAI.OneModel.Graph.Operators;
 
@@ -117,5 +118,14 @@ internal static class OpTable
         WhereOp.Def,
         CastOp.Def,
         CastLikeOp.Def,
+
+        // 8-bit quantization: conversions, integer matrix products and convolutions.
+        QuantizeLinearOp.Def,
+        DequantizeLinearOp.Def,
+        DynamicQuantizeLinearOp.Def,
+        IntegerMatMulOp.MatMulInteger,
+        IntegerMatMulOp.QLinearMatMul,
+        IntegerConvOp.ConvInteger,
+        IntegerConvOp.QLinearConv,
     ];
 }
