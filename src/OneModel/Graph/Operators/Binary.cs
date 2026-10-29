@@ -58,6 +58,9 @@ internal abstract class BinaryArithmeticKernel<TOp> : OpKernel where TOp : IBina
             case DType.F64:
                 Broadcast.Binary<double, NumberRows<double, TOp>>(path, exact, so, sa, sb, a.Data<double>(), b.Data<double>(), c.MutableData<double>());
                 break;
+            case DType.F16:
+                Broadcast.Binary<Half, NumberRows<Half, TOp>>(path, exact, so, sa, sb, a.Data<Half>(), b.Data<Half>(), c.MutableData<Half>());
+                break;
             case DType.I8:
                 Broadcast.Binary<sbyte, NumberRows<sbyte, TOp>>(path, exact, so, sa, sb, a.Data<sbyte>(), b.Data<sbyte>(), c.MutableData<sbyte>());
                 break;
@@ -87,8 +90,9 @@ internal abstract class BinaryArithmeticKernel<TOp> : OpKernel where TOp : IBina
         }
     }
 
-    private static bool IsSupported(DType t) =>
-        t is DType.F32 or DType.F64 or DType.I8 or DType.I16 or DType.I32 or DType.I64 or DType.U8 or DType.U16 or DType.U32 or DType.U64;
+    /// <summary>Whether the operator accepts element type <paramref name="t"/>; derived classes narrow it (Mod with fmod = 0 takes integers only).</summary>
+    protected virtual bool IsSupported(DType t) =>
+        t is DType.F32 or DType.F64 or DType.F16 or DType.I8 or DType.I16 or DType.I32 or DType.I64 or DType.U8 or DType.U16 or DType.U32 or DType.U64;
 }
 
 /// <summary>Add: C = A + B with broadcasting.</summary>
