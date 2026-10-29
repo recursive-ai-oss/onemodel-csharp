@@ -13,7 +13,6 @@
     <AssemblyName>Bar</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <!-- When the central package list gains this version, drop the Version attribute here. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
   </ItemGroup>
 </Project>
