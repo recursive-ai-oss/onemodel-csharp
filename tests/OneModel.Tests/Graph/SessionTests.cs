@@ -339,10 +339,10 @@ public class SessionTests
     {
         byte[] model = new ModelBuilder()
             .Input("x", 1, 4).Output("y", 1, 4)
-            .Node("Softmax", ["x"], ["a"]).Node("FancyThing", ["a"], ["b"]).Node("Relu", ["b"], ["y"]).Build();
+            .Node("Det", ["x"], ["a"]).Node("FancyThing", ["a"], ["b"]).Node("Relu", ["b"], ["y"]).Build();
         SessionException e = Assert.Throws<SessionException>(() => Session.Load(new MemoryStream(model)));
         Assert.Equal(SessionErrorKind.UnsupportedOperator, e.Kind);
-        Assert.Contains("Softmax", e.Message);
+        Assert.Contains("Det", e.Message);
         Assert.Contains("FancyThing", e.Message);
         Assert.Equal(2, e.Operators.Length);
     }
