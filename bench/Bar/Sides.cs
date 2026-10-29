@@ -113,6 +113,8 @@ internal sealed class OursSide : ISide
 
     public string Name => "ours";
 
+    public string KernelPath => _session?.KernelPath ?? "";
+
     public string Version => typeof(RecursiveAI.OneModel.Graph.Session).Assembly.GetName().Version?.ToString() ?? "unknown";
 
     public void Load(string modelPath, int threads)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Immutable;
 using System.IO;
 using System.Threading;
 using RecursiveAI.OneModel.Graph;
@@ -85,21 +86,43 @@ public sealed class Model : IDisposable
         where TIn : unmanaged
         where TOut : unmanaged
     {
-        string inName = SingleInput(), outName = SingleOutput();
+        int primary = PrimaryInput();
+        string outName = SingleOutput();
         Span<int> resolved = stackalloc int[StackDims];
-        Shape s = ResolveShape(input.Length, shape, resolved);
+        Shape s = ResolveShape(primary, input.Length, shape, resolved);
         using Tensor inT = Tensor.FromSpan(input, s);
-        Span<string> inNames = [inName];
-        Span<string> outNames = [outName];
-        Span<Tensor> outs = [default];
-        Session.Run(inNames, [inT], outNames, outs);
-        using Tensor outT = outs[0];
-        if (outT.DType != DTypes.Of<TOut>())
+        ImmutableArray<TensorInfo> all = Session.Inputs;
+        string[] inNames = new string[all.Length];
+        Tensor[] ins = new Tensor[all.Length];
+        try
         {
-            throw new SessionException(SessionErrorKind.InvalidInput, $"Output '{outName}' holds {outT.DType}, not {DTypes.Of<TOut>()}.");
-        }
+            for (int i = 0; i < all.Length; i++)
+            {
+                inNames[i] = all[i].Name;
+                ins[i] = i == primary ? inT : AuxiliaryInput(all[i], s);
+            }
 
-        return outT.ToArray<TOut>();
+            Span<string> outNames = [outName];
+            Span<Tensor> outs = [default];
+            Session.Run(inNames, ins, outNames, outs);
+            using Tensor outT = outs[0];
+            if (outT.DType != DTypes.Of<TOut>())
+            {
+                throw new SessionException(SessionErrorKind.InvalidInput, $"Output '{outName}' holds {outT.DType}, not {DTypes.Of<TOut>()}.");
+            }
+
+            return outT.ToArray<TOut>();
+        }
+        finally
+        {
+            for (int i = 0; i < ins.Length; i++)
+            {
+                if (i != primary && !ins[i].IsEmpty)
+                {
+                    ins[i].Dispose();
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -114,9 +137,15 @@ public sealed class Model : IDisposable
         where TIn : unmanaged
         where TOut : unmanaged
     {
-        string inName = SingleInput(), outName = SingleOutput();
+        if (Session.Inputs.Length != 1)
+        {
+            throw new SessionException(SessionErrorKind.InvalidInput,
+                $"This model has {Session.Inputs.Length} inputs; the span-output overload needs exactly one. Use the array overloads or Model.Session.Run with named tensors.");
+        }
+
+        string inName = Session.Inputs[0].Name, outName = SingleOutput();
         Span<int> resolved = stackalloc int[StackDims];
-        Shape s = ResolveShape(input.Length, shape, resolved);
+        Shape s = ResolveShape(0, input.Length, shape, resolved);
         return Session.Run(inName, input, s.Dimensions, outName, output).Length;
     }
 
@@ -125,11 +154,59 @@ public sealed class Model : IDisposable
     /// <inheritdoc cref="Run{TIn, TOut}(ReadOnlySpan{TIn}, ReadOnlySpan{int}, Span{TOut})"/>
     public int Run(ReadOnlySpan<float> input, Span<float> output) => Run<float, float>(input, default, output);
 
-    private string SingleInput() =>
-        Session.Inputs.Length == 1
-            ? Session.Inputs[0].Name
-            : throw new SessionException(SessionErrorKind.InvalidInput,
-                $"This model has {Session.Inputs.Length} inputs; the typed Run overloads need exactly one. Use Model.Session.Run with named tensors.");
+    /// <summary>
+    /// Checks that the model can be run from one array of values. A model with several inputs (a text encoder's ids, mask and segment
+    /// ids) still works when every input after the first is a mask or segment-id input that can be filled from the ids' shape:
+    /// <c>attention_mask</c> is all ones (nothing is padding) and <c>token_type_ids</c> is all zeros. The values feed input 0.
+    /// </summary>
+    private int PrimaryInput()
+    {
+        ImmutableArray<TensorInfo> ins = Session.Inputs;
+        for (int i = 1; i < ins.Length; i++)
+        {
+            if (AuxiliaryKind(ins[i]) == 0)
+            {
+                throw new SessionException(SessionErrorKind.InvalidInput,
+                    $"This model has {ins.Length} inputs and '{ins[i].Name}' cannot be filled in for you; the typed Run overloads need one input (or token ids plus attention_mask and token_type_ids). Use Model.Session.Run with named tensors.");
+            }
+        }
+
+        return 0;
+    }
+
+    // 1 = ones (attention mask), 2 = zeros (segment ids), 0 = not an auxiliary input.
+    private static int AuxiliaryKind(TensorInfo i)
+    {
+        if (i.DType is not (DType.I64 or DType.I32))
+        {
+            return 0;
+        }
+
+        if (i.Name.Contains("attention_mask", StringComparison.Ordinal))
+        {
+            return 1;
+        }
+
+        return i.Name.Contains("token_type_ids", StringComparison.Ordinal) ? 2 : 0;
+    }
+
+    private static Tensor AuxiliaryInput(TensorInfo info, Shape like)
+    {
+        Tensor t = Tensor.Create(info.DType, like, zero: true);
+        if (AuxiliaryKind(info) == 1)
+        {
+            if (info.DType == DType.I64)
+            {
+                t.MutableData<long>().Fill(1);
+            }
+            else
+            {
+                t.MutableData<int>().Fill(1);
+            }
+        }
+
+        return t;
+    }
 
     private string SingleOutput() =>
         Session.Outputs.Length == 1
@@ -137,9 +214,9 @@ public sealed class Model : IDisposable
             : throw new SessionException(SessionErrorKind.InvalidInput,
                 $"This model has {Session.Outputs.Length} outputs; the typed Run overloads need exactly one. Use Model.Session.Run with named tensors.");
 
-    private Shape ResolveShape(int length, ReadOnlySpan<int> given, Span<int> scratch)
+    private Shape ResolveShape(int inputIndex, int length, ReadOnlySpan<int> given, Span<int> scratch)
     {
-        TensorInfo info = Session.Inputs[0];
+        TensorInfo info = Session.Inputs[inputIndex];
         if (!given.IsEmpty)
         {
             return CreateShape(given, info);
@@ -170,6 +247,13 @@ public sealed class Model : IDisposable
                 unknown = i;
                 unknownCount++;
             }
+        }
+
+        // Token ids are [batch, sequence]: with both open and no shape given, the values are one sequence.
+        if (unknownCount == 2 && unknown > 0 && !info.Dims[0].IsFixed && info.Dims.Length == 2 && info.DType is DType.I64 or DType.I32)
+        {
+            scratch[0] = 1;
+            unknownCount = 1;
         }
 
         if (unknownCount > 1)

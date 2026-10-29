@@ -53,6 +53,22 @@ foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact }
     }
 }
 
+// The README one-liner on a real encoder, when its file is supplied (ONEMODEL_MINILM); skipped otherwise.
+string? minilm = Environment.GetEnvironmentVariable("ONEMODEL_MINILM");
+if (!string.IsNullOrEmpty(minilm) && File.Exists(minilm))
+{
+    using Model enc = Model.Load(minilm);
+    long[] tokens = [101, 7592, 2088, 102];
+    float[] v = enc.Run(tokens);
+    bool finite = v.Length == tokens.Length * 384 && v.All(float.IsFinite);
+    string h = Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes<float>(v)))[..16];
+    Console.WriteLine($"minilm: {v.Length} values, finite {finite}, hash {h}");
+    if (!finite)
+    {
+        return 4;
+    }
+}
+
 return 0;
 
 Stream Open(string name) =>

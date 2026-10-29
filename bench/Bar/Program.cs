@@ -40,6 +40,7 @@ internal static class Program
             {
                 "run" => Run(o),
                 "emit" => Emit(o),
+                "check" => Check(o),
                 _ => Usage(),
             };
         }
@@ -55,7 +56,8 @@ internal static class Program
         Console.Error.WriteLine(
             "usage: Bar run --model FILE --ref DIR --model-name N --variant V --batch B --threads T [--side ort|ours] [--mode fast|exact]\n" +
             "               [--reps 3] [--warmup 3] [--target-ms 1000] --row-out FILE [--sdk X] [--lock-label L]\n" +
-            "       Bar emit --row FILE --rss-mb X [--csv FILE] [--md FILE]");
+            "       Bar emit --row FILE --rss-mb X [--csv FILE] [--md FILE]\n" +
+            "       Bar check --model FILE --ref DIR --threads T [--mode fast|exact] [--tol 1e-4]   (ours vs the stored ONNX Runtime outputs)");
         return 2;
     }
 
@@ -166,6 +168,90 @@ internal static class Program
         Console.WriteLine($"{side.Name} {o["model-name"]}/{o["variant"]} b{o["batch"]} t{threads}: " +
                           $"median {r.Median:F3} ms (min {r.Min:F3}, max {r.Max:F3}), load {loadMs:F0} ms");
         return 0;
+    }
+
+    /// <summary>
+    /// Correctness of this library on one model and input set, against the stored ONNX Runtime outputs: per output the scaled error
+    /// max|ours-ref|/max|ref| (the gate) and the element-wise relative error |ours-ref|/max(|ref|, 1e-6) (reported only), plus the
+    /// SHA-256 of each output from two runs, so a caller can compare hashes across thread counts and across runs.
+    /// Exit code 0 when every output is within --tol, 1 otherwise.
+    /// </summary>
+    private static int Check(Dictionary<string, string> o)
+    {
+        int threads = int.Parse(o["threads"], CultureInfo.InvariantCulture);
+        double tol = double.Parse(o.GetValueOrDefault("tol", "1e-4"), CultureInfo.InvariantCulture);
+        using var side = new OursSide(o.GetValueOrDefault("mode", "fast"));
+        var inputs = new Dictionary<string, NpyArray>();
+        foreach (string f in Directory.GetFiles(Path.Combine(o["ref"], "inputs"), "*.npy"))
+        {
+            inputs[Path.GetFileNameWithoutExtension(f)] = NpyArray.Load(f);
+        }
+
+        side.Load(o["model"], threads);
+        side.Bind(inputs);
+        bool ok = true;
+        string[] first = [];
+        string[] files = Directory.GetFiles(Path.Combine(o["ref"], "outputs"), "*.npy");
+        Array.Sort(files, StringComparer.Ordinal);
+        for (int run = 0; run < 2; run++)
+        {
+            side.Run();
+            string[] hashes = new string[files.Length];
+            for (int k = 0; k < files.Length; k++)
+            {
+                string name = Path.GetFileNameWithoutExtension(files[k]);
+                float[]? got = side.Output(name);
+                hashes[k] = got is null ? "missing" : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Runtime.InteropServices.MemoryMarshal.AsBytes<float>(got)))[..16];
+                if (run > 0)
+                {
+                    if (hashes[k] != first[k])
+                    {
+                        Console.WriteLine($"  {name}: run-to-run hash differs ({first[k]} vs {hashes[k]})");
+                        ok = false;
+                    }
+
+                    continue;
+                }
+
+                NpyArray want = NpyArray.Load(files[k]);
+                if (want.F32 is null || got is null || got.Length != want.F32.Length)
+                {
+                    Console.WriteLine($"  {name}: FAIL missing or wrong size (want {want.F32?.Length}, got {got?.Length})");
+                    ok = false;
+                    continue;
+                }
+
+                double max = 1e-30, d = 0, rel = 0;
+                for (int i = 0; i < got.Length; i++)
+                {
+                    max = Math.Max(max, Math.Abs(want.F32[i]));
+                }
+
+                for (int i = 0; i < got.Length; i++)
+                {
+                    double diff = Math.Abs((double)got[i] - want.F32[i]);
+                    if (double.IsNaN(diff))
+                    {
+                        diff = double.PositiveInfinity;
+                    }
+
+                    d = Math.Max(d, diff);
+                    rel = Math.Max(rel, diff / Math.Max(Math.Abs(want.F32[i]), 1e-6));
+                }
+
+                bool pass = d / max <= tol;
+                ok &= pass;
+                Console.WriteLine($"  {name} [{string.Join('x', want.Shape)}]: {(pass ? "pass" : "FAIL")} scaled {d / max:E2} elementwise {rel:E2} hash {hashes[k]}");
+            }
+
+            if (run == 0)
+            {
+                first = hashes;
+            }
+        }
+
+        Console.WriteLine($"check {o["model"]} threads {threads} mode {o.GetValueOrDefault("mode", "fast")} path {side.KernelPath}: {(ok ? "PASS" : "FAIL")}");
+        return ok ? 0 : 1;
     }
 
     private static int Emit(Dictionary<string, string> o)
