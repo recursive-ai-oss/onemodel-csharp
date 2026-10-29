@@ -31,6 +31,7 @@ internal sealed class LinearFusionPass : IGraphPass
     public void Run(PassGraph g, CancellationToken ct)
     {
         int[] sole = PassPatterns.SoleConsumers(g);
+        int[] uses = g.UseCounts();
         for (int i = 0; i < g.Nodes.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -78,6 +79,14 @@ internal sealed class LinearFusionPass : IGraphPass
             var kernel = g.Own(new LinearOp(packed, k, n, bias, biasRank, act, g.Path));
             CompiledNode tail = g.Nodes[last];
             g.Nodes[last] = new CompiledNode(node.Info, kernel, [a], tail.Outputs);
+
+            // The product node is dead now; its weights are too, unless another node shares them. Freeing them here keeps the
+            // peak at one copy of each weight matrix plus the one being packed, not two copies of the whole model.
+            int bId = node.Inputs[1];
+            if (--uses[bId] == 0)
+            {
+                g.ReleaseConstant(bId);
+            }
         }
     }
 

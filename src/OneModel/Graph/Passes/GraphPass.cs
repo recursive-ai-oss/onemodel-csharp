@@ -89,6 +89,20 @@ internal sealed class PassGraph
     /// <summary>Makes value <paramref name="id"/> a constant; the graph owns <paramref name="value"/>.</summary>
     public void SetConstant(int id, Tensor value) => _constants[id] = value;
 
+    /// <summary>
+    /// Releases the weights of constant <paramref name="id"/> now (a pass that has packed them elsewhere), so the unpacked and the
+    /// packed copy are never both resident for long. Only for a value no remaining node reads.
+    /// </summary>
+    public void ReleaseConstant(int id)
+    {
+        Tensor c = _constants[id];
+        if (!c.IsEmpty)
+        {
+            c.Dispose();
+            _constants[id] = default;
+        }
+    }
+
     /// <summary>Hands a kernel a pass created to the graph, which disposes it when the session ends.</summary>
     public T Own<T>(T kernel) where T : OpKernel
     {
