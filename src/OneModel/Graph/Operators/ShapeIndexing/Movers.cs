@@ -574,6 +574,11 @@ internal sealed class ExpandOp : OpKernel
             throw ctx.Fail($"{ctx.InputShape(0)} cannot be expanded to {given}");
         }
 
+        if ((long)result.Length * DTypes.SizeOf(ctx.InputType(0)) > int.MaxValue)
+        {
+            throw ctx.Fail($"the output {result} would be larger than 2 GiB");
+        }
+
         ctx.SetOutput(0, ctx.InputType(0), result);
     }
 
@@ -635,7 +640,7 @@ internal sealed class TileOp : OpKernel
             dims[a] = reps[a] > int.MaxValue ? long.MaxValue : s[a] * reps[a];
         }
 
-        ctx.SetOutput(0, ctx.InputType(0), OpUtil.MakeShape(ctx, dims.Slice(0, s.Rank)));
+        ctx.SetOutput(0, ctx.InputType(0), OpUtil.MakeGrownShape(ctx, dims.Slice(0, s.Rank), ctx.InputType(0)));
     }
 
     public override void Run(in OpRun run)

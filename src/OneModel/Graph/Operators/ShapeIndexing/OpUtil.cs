@@ -53,6 +53,21 @@ internal static class OpUtil
         }
     }
 
+    /// <summary>
+    /// Builds a shape for an output that can be far larger than any input (ConstantOfShape, Expand, Tile, Pad, Range, OneHot) and
+    /// refuses one whose bytes exceed what a tensor can hold (2^31-1), as a model error naming the node.
+    /// </summary>
+    public static Shape MakeGrownShape(InferContext ctx, ReadOnlySpan<long> dims, DType type)
+    {
+        Shape s = MakeShape(ctx, dims);
+        if ((long)s.Length * DTypes.SizeOf(type) > int.MaxValue)
+        {
+            throw ctx.Fail($"the output {s} of {type} would be larger than 2 GiB");
+        }
+
+        return s;
+    }
+
     /// <summary>Normalizes a possibly negative axis against <paramref name="rank"/> (valid range [-rank, rank)).</summary>
     public static int Axis(InferContext ctx, long axis, int rank, string what = "axis")
     {

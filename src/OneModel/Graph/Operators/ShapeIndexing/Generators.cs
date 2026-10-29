@@ -70,7 +70,7 @@ internal sealed class ConstantOfShapeOp : OpKernel
             }
         }
 
-        ctx.SetOutput(0, _value.DType, OpUtil.MakeShape(ctx, dims));
+        ctx.SetOutput(0, _value.DType, OpUtil.MakeGrownShape(ctx, dims, _value.DType));
     }
 
     public override void Run(in OpRun run) => Movement.FillWith(run.Outputs[0], _value);
@@ -134,7 +134,7 @@ internal sealed class RangeOp : OpKernel
             throw ctx.Fail(error);
         }
 
-        ctx.SetOutput(0, t, OpUtil.MakeShape(ctx, [n]));
+        ctx.SetOutput(0, t, OpUtil.MakeGrownShape(ctx, [n], t));
     }
 
     private static long Count(in Tensor start, in Tensor limit, in Tensor delta, out string? error)
@@ -285,7 +285,7 @@ internal sealed class OneHotOp : OpKernel
             dims[o] = o == axis ? depth : ix[i++];
         }
 
-        ctx.SetOutput(0, ctx.InputType(2), OpUtil.MakeShape(ctx, dims.Slice(0, outRank)));
+        ctx.SetOutput(0, ctx.InputType(2), OpUtil.MakeGrownShape(ctx, dims.Slice(0, outRank), ctx.InputType(2)));
     }
 
     public override void Run(in OpRun run)

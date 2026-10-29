@@ -18,6 +18,8 @@
     <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
     <EmbeddedResource Include="../../testdata/graphs/mlp.onnx" LogicalName="mlp.onnx" />
     <EmbeddedResource Include="../../testdata/graphs/reference.json" LogicalName="reference.json" />
+    <EmbeddedResource Include="../../testdata/graphs/shape_ops.onnx" LogicalName="shape_ops.onnx" />
+    <EmbeddedResource Include="../../testdata/graphs/shape_ops.json" LogicalName="shape_ops.json" />
   </ItemGroup>
 
 </Project>

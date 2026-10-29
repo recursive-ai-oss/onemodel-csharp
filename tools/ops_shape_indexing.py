@@ -1,6 +1,6 @@
 """Reference cases for the shape and indexing operators, with ONNX Runtime's outputs as the expected values.
 
-    ops_shape_indexing.py --out DIR [--seed N]
+    ops_shape_indexing.py --out DIR [--seed N] [--smoke testdata/graphs]
 
 Writes DIR/<case>/model.onnx and DIR/<case>/test_data_set_0/{input_i,output_j}.pb in the same layout as onnx/backend/test, so the
 C# runner that reads backend-test cases reads these too. A case ONNX Runtime refuses to run gets an `expect_error` file naming its
@@ -351,15 +351,50 @@ def gen(c: Cases):
     c.add("Dropout", 7, [x], out_types=[np.float32], tag="old")
 
 
+def smoke(out: Path) -> None:
+    """testdata/graphs/shape_ops.onnx + .json: one small model through Transpose, Slice, Gather, Concat, Pad, TopK and Tile, for the
+    NativeAOT and browser smoke apps (movement operators give the same bits as ONNX Runtime, so the check is exact equality)."""
+    ins = lambda n, v: numpy_helper.from_array(np.array(v, np.int64), n)
+    nodes = [
+        helper.make_node("Transpose", ["x"], ["t"], perm=[2, 0, 1]),
+        helper.make_node("Slice", ["t", "st", "en", "ax", "sp"], ["s"]),
+        helper.make_node("Gather", ["s", "gi"], ["g"], axis=0),
+        helper.make_node("Concat", ["g", "g"], ["c"], axis=2),
+        helper.make_node("Pad", ["c", "pads"], ["p"], mode="reflect"),
+        helper.make_node("TopK", ["p", "k"], ["tv", "ti"], axis=-1),
+        helper.make_node("Tile", ["tv", "reps"], ["y"]),
+    ]
+    inits = [ins("st", [1]), ins("en", [7]), ins("ax", [0]), ins("sp", [2]), ins("gi", [2, 0]), ins("pads", [0, 1, 0, 0, 1, 0]),
+             ins("k", [3]), ins("reps", [1, 2, 1])]
+    g = helper.make_graph(nodes, "shape_ops", [helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 3, 8])],
+                          [helper.make_tensor_value_info("y", TensorProto.FLOAT, [2, 8, 3])], inits)
+    m = helper.make_model(g, opset_imports=[helper.make_opsetid("", 17)], ir_version=8)
+    onnx.checker.check_model(m)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "shape_ops.onnx").write_bytes(m.SerializeToString())
+    x = (np.arange(48, dtype=np.float32).reshape(2, 3, 8) * 0.37) % 5.0 - 2.0
+    sess = ort.InferenceSession(str(out / "shape_ops.onnx"), providers=["CPUExecutionProvider"])
+    (y,) = sess.run(None, {"x": x})
+    (out / "shape_ops.json").write_text(json.dumps({"onnxruntime": ort.__version__, "shape": list(x.shape), "input": x.ravel().tolist(),
+                                                    "outShape": list(y.shape), "output": y.ravel().tolist()}, indent=1) + "\n", encoding="utf-8")
+
+
 def rng_choice(r, lo, hi):
     return r.integers(lo, hi)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", help="directory for the comparison cases")
+    ap.add_argument("--smoke", help="directory (testdata/graphs) to write the small smoke-app model and its reference to")
     ap.add_argument("--seed", type=int, default=20261029)
     a = ap.parse_args()
+    if a.smoke:
+        smoke(Path(a.smoke))
+        if not a.out:
+            return
+    if not a.out:
+        ap.error("--out or --smoke is required")
     out = Path(a.out)
     if out.exists():
         shutil.rmtree(out)

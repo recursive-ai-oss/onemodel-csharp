@@ -419,6 +419,70 @@ public class IndexingTests
     }
 
     [Fact]
+    public void HostileValuesFailWithSessionExceptionsOnly()
+    {
+        long big = 1L << 40;
+        Tensor x = Make(Iota<float>(6), 2, 3);
+        var cases = new (string Op, int Opset, In?[] Inputs, (string, object)[] Attrs)[]
+        {
+            ("ConstantOfShape", 9, [new In(Make<long>([big], 1))], []),
+            ("ConstantOfShape", 9, [new In(Make<long>([100000, 100000], 2), true)], []),
+            ("ConstantOfShape", 9, [new In(Make<long>([1000000, 1000], 2))], []),
+            ("Expand", 13, [new In(x), new In(Make<long>([big], 1))], []),
+            ("Expand", 13, [new In(x), new In(Make<long>([-1], 1))], []),
+            ("Tile", 13, [new In(x), new In(Make<long>([big, 1], 2))], []),
+            ("Tile", 13, [new In(x), new In(Make<long>([-1, 1], 2))], []),
+            ("Pad", 13, [new In(x), new In(Make<long>([big, 0, 0, 0], 4))], []),
+            ("Pad", 13, [new In(x), new In(Make<long>([-big, 0, 0, 0], 4))], []),
+            ("Pad", 13, [new In(x), new In(Make<long>([1, 2, 3], 3))], []),
+            ("Range", 11, [new In(Tensor.Scalar(0L)), new In(Tensor.Scalar(big)), new In(Tensor.Scalar(1L))], []),
+            ("Range", 11, [new In(Tensor.Scalar(long.MinValue)), new In(Tensor.Scalar(long.MaxValue)), new In(Tensor.Scalar(1L))], []),
+            ("Range", 11, [new In(Tensor.Scalar(0f)), new In(Tensor.Scalar(float.NaN)), new In(Tensor.Scalar(1f))], []),
+            ("OneHot", 11, [new In(Make<long>([1], 1)), new In(Tensor.Scalar(big)), new In(Make<long>([0, 1], 2))], []),
+            ("OneHot", 11, [new In(Make<long>([1], 1)), new In(Tensor.Scalar(-3L)), new In(Make<long>([0, 1], 2))], []),
+            ("Slice", 13, [new In(x), new In(Make<long>([0], 1)), new In(Make<long>([1], 1)), new In(Make<long>([big], 1))], []),
+            ("Slice", 13, [new In(x), new In(Make<long>([0, 0, 0], 3)), new In(Make<long>([1, 1, 1], 3))], []),
+            ("Unsqueeze", 13, [new In(x), new In(Make(Enumerable.Range(0, 40).Select(i => (long)i).ToArray(), 40))], []),
+            ("Unsqueeze", 13, [new In(x), new In(Make<long>([big], 1))], []),
+            ("Squeeze", 13, [new In(x), new In(Make<long>([big], 1))], []),
+            ("Split", 13, [new In(x), new In(Make<long>([-1, 4], 2))], [("axis", 1L)]),
+            ("Split", 13, [new In(x), new In(Make<long>([long.MaxValue, 1], 2))], [("axis", 1L)]),
+            ("TopK", 11, [new In(x), new In(Make<long>([big], 1))], []),
+            ("TopK", 11, [new In(x), new In(Make<long>([-1], 1))], []),
+            ("Gather", 13, [new In(x), new In(Make<long>([long.MinValue], 1))], []),
+            ("GatherND", 13, [new In(x), new In(Make<long>([long.MaxValue, 0], 1, 2))], []),
+            ("GatherND", 13, [new In(x), new In(Make<long>([0, 0, 0], 1, 3))], []),
+            ("GatherElements", 13, [new In(x), new In(Make<long>([9, 9], 1, 2))], [("axis", 1L)]),
+            ("ScatterND", 13, [new In(x), new In(Make<long>([long.MinValue], 1, 1)), new In(Make<float>([1, 1, 1], 1, 3))], []),
+            ("Transpose", 13, [new In(x)], [("perm", new long[] { 0, big })]),
+            ("Flatten", 13, [new In(x)], [("axis", big)]),
+            ("Concat", 13, [new In(x), new In(Make<float>([1, 2], 2, 1)), new In(Make<float>([1], 1, 1))], [("axis", 1L)]),
+            ("Trilu", 14, [new In(Make<float>([1, 2], 2))], []),
+        };
+        var wrong = new List<string>();
+        foreach ((string op, int opset, In?[] inputs, (string, object)[] attrs) in cases)
+        {
+            DType[] types = op is "Range" or "TopK" or "OneHot" or "ConstantOfShape" ? [DType.F32, DType.I64] : [DType.F32];
+            try
+            {
+                Tensor[] o = Harness.Run(op, opset, inputs, attrs, op == "TopK" ? types : [types[0]]);
+                DisposeAll(o);
+                wrong.Add($"{op}: no error");
+            }
+            catch (SessionException)
+            {
+            }
+            catch (Exception e)
+            {
+                wrong.Add($"{op}: {e.GetType().Name}: {e.Message}");
+            }
+        }
+
+        x.Dispose();
+        Assert.True(wrong.Count == 0, string.Join("\n", wrong));
+    }
+
+    [Fact]
     public void BigTransposeAndGatherAgreeAcrossThreadCounts()
     {
         float[] data = Iota<float>(257 * 129 * 3);

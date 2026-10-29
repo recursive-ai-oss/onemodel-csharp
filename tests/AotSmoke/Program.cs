@@ -53,6 +53,23 @@ foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact }
     }
 }
 
+// Data-movement operators (transpose, slice, gather, concat, pad, top-k, tile) move bits, so they must equal ONNX Runtime's exactly.
+using JsonDocument moveDoc = JsonDocument.Parse(Open("shape_ops.json"));
+float[] moveInput = [.. moveDoc.RootElement.GetProperty("input").EnumerateArray().Select(e => (float)e.GetDouble())];
+float[] moveExpected = [.. moveDoc.RootElement.GetProperty("output").EnumerateArray().Select(e => (float)e.GetDouble())];
+int[] moveShape = [.. moveDoc.RootElement.GetProperty("shape").EnumerateArray().Select(e => e.GetInt32())];
+foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+{
+    using Model m = Model.Load(Open("shape_ops.onnx"), new SessionOptions { Mode = mode });
+    float[] y = m.Run(moveInput, moveShape);
+    bool same = y.AsSpan().SequenceEqual(moveExpected);
+    Console.WriteLine($"{mode}: shape and indexing operators {(same ? "equal" : "DIFFER")} to ONNX Runtime");
+    if (!same)
+    {
+        return 4;
+    }
+}
+
 return 0;
 
 Stream Open(string name) =>

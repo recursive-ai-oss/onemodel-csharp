@@ -118,7 +118,7 @@ internal sealed class PadOp : OpKernel
             }
         }
 
-        ctx.SetOutput(0, ctx.InputType(0), OpUtil.MakeShape(ctx, dims.Slice(0, rank)));
+        ctx.SetOutput(0, ctx.InputType(0), OpUtil.MakeGrownShape(ctx, dims.Slice(0, rank), ctx.InputType(0)));
     }
 
     // pads = [begin of each listed axis..., end of each listed axis...]; axes not listed get 0.
