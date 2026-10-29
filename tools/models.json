@@ -140,20 +140,106 @@
       }
     },
     "dbnet": {
-      "task": "text detection",
+      "task": "text detection and layout (DBNet-style)",
       "source": {
-        "kind": "external",
-        "note": "supplied later; add the file under models/dbnet/ and record it"
+        "kind": "container",
+        "name": "dbnet-lite-v1",
+        "version": "0.3.2",
+        "weightsSha256": "45950e9e4c27abf6642d7e61364e92d96439534708c641dece2d35c54f696d66",
+        "licence": "MIT OR Apache-2.0 (family-owned weights; fetch-only, never committed)",
+        "note": "fp16 .onm container; export_oneocr.py exports the folded reference forward pass"
       },
-      "files": {}
+      "files": {
+        "fp32": {
+          "path": "dbnet/dbnet_lite_v1.onnx",
+          "sha256": "e5a7757820e3f6dde8e2751cc6d602e56cdef21e5e3c6a9a599eecab77c17b52",
+          "bytes": 2729809,
+          "opset": 17,
+          "ops": {
+            "Add": 5,
+            "Concat": 1,
+            "Constant": 5,
+            "Conv": 61,
+            "Gemm": 1,
+            "ReduceMean": 2,
+            "Relu": 53,
+            "Resize": 5
+          },
+          "fixtureCheck": {
+            "inputs": 6,
+            "prob": {
+              "torchMaxAbs": 2.86102294921875e-06,
+              "torchMaxRel": 0.00010531936162582946,
+              "ortMaxAbs": 6.67572021484375e-06,
+              "ortMaxRel": 0.00021103540634629482,
+              "fixtureFloorMaxAbs": 7.129693309515517e-06,
+              "fixtureFloorMaxRel": 0.00013007947333591553
+            },
+            "layout": {
+              "torchMaxAbs": 3.814697265625e-05,
+              "torchMaxRel": 2.6174127747192826e-05,
+              "ortMaxAbs": 5.340576171875e-05,
+              "ortMaxRel": 3.227697952025649e-05,
+              "fixtureFloorMaxAbs": 4.206524664596145e-05,
+              "fixtureFloorMaxRel": 2.084485974941026e-05
+            },
+            "orient": {
+              "torchMaxAbs": 7.62939453125e-06,
+              "torchMaxRel": 4.3679643015013565e-07,
+              "ortMaxAbs": 1.9073486328125e-05,
+              "ortMaxRel": 3.7903378086885568e-06,
+              "fixtureFloorMaxAbs": 1.5060480642148377e-05,
+              "fixtureFloorMaxRel": 3.936372156584454e-06
+            }
+          }
+        }
+      }
     },
     "crnn": {
-      "task": "text recognition",
+      "task": "text recognition (CRNN, CTC logits)",
       "source": {
-        "kind": "external",
-        "note": "supplied later; add the file under models/crnn/ and record it"
+        "kind": "container",
+        "name": "crnn-v0",
+        "version": "0.7.3",
+        "weightsSha256": "5c767a5ea36771a50caca812f5bbff9c64301536079b54d0c42b2982d7958eeb",
+        "licence": "MIT OR Apache-2.0 (family-owned weights; fetch-only, never committed)",
+        "note": "fp16 .onm container built with the family training code; export_oneocr.py builds the fp32 module and exports it"
       },
-      "files": {}
+      "files": {
+        "fp32": {
+          "path": "crnn/crnn_v0.onnx",
+          "sha256": "3592c46c2265ecf7077f8b43b1f92b23c2ce758f1af29ccb91fece1866c130e4",
+          "bytes": 10063047,
+          "opset": 17,
+          "ops": {
+            "Add": 1,
+            "Concat": 1,
+            "Constant": 19,
+            "ConstantOfShape": 1,
+            "Conv": 6,
+            "Gather": 1,
+            "LSTM": 2,
+            "MatMul": 1,
+            "MaxPool": 5,
+            "Relu": 6,
+            "Reshape": 2,
+            "Shape": 1,
+            "Slice": 4,
+            "Squeeze": 1,
+            "Transpose": 5,
+            "Unsqueeze": 1
+          },
+          "fixtureCheck": {
+            "lines": 50,
+            "torchMaxAbs": 3.647804260253906e-05,
+            "torchMaxRel": 0.0013320647002854425,
+            "ortMaxAbs": 3.790855407714844e-05,
+            "ortMaxRel": 0.0016868220273005658,
+            "fixtureFloorMaxAbs": 9.425442442179133e-05,
+            "fixtureFloorMaxRel": 0.0020122600473953586
+          }
+        }
+      }
     }
   },
   "backendTest": {

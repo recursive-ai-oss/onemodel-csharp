@@ -90,7 +90,8 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=1)
     a = ap.parse_args()
     man = load_manifest()
-    names = a.names or [n for n, m in man["models"].items() if m["files"]]
+    names = a.names or [n for n, m in man["models"].items()
+                        if m["files"] and m["source"]["kind"] in ("torchvision", "huggingface")]
     root = REFERENCE / machine_id()
     root.mkdir(parents=True, exist_ok=True)
     rows = []

@@ -29,13 +29,32 @@ ONNX Runtime and PyTorch are used as black boxes: they produce reference outputs
 | BERT-base | `google-bert/bert-base-uncased` at a pinned commit | fp32, int8 dynamic |
 | MiniLM-L6 | `sentence-transformers/all-MiniLM-L6-v2` at a pinned commit | fp32, int8 dynamic |
 | Whisper-small | `openai/whisper-small` at a pinned commit | encoder and decoder, each fp32 and int8 dynamic |
-| DBNet, CRNN | supplied later | slots in the manifest |
+| CRNN recogniser `crnn-v0` 0.7.3 | fp16 `.onm` container (family-owned; fetch-only) | fp32 |
+| DBNet-style detector `dbnet-lite-v1` 0.3.2 | fp16 `.onm` container (family-owned; fetch-only) | fp32 |
 
 Export (`tools/export_models.py`): TorchScript-based `torch.onnx.export`, opset 17, weights embedded in one file, eval mode, dynamic batch (and sequence for the text models). Encoders output `last_hidden_state` only, with inputs `input_ids`, `attention_mask`, `token_type_ids` (attention is the explicit, eager form). The Whisper encoder takes `input_features` `[B,80,3000]`; the decoder takes `input_ids` and `encoder_hidden_states` and returns logits for the whole sequence without a key/value cache. These are fixed choices of this repository, not the upstream defaults.
 
 ### Reproducibility across machines
 
 Exported on x64 Linux and on arm64 macOS with the same pins, BERT-base, MiniLM and Whisper (fp32 and int8) are **byte-identical**. The ResNet-50 and MobileNetV3 exports are **not** (same size, different bytes: the cause was not investigated; the likely one is constant folding of batch-norm into the convolution weights, which is floating-point arithmetic done on the exporting CPU), and their static int8 files follow. The manifest pins the x64 file, and other machines copy it instead of re-exporting; `export_models.py` prints a note when its output differs from the pinned hash.
+
+### The OCR models (`tools/export_oneocr.py`)
+
+Built from their containers with the family's training code imported read-only (the paths come from arguments or `ONEOCR_*` environment variables; the detector module's unused post-processing imports are stubbed so only torch and NumPy are needed). Opset 17, fp32, no CTC in the graph.
+
+* Recogniser: input `[B,1,32,W]` (dynamic B and W), output `logits [B, W//4, 622]`. Ops: Conv 6, Relu 6, MaxPool 5, Transpose 5, LSTM 2 (bidirectional), MatMul 1, Add 1, plus Shape/Gather/ConstantOfShape/Slice/Squeeze/Unsqueeze/Reshape/Concat/Constant plumbing.
+* Detector: input `[1,1,H,W]` (dynamic H, W, multiples of 32), outputs `prob [1,1,H/2,W/2]`, `layout [1,8,H/8,W/8]`, `orient [1,4]`. Ops: Conv 61 (depthwise ones with `group = C`), Relu 53, Add 5, Resize 5 (nearest ×2), ReduceMean 2, Concat 1, Gemm 1.
+
+Against the fixtures' fp32 reference tensors (50 recogniser lines; 6 detector inputs; metrics defined in the script's header), maximum over all inputs:
+
+| Output | PyTorch module: abs / rel | ONNX Runtime on the file: abs / rel | Fixtures' own fp32-vs-fp64 floor: abs / rel |
+|---|---|---|---|
+| recogniser logits | 3.6e-5 / 1.3e-3 | 3.8e-5 / 1.7e-3 | 9.4e-5 / 2.0e-3 |
+| detector prob | 2.9e-6 / 1.1e-4 | 6.7e-6 / 2.1e-4 | 7.1e-6 / 1.3e-4 |
+| detector layout | 3.8e-5 / 2.6e-5 | 5.3e-5 / 3.2e-5 | 4.2e-5 / 2.1e-5 |
+| detector orient | 7.6e-6 / 4.4e-7 | 1.9e-5 / 3.8e-6 | 1.5e-5 / 3.9e-6 |
+
+ONNX Runtime stays within 1.7× of the fixtures' floors on every output. Reference outputs are written for the recogniser at batch 1 on five fixture crops (`b1-<crop id>`) and at batch 8 (`b8`: eight crops right-padded with white to width 128), and for the detector at batch 1 on `tile0` and `wide` (`b1-tile0`, `b1-wide`), so a bar row is e.g. `crnn:fp32:8` or `dbnet:fp32:1-wide`. The exports are byte-stable on repeat runs on the same machine.
 
 ## int8 variants (`tools/quantize_models.py`)
 
