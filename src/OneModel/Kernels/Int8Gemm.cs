@@ -141,8 +141,10 @@ internal unsafe struct Int8Epilogue
     /// <summary>Row stride of the output, in elements.</summary>
     public long Ldc;
 
-    /// <summary>Per-row int32 added to each sum (a convolution's bias), or null.</summary>
+    /// <summary>int32 added to each sum (a bias): one per row, or one per column when <see cref="BiasPerCol"/>; null for none.</summary>
     public int* Bias;
+
+    public bool BiasPerCol;
 
     /// <summary>The multiplier applied to each sum before rounding, when <see cref="MultVec"/> is null.</summary>
     public float Mult;
@@ -516,7 +518,7 @@ internal static unsafe class Int8Gemm
                 int gi = i0 + i;
                 int za = ZeroA.Get(gi);
                 int t = unchecked(rowSums[i] - (K * za));
-                int bias = ep.Bias != null ? ep.Bias[gi] : 0;
+                int biasRow = ep.Bias != null && !ep.BiasPerCol ? ep.Bias[gi] : 0;
                 int* row = tile + (i * ldt);
                 if (ep.OutInt32 != null)
                 {
@@ -524,6 +526,7 @@ internal static unsafe class Int8Gemm
                     for (int j = 0; j < nc; j++)
                     {
                         int gj = j0 + j;
+                        int bias = ep.BiasPerCol ? ep.Bias[gj] : biasRow;
                         dst[j] = unchecked(row[j] - (za * ColSums[gj]) - (ZeroB.Get(gj) * t) + bias);
                     }
 
@@ -537,6 +540,7 @@ internal static unsafe class Int8Gemm
                 for (int j = 0; j < nc; j++)
                 {
                     int gj = j0 + j;
+                    int bias = ep.BiasPerCol ? ep.Bias[gj] : biasRow;
                     int acc = unchecked(row[j] - (za * ColSums[gj]) - (ZeroB.Get(gj) * t) + bias);
                     float mult = ep.MultVec != null && !ep.MultPerRow ? ep.MultVec[gj] : mRow;
                     q[j] = (byte)Requant(acc, mult, ep.QuantZero, lo, hi);

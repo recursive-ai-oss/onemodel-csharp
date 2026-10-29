@@ -241,7 +241,30 @@ internal static class Program
 
                 bool pass = d / max <= tol;
                 ok &= pass;
-                Console.WriteLine($"  {name} [{string.Join('x', want.Shape)}]: {(pass ? "pass" : "FAIL")} scaled {d / max:E2} elementwise {rel:E2} hash {hashes[k]}");
+                // The decision metrics used for int8 rows: how many rows have the same largest element along the last axis (class or
+                // token decisions), and the smallest cosine similarity between a row of ours and the same row of the reference.
+                int width = want.Shape.Length > 0 ? (int)want.Shape[^1] : got.Length;
+                int rows = width > 0 ? got.Length / width : 0, agree = 0;
+                double minCos = 1;
+                for (int r = 0; r < rows; r++)
+                {
+                    int ag = 0, aw = 0;
+                    double dot = 0, ng = 0, nw = 0;
+                    for (int c = 0; c < width; c++)
+                    {
+                        float gv = got[(r * width) + c], wv = want.F32[(r * width) + c];
+                        ag = gv > got[(r * width) + ag] ? c : ag;
+                        aw = wv > want.F32[(r * width) + aw] ? c : aw;
+                        dot += (double)gv * wv;
+                        ng += (double)gv * gv;
+                        nw += (double)wv * wv;
+                    }
+
+                    agree += ag == aw ? 1 : 0;
+                    minCos = Math.Min(minCos, dot / Math.Max(Math.Sqrt(ng * nw), 1e-30));
+                }
+
+                Console.WriteLine($"  {name} [{string.Join('x', want.Shape)}]: {(pass ? "pass" : "FAIL")} scaled {d / max:E2} elementwise {rel:E2} top1 {agree}/{rows} mincos {minCos:F6} hash {hashes[k]}");
             }
 
             if (run == 0)

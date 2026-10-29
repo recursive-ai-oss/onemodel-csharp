@@ -103,8 +103,9 @@ internal ref struct Int8Call
     public int QuantZero;
     public long Ldc;
 
-    /// <summary>Per-row int32 added before scaling (may be empty).</summary>
+    /// <summary>int32 added before scaling (may be empty): one per row, or one per column when <see cref="BiasPerCol"/>.</summary>
     public ReadOnlySpan<int> Bias;
+    public bool BiasPerCol;
 
     /// <summary>Scale applied to the sums when <see cref="MultVec"/> is empty; else one scale per row (<see cref="MultPerRow"/>) or column.</summary>
     public float Mult;
@@ -166,9 +167,9 @@ internal static unsafe class Int8Matmul
             throw new ArgumentException("The output is smaller than m x n with its row stride.");
         }
 
-        if (!c.Bias.IsEmpty && c.Bias.Length < m)
+        if (!c.Bias.IsEmpty && c.Bias.Length < (c.BiasPerCol ? n : m))
         {
-            throw new ArgumentException("The bias is shorter than the number of rows.");
+            throw new ArgumentException("The bias is shorter than the dimension it covers.");
         }
 
         if (!c.MultVec.IsEmpty && c.MultVec.Length < (c.MultPerRow ? m : n))
@@ -202,6 +203,7 @@ internal static unsafe class Int8Matmul
             ep.QuantZero = c.QuantZero;
             ep.Ldc = c.Ldc;
             ep.Bias = c.Bias.IsEmpty ? null : pbias;
+            ep.BiasPerCol = c.BiasPerCol && !c.Bias.IsEmpty;
             ep.Mult = c.Mult;
             ep.MultVec = c.MultVec.IsEmpty ? null : pmv;
             ep.MultPerRow = c.MultPerRow;

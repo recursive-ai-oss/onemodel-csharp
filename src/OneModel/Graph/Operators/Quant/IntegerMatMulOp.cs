@@ -178,6 +178,12 @@ internal sealed class IntegerMatMulOp : OpKernel
 
             outType = ctx.InputType(7);
             _ = QuantCommon.IsU8(ctx, outType, "y_zero_point");
+            // An optional ninth input, not in the ONNX operator: an int32 bias per output column, added to the sums before scaling.
+            // The QDQ rewrite uses it to absorb a Gemm's bias.
+            if (ctx.HasInput(8) && (ctx.InputType(8) != DType.I32 || ctx.InputShape(8).Rank != 1 || ctx.InputShape(8)[0] != n))
+            {
+                throw ctx.Fail($"the bias must be int32 with {n} values");
+            }
         }
 
         Span<int> d = stackalloc int[Shape.MaxRank + 2];
@@ -321,6 +327,7 @@ internal sealed class IntegerMatMulOp : OpKernel
             batchOut *= y.Shape[i];
         }
 
+        ReadOnlySpan<int> bias = _q && run.Inputs.Length > 8 && !run.Inputs[8].IsEmpty ? run.Inputs[8].Data<int>() : default;
         long mk = (long)m * k, kn = (long)k * n, mn = (long)m * n;
         ReadOnlySpan<byte> aBytes = QuantParams.Bytes(in a);
         if (st?.B != null)
@@ -347,6 +354,8 @@ internal sealed class IntegerMatMulOp : OpKernel
                 Mult = mult,
                 MultVec = multVec,
                 MultPerRow = false,
+                Bias = bias,
+                BiasPerCol = true,
                 QuantUnsigned = quantUnsigned,
                 QuantZero = quantZero,
                 Threads = run.Threads,
@@ -403,6 +412,8 @@ internal sealed class IntegerMatMulOp : OpKernel
                 Ldc = n,
                 Mult = mult,
                 MultVec = multVec,
+                Bias = bias,
+                BiasPerCol = true,
                 QuantUnsigned = quantUnsigned,
                 QuantZero = quantZero,
                 Threads = run.Threads,
