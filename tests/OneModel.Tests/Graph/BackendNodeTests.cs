@@ -18,7 +18,7 @@ public partial class BackendNodeTests
     private const double Rtol = 1e-3;
     private const double Atol = 1e-7;
 
-    [GeneratedRegex("^test_(add|mul|relu|matmul|gemm|reshape|identity|constant)(_|$)")]
+    [GeneratedRegex("^test_(add|mul|relu|matmul|gemm|reshape|identity|constant|lstm|gru|rnn|simple_rnn)(_|$)")]
     private static partial Regex Wanted();
 
     [Theory]
