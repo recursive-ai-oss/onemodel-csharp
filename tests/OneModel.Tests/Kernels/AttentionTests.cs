@@ -246,6 +246,90 @@ public class AttentionTests
         Assert.True(MaxErr(Run(d2, false, VecIsa.V256, 1, 1), Reference(d2)) < 4e-6);
     }
 
+    /// <summary>Uniform data from IEEE-exact operations only, so every platform generates the same inputs.</summary>
+    private static float[] UniformData(int n, int seed, float scale)
+    {
+        var rng = new Random(seed);
+        var a = new float[n];
+        for (int i = 0; i < n; i++)
+        {
+            a[i] = (float)((rng.NextDouble() - 0.5) * 2.0 * scale);
+        }
+
+        return a;
+    }
+
+    private static string HashOf(float[] x) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Runtime.InteropServices.MemoryMarshal.AsBytes<float>(x))).ToLowerInvariant();
+
+    /// <summary>
+    /// SHA-256 of the exact outputs on fixed inputs. Every platform and lane width must reproduce these; they were produced on x64
+    /// and are checked on arm64 (NEON) and with hardware intrinsics disabled.
+    /// </summary>
+    [Fact]
+    public void ExactOutputsMatchTheGoldenHashes()
+    {
+        var shapes = new[] { new AttnCase(1, 3, 37, 150, 32, true), new AttnCase(2, 2, 70, 65, 64, false), new AttnCase(1, 1, 1, 1500, 64, false) };
+        string[] want = [AttentionGolden0, AttentionGolden1, AttentionGolden2, SoftmaxGolden];
+        var got = new List<string>();
+        for (int i = 0; i < shapes.Length; i++)
+        {
+            AttnCase c = shapes[i];
+            AttentionShape s = AttentionShape.Contiguous(c.Batch, c.Heads, c.QLen, c.KLen, c.Dim, 0.125f);
+            var d = new Data
+            {
+                Shape = s,
+                Q = UniformData(c.Batch * c.Heads * c.QLen * c.Dim, 100 + i, 2f),
+                K = UniformData(c.Batch * c.Heads * c.KLen * c.Dim, 200 + i, 2f),
+                V = UniformData(c.Batch * c.Heads * c.KLen * c.Dim, 300 + i, 1f),
+            };
+            if (c.Mask)
+            {
+                d.Mask = UniformData(c.Batch * c.QLen * c.KLen, 400 + i, 1f);
+            }
+
+            got.Add(HashOf(Run(d, true, VecIsa.Auto, 1, int.MaxValue)));
+        }
+
+        float[] x = UniformData(7 * 301, 500, 6f);
+        var y = new float[7 * 300];
+        Softmax.Rows(true, VecIsa.Auto, x, y, 7, 300, 301, 300);
+        got.Add(HashOf(y));
+        Assert.True(got.SequenceEqual(want), "Golden hashes differ; current values:\n" + string.Join("\n", got));
+    }
+
+    private const string AttentionGolden0 = "65a73c5ee2b223add442685338de70a9c07ac03227f93a1effd954f1069373f9";
+    private const string AttentionGolden1 = "eab2ed0fbd6daeef56bb76d0fa44e8ac07aeff4a7c9d613b2bd00c180efb3366";
+    private const string AttentionGolden2 = "61204669ccec5e8f0e9bdc7fc5558e920a35f8707d07e1e09a6fa7e9c8a3e5dc";
+    private const string SoftmaxGolden = "80f5c1b8938d99a646b11d7406c6b976a8480ec213c65ee3594d411169dfceb3";
+
+    /// <summary>Writes the accuracy table for the docs. Run with ONEMODEL_ATTN_TABLE set to an output path; does nothing otherwise.</summary>
+    [Fact]
+    public void WriteAccuracyTable()
+    {
+        string? path = Environment.GetEnvironmentVariable("ONEMODEL_ATTN_TABLE");
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("| shape (batch, heads, q, k, dim) | mask | flavour | max abs error vs double reference | max abs of output |");
+        sb.AppendLine("|---|---|---|---|---|");
+        foreach (AttnCase c in new[] { new AttnCase(1, 12, 128, 128, 64, false), new AttnCase(1, 12, 128, 128, 32, true), new AttnCase(1, 12, 512, 512, 64, false), new AttnCase(1, 12, 1, 1500, 64, false), new AttnCase(1, 4, 300, 1500, 64, false) })
+        {
+            Data d = Make(c, 77);
+            float[] want = Reference(d);
+            double maxOut = want.Max(x => Math.Abs((double)x));
+            foreach (bool exact in new[] { false, true })
+            {
+                double err = MaxErr(Run(d, exact, VecIsa.Auto, 1, int.MaxValue), want);
+                sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"| ({c.Batch}, {c.Heads}, {c.QLen}, {c.KLen}, {c.Dim}) | {(c.Mask ? "yes" : "no")} | {(exact ? "exact" : "fast")} | {err:E2} | {maxOut:F3} |");
+            }
+        }
+
+        File.WriteAllText(path, sb.ToString());
+    }
+
     [Fact]
     public void SizesAreValidated()
     {

@@ -1,3 +1,5 @@
+using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Intrinsics;
 
 namespace RecursiveAI.OneModel.Kernels;
@@ -23,11 +25,17 @@ internal interface IVecOps<TV>
     /// <summary>Broadcasts a value to every lane.</summary>
     static abstract TV Splat(float x);
 
-    /// <summary>Loads <see cref="Lanes"/> floats starting at <c>Unsafe.Add(ref p, index)</c>. The caller has checked the range.</summary>
-    static abstract TV Load(ref float p, nuint index);
+    /// <summary>
+    /// Loads <see cref="Lanes"/> floats from <c>p[index..]</c>. The caller guarantees <c>0 &lt;= index</c> and <c>index + Lanes &lt;= p.Length</c>;
+    /// the Checked build asserts it.
+    /// </summary>
+    static abstract TV Load(ReadOnlySpan<float> p, int index);
 
-    /// <summary>Stores <see cref="Lanes"/> floats starting at <c>Unsafe.Add(ref p, index)</c>. The caller has checked the range.</summary>
-    static abstract void Store(ref float p, nuint index, TV v);
+    /// <summary>
+    /// Stores <see cref="Lanes"/> floats to <c>p[index..]</c>. The caller guarantees <c>0 &lt;= index</c> and <c>index + Lanes &lt;= p.Length</c>;
+    /// the Checked build asserts it.
+    /// </summary>
+    static abstract void Store(Span<float> p, int index, TV v);
 
     /// <summary>a + b, one IEEE rounding.</summary>
     static abstract TV Add(TV a, TV b);
@@ -141,4 +149,22 @@ internal static class VecIsaInfo
         VecIsa.V512 => Vector512.IsHardwareAccelerated,
         _ => true,
     };
+}
+
+/// <summary>The range assertion behind <see cref="IVecOps{TV}.Load"/> and <see cref="IVecOps{TV}.Store"/> in the Checked build.</summary>
+internal static class VecChecks
+{
+    /// <summary>Throws when a vector access of <paramref name="lanes"/> floats at <paramref name="index"/> leaves a span of <paramref name="length"/>.</summary>
+    [System.Diagnostics.Conditional("CHECKED")]
+    public static void Range(int index, int lanes, int length)
+    {
+        if (index < 0 || length - index < lanes)
+        {
+            Fail(index, lanes, length);
+        }
+    }
+
+    [DoesNotReturn]
+    private static void Fail(int index, int lanes, int length) =>
+        throw new ArgumentOutOfRangeException(nameof(index), $"Vector access of {lanes} floats at {index} outside a span of {length}.");
 }

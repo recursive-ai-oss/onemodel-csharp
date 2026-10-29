@@ -26,6 +26,24 @@ fi
 export ONEMODEL_ARTIFACTS="${ONEMODEL_ARTIFACTS:-$out/artifacts}"
 dotnet build "$here/Micro.csproj" -c Release -v quiet -clp:NoSummary || exit 1
 
+# Optional: wait until the machine is quiet (fewer than BENCH_QUIET_MAX busy cores, sampled over 5 s) before timing, up to
+# BENCH_QUIET_WAIT seconds; the wait and the last sample are logged.
+if [ -n "${BENCH_QUIET_WAIT:-}" ] && [ -r /proc/stat ]; then
+  waited=0
+  while :; do
+    read -r -a before < /proc/stat; sleep 5; read -r -a after < /proc/stat
+    # /proc/stat fields after "cpu": user nice system idle iowait irq softirq steal
+    busy=0; idle=0
+    for f in 1 2 3 6 7 8; do busy=$(( busy + after[f] - before[f] )); done
+    for f in 4 5; do idle=$(( idle + after[f] - before[f] )); done
+    nproc_=$(nproc); cores=$(awk -v b=$busy -v i=$idle -v n=$nproc_ 'BEGIN{printf "%.2f", (b+i)>0 ? n*b/(b+i) : 0}')
+    echo "$(date -u +%T) busy cores $cores (waited ${waited}s)" >> "$out/quiet.log"
+    if awk -v c=$cores -v m="${BENCH_QUIET_MAX:-1.5}" 'BEGIN{exit !(c<m)}'; then break; fi
+    waited=$((waited+5))
+    if [ "$waited" -ge "$BENCH_QUIET_WAIT" ]; then echo "machine not quiet after ${waited}s" >> "$out/quiet.log"; break; fi
+  done
+fi
+
 ( while true; do echo "$(date -u +%T) $(cat /proc/loadavg 2>/dev/null || uptime)" >> "$out/load.log"; sleep 10; done ) &
 sampler=$!
 trap 'kill $sampler 2>/dev/null; [ -n "${BENCH_LOCK:-}" ] && rm -f "$BENCH_LOCK"' EXIT

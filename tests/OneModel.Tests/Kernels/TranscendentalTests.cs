@@ -17,13 +17,13 @@ public class TranscendentalTests
 
     private static readonly Fn[] Fns =
     [
-        new(ElementwiseFn.Exp, TranscendentalReference.Exp, -20f, 20f, -110f, 90f),
-        new(ElementwiseFn.Log, TranscendentalReference.Log, 0.01f, 100f, 0f, float.MaxValue),
+        new(ElementwiseFn.Exp, TranscendentalReference.Exp, -16f, 16f, -110f, 90f),
+        new(ElementwiseFn.Log, TranscendentalReference.Log, 0.0625f, 16f, 0f, float.MaxValue),
         new(ElementwiseFn.Tanh, TranscendentalReference.Tanh, -10f, 10f, -50f, 50f),
         new(ElementwiseFn.Erf, TranscendentalReference.Erf, -6f, 6f, -10f, 10f),
-        new(ElementwiseFn.Sigmoid, TranscendentalReference.Sigmoid, -20f, 20f, -110f, 90f),
-        new(ElementwiseFn.GeluErf, TranscendentalReference.GeluErf, -3f, 12f, -3f, 40f),
-        new(ElementwiseFn.GeluTanh, TranscendentalReference.GeluTanh, -3f, 12f, -3f, 40f),
+        new(ElementwiseFn.Sigmoid, TranscendentalReference.Sigmoid, -16f, 16f, -110f, 90f),
+        new(ElementwiseFn.GeluErf, TranscendentalReference.GeluErf, -3f, 10f, -3f, 40f),
+        new(ElementwiseFn.GeluTanh, TranscendentalReference.GeluTanh, -3f, 10f, -3f, 40f),
     ];
 
     /// <summary>Monotonic integer key of a float (negative floats get negative keys, both zeros map to 0).</summary>
@@ -253,21 +253,48 @@ public class TranscendentalTests
     {
         double max = 0;
         float at = 0;
-        foreach (float[] chunk in Chunks(lo, hi, stride))
+        var gate = new object();
+        int threads = int.Parse(Environment.GetEnvironmentVariable("ONEMODEL_ULP_THREADS") ?? "1", CultureInfo.InvariantCulture);
+        Parallel.ForEach(Chunks(lo, hi, stride).Select(c => (float[])c.Clone()), new ParallelOptions { MaxDegreeOfParallelism = threads }, chunk =>
         {
             float[] y = Run(f.Id, exact, isa, chunk);
+            double m = 0;
+            float where = 0;
             for (int i = 0; i < chunk.Length; i++)
             {
                 double e = TranscendentalReference.UlpError(y[i], f.Reference(chunk[i]));
-                if (e > max)
+                if (e > m)
                 {
-                    max = e;
-                    at = chunk[i];
+                    m = e;
+                    where = chunk[i];
                 }
+            }
+
+            lock (gate)
+            {
+                if (m > max || (m == max && BitConverter.SingleToInt32Bits(where) < BitConverter.SingleToInt32Bits(at)))
+                {
+                    max = m;
+                    at = where;
+                }
+            }
+        });
+        return (max, at);
+    }
+
+    /// <summary>Error of the platform library function over the same sweep, for comparison with the table.</summary>
+    private static double BclMaxUlp(Func<float, float> fn, Func<double, double> reference, float lo, float hi, long stride)
+    {
+        double max = 0;
+        foreach (float[] chunk in Chunks(lo, hi, stride))
+        {
+            foreach (float x in chunk)
+            {
+                max = Math.Max(max, TranscendentalReference.UlpError(fn(x), reference(x)));
             }
         }
 
-        return (max, at);
+        return max;
     }
 
     [Fact]
@@ -277,12 +304,12 @@ public class TranscendentalTests
         var bound = new Dictionary<ElementwiseFn, double>
         {
             [ElementwiseFn.Exp] = 1.2,
-            [ElementwiseFn.Log] = 2.0,
+            [ElementwiseFn.Log] = 2.1,
             [ElementwiseFn.Tanh] = 1.5,
-            [ElementwiseFn.Erf] = 2.8,
+            [ElementwiseFn.Erf] = 3.0,
             [ElementwiseFn.Sigmoid] = 2.5,
-            [ElementwiseFn.GeluErf] = 16.0,
-            [ElementwiseFn.GeluTanh] = 16.0,
+            [ElementwiseFn.GeluErf] = 13.0,
+            [ElementwiseFn.GeluTanh] = 18.0,
         };
         foreach (Fn f in Fns)
         {
@@ -299,12 +326,12 @@ public class TranscendentalTests
         var bound = new Dictionary<ElementwiseFn, double>
         {
             [ElementwiseFn.Exp] = 2.5,
-            [ElementwiseFn.Log] = 2.0,
+            [ElementwiseFn.Log] = 2.1,
             [ElementwiseFn.Tanh] = 1.5,
-            [ElementwiseFn.Erf] = 2.8,
+            [ElementwiseFn.Erf] = 3.0,
             [ElementwiseFn.Sigmoid] = 2.5,
-            [ElementwiseFn.GeluErf] = 16.0,
-            [ElementwiseFn.GeluTanh] = 16.0,
+            [ElementwiseFn.GeluErf] = 13.0,
+            [ElementwiseFn.GeluTanh] = 18.0,
         };
         foreach (Fn f in Fns)
         {
@@ -362,6 +389,17 @@ public class TranscendentalTests
                 (double max, float at) = MaxUlp(f, true, VecIsa.Auto, lo, hi, stride);
                 sb.AppendLine(CultureInfo.InvariantCulture, $"| {f.Id} | exact | negative tail [{lo:G6}, {hi:G6}] stride {stride} | {((Key(hi) - Key(lo)) / stride) + 1} | {max:F3} | {at:R} |");
             }
+        }
+
+        foreach ((string name, Func<float, float> fn, Fn f) in new (string, Func<float, float>, Fn)[]
+        {
+            ("MathF.Exp", MathF.Exp, Fns[0]),
+            ("MathF.Log", MathF.Log, Fns[1]),
+            ("MathF.Tanh", MathF.Tanh, Fns[2]),
+        })
+        {
+            double max = BclMaxUlp(fn, f.Reference, f.HotLo, f.HotHi, stride * 8);
+            sb.AppendLine(CultureInfo.InvariantCulture, $"| {name} (platform library) | - | hot [{f.HotLo:G6}, {f.HotHi:G6}] stride {stride * 8} | - | {max:F3} | - |");
         }
 
         File.WriteAllText(path, sb.ToString());

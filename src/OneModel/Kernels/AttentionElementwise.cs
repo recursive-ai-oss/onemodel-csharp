@@ -154,14 +154,12 @@ internal static class ElementwiseMath
     {
         int lanes = TO.Lanes;
         int n = x.Length;
-        ref float src = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(x);
-        ref float dst = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(y);
 
-        // Bounds: y.Length >= n was checked by the caller, and every access below is at an index < n.
+        // Bounds: y.Length >= n was checked by the caller, and every vector access below lies inside [0, n).
         int i = 0;
         for (; i + lanes <= n; i += lanes)
         {
-            TO.Store(ref dst, (nuint)i, TF.Apply<TV, TO>(TO.Load(ref src, (nuint)i)));
+            TO.Store(y, i, TF.Apply<TV, TO>(TO.Load(x, i)));
         }
 
         if (i < n)
@@ -170,8 +168,7 @@ internal static class ElementwiseMath
             Span<float> buf = stackalloc float[16];
             buf.Clear();
             x.Slice(i).CopyTo(buf);
-            ref float b = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(buf);
-            TO.Store(ref b, 0, TF.Apply<TV, TO>(TO.Load(ref b, 0)));
+            TO.Store(buf, 0, TF.Apply<TV, TO>(TO.Load(buf, 0)));
             buf.Slice(0, n - i).CopyTo(y.Slice(i));
         }
     }

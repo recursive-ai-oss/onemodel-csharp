@@ -1,6 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using RecursiveAI.OneModel.Kernels.Exact;
 
@@ -208,8 +206,9 @@ internal static class Attention
     }
 
     // Bounds: Validate() established that q, k, v, o and the mask cover every (batch, head, row, column) index the loops below form
-    // (Extent above is the largest index + 1), and that scratch holds ScratchLength(HeadDim) floats, which is carved up as
-    // kt | tile | acc | m | l | maskRow | misc below. All loop counters are clamped to the shape. Refs are formed with Unsafe.Add.
+    // (Extent above is the largest index + 1) and that scratch holds ScratchLength(HeadDim) floats, carved up below as
+    // kt | tile | acc | m | l | maskRow | misc. Everything is addressed through spans; the vector loads and stores go through
+    // IVecOps.Load/Store, which assert their range in the Checked build.
     private static void Run<TV, TO>(
         in AttentionShape s,
         ReadOnlySpan<float> q,
@@ -231,32 +230,21 @@ internal static class Attention
         bool hasMask = !mask.IsEmpty;
         int qBlocks = (s.QLen + Qb - 1) / Qb;
 
-        Span<float> ktS = scratch.Slice(0, dim * Bc);
-        Span<float> tileS = scratch.Slice(dim * Bc, Qb * Bc);
-        Span<float> accS = scratch.Slice((dim * Bc) + (Qb * Bc), Qb * dim);
+        Span<float> kt = scratch.Slice(0, dim * Bc);
+        Span<float> tile = scratch.Slice(dim * Bc, Qb * Bc);
+        Span<float> acc = scratch.Slice((dim * Bc) + (Qb * Bc), Qb * dim);
         int rest = (dim * Bc) + (Qb * Bc) + (Qb * dim);
-        Span<float> mS = scratch.Slice(rest, Qb);
-        Span<float> lS = scratch.Slice(rest + Qb, Qb);
-        Span<float> maskRowS = scratch.Slice(rest + (2 * Qb), Bc);
-        Span<float> miscS = scratch.Slice(rest + (2 * Qb) + Bc, 64);
-
-        ref float kt = ref MemoryMarshal.GetReference(ktS);
-        ref float tile = ref MemoryMarshal.GetReference(tileS);
-        ref float acc = ref MemoryMarshal.GetReference(accS);
-        ref float maskRow = ref MemoryMarshal.GetReference(maskRowS);
-        ref float misc = ref MemoryMarshal.GetReference(miscS);
-        ref float qBaseRef = ref MemoryMarshal.GetReference(q);
-        ref float kBaseRef = ref MemoryMarshal.GetReference(k);
-        ref float vBaseRef = ref MemoryMarshal.GetReference(v);
-        ref float oBaseRef = ref MemoryMarshal.GetReference(o);
-        ref float mask0 = ref MemoryMarshal.GetReference(mask);
+        Span<float> mRun = scratch.Slice(rest, Qb);
+        Span<float> lRun = scratch.Slice(rest + Qb, Qb);
+        Span<float> maskRow = scratch.Slice(rest + (2 * Qb), Bc);
+        Span<float> misc = scratch.Slice(rest + (2 * Qb) + Bc, 64);
 
         TV scaleV = TO.Splat(s.Scale);
         TV nanV = TO.Splat(BitConverter.UInt32BitsToSingle(Softmax.QuietNaNBits));
 
         // Zero the tile once: rows beyond the item's row count are computed from a duplicate of the last row and never read back,
         // but they must not hold uninitialised memory.
-        tileS.Clear();
+        tile.Clear();
 
         for (int item = itemStart; item < itemEnd; item++)
         {
@@ -274,11 +262,11 @@ internal static class Attention
             long oBase = (b * s.OBatchStride) + (h * s.OHeadStride);
             long maskBase = (b * s.MaskBatchStride) + (h * s.MaskHeadStride);
 
-            accS.Slice(0, rowsPadded * dim).Clear();
+            acc.Slice(0, rowsPadded * dim).Clear();
             for (int r = 0; r < rows; r++)
             {
-                mS[r] = float.NegativeInfinity;
-                lS[r] = 0f;
+                mRun[r] = float.NegativeInfinity;
+                lRun[r] = 0f;
             }
 
             for (int kb = 0; kb < s.KLen; kb += Bc)
@@ -290,10 +278,10 @@ internal static class Attention
                 // microkernel streams contiguous key lanes for each head-dimension index. Padding columns are zero.
                 for (int j = 0; j < n; j++)
                 {
-                    ref float krow = ref Unsafe.Add(ref kBaseRef, (nint)(kBase + ((kb + j) * s.KRowStride)));
+                    ReadOnlySpan<float> krow = k.Slice((int)(kBase + ((kb + j) * s.KRowStride)), dim);
                     for (int d = 0; d < dim; d++)
                     {
-                        Unsafe.Add(ref kt, (d * Bc) + j) = Unsafe.Add(ref krow, d);
+                        kt[(d * Bc) + j] = krow[d];
                     }
                 }
 
@@ -301,7 +289,7 @@ internal static class Attention
                 {
                     for (int d = 0; d < dim; d++)
                     {
-                        Unsafe.Add(ref kt, (d * Bc) + j) = 0f;
+                        kt[(d * Bc) + j] = 0f;
                     }
                 }
 
@@ -309,22 +297,22 @@ internal static class Attention
                 // dimension in increasing order from +0, one accumulator, so the result does not depend on the lane width.
                 for (int rg = 0; rg < rowsPadded; rg += 4)
                 {
-                    ref float qr0 = ref Unsafe.Add(ref qBaseRef, (nint)(qBase + ((rowStart + Math.Min(rg, rows - 1)) * s.QRowStride)));
-                    ref float qr1 = ref Unsafe.Add(ref qBaseRef, (nint)(qBase + ((rowStart + Math.Min(rg + 1, rows - 1)) * s.QRowStride)));
-                    ref float qr2 = ref Unsafe.Add(ref qBaseRef, (nint)(qBase + ((rowStart + Math.Min(rg + 2, rows - 1)) * s.QRowStride)));
-                    ref float qr3 = ref Unsafe.Add(ref qBaseRef, (nint)(qBase + ((rowStart + Math.Min(rg + 3, rows - 1)) * s.QRowStride)));
+                    ReadOnlySpan<float> qr0 = q.Slice((int)(qBase + ((rowStart + Math.Min(rg, rows - 1)) * s.QRowStride)), dim);
+                    ReadOnlySpan<float> qr1 = q.Slice((int)(qBase + ((rowStart + Math.Min(rg + 1, rows - 1)) * s.QRowStride)), dim);
+                    ReadOnlySpan<float> qr2 = q.Slice((int)(qBase + ((rowStart + Math.Min(rg + 2, rows - 1)) * s.QRowStride)), dim);
+                    ReadOnlySpan<float> qr3 = q.Slice((int)(qBase + ((rowStart + Math.Min(rg + 3, rows - 1)) * s.QRowStride)), dim);
                     for (int cg = 0; cg < nPad; cg += nr)
                     {
                         TV a00 = TO.Zero, a01 = TO.Zero, a10 = TO.Zero, a11 = TO.Zero;
                         TV a20 = TO.Zero, a21 = TO.Zero, a30 = TO.Zero, a31 = TO.Zero;
                         for (int d = 0; d < dim; d++)
                         {
-                            TV b0 = TO.Load(ref kt, (nuint)((d * Bc) + cg));
-                            TV b1 = TO.Load(ref kt, (nuint)((d * Bc) + cg + lanes));
-                            TV x0 = TO.Splat(Unsafe.Add(ref qr0, d));
-                            TV x1 = TO.Splat(Unsafe.Add(ref qr1, d));
-                            TV x2 = TO.Splat(Unsafe.Add(ref qr2, d));
-                            TV x3 = TO.Splat(Unsafe.Add(ref qr3, d));
+                            TV b0 = TO.Load(kt, (d * Bc) + cg);
+                            TV b1 = TO.Load(kt, (d * Bc) + cg + lanes);
+                            TV x0 = TO.Splat(qr0[d]);
+                            TV x1 = TO.Splat(qr1[d]);
+                            TV x2 = TO.Splat(qr2[d]);
+                            TV x3 = TO.Splat(qr3[d]);
                             a00 = TO.Accumulate(a00, x0, b0);
                             a01 = TO.Accumulate(a01, x0, b1);
                             a10 = TO.Accumulate(a10, x1, b0);
@@ -336,73 +324,59 @@ internal static class Attention
                         }
 
                         int t0 = (rg * Bc) + cg;
-                        TO.Store(ref tile, (nuint)t0, a00);
-                        TO.Store(ref tile, (nuint)(t0 + lanes), a01);
-                        TO.Store(ref tile, (nuint)(t0 + Bc), a10);
-                        TO.Store(ref tile, (nuint)(t0 + Bc + lanes), a11);
-                        TO.Store(ref tile, (nuint)(t0 + (2 * Bc)), a20);
-                        TO.Store(ref tile, (nuint)(t0 + (2 * Bc) + lanes), a21);
-                        TO.Store(ref tile, (nuint)(t0 + (3 * Bc)), a30);
-                        TO.Store(ref tile, (nuint)(t0 + (3 * Bc) + lanes), a31);
+                        TO.Store(tile, t0, a00);
+                        TO.Store(tile, t0 + lanes, a01);
+                        TO.Store(tile, t0 + Bc, a10);
+                        TO.Store(tile, t0 + Bc + lanes, a11);
+                        TO.Store(tile, t0 + (2 * Bc), a20);
+                        TO.Store(tile, t0 + (2 * Bc) + lanes, a21);
+                        TO.Store(tile, t0 + (3 * Bc), a30);
+                        TO.Store(tile, t0 + (3 * Bc) + lanes, a31);
                     }
                 }
 
                 if (!hasMask)
                 {
-                    for (int j = 0; j < n; j++)
-                    {
-                        Unsafe.Add(ref maskRow, j) = 0f;
-                    }
-
-                    for (int j = n; j < nPad; j++)
-                    {
-                        Unsafe.Add(ref maskRow, j) = float.NegativeInfinity;
-                    }
+                    maskRow.Slice(0, n).Clear();
+                    maskRow.Slice(n, nPad - n).Fill(float.NegativeInfinity);
                 }
 
                 // Online softmax (Dao et al. 2022, alg. 1) per query row.
                 for (int r = 0; r < rows; r++)
                 {
-                    ref float srow = ref Unsafe.Add(ref tile, r * Bc);
+                    Span<float> srow = tile.Slice(r * Bc, Bc);
 
                     // S = mask + scale * dot, one pass that also collects the row maximum (max ignores NaN and does not depend on
                     // order or lane width). The mask row is zero where nothing is masked and -inf in the padding columns, so
                     // padding carries no weight and cannot win the maximum.
                     if (hasMask)
                     {
-                        long mo = maskBase + ((rowStart + r) * s.MaskRowStride) + kb;
-                        for (int j = 0; j < n; j++)
-                        {
-                            Unsafe.Add(ref maskRow, j) = Unsafe.Add(ref mask0, (nint)(mo + j));
-                        }
-
-                        for (int j = n; j < nPad; j++)
-                        {
-                            Unsafe.Add(ref maskRow, j) = float.NegativeInfinity;
-                        }
+                        mask.Slice((int)(maskBase + ((rowStart + r) * s.MaskRowStride) + kb), n).CopyTo(maskRow);
+                        maskRow.Slice(n, nPad - n).Fill(float.NegativeInfinity);
                     }
 
                     TV runMax = TO.Splat(float.NegativeInfinity);
                     for (int c = 0; c < nPad; c += lanes)
                     {
-                        TV sv = TO.Accumulate(TO.Load(ref maskRow, (nuint)c), TO.Load(ref srow, (nuint)c), scaleV);
-                        TO.Store(ref srow, (nuint)c, sv);
+                        TV sv = TO.Accumulate(TO.Load(maskRow, c), TO.Load(srow, c), scaleV);
+                        TO.Store(srow, c, sv);
                         runMax = TO.Select(TO.GreaterThan(sv, runMax), sv, runMax);
                     }
 
-                    TO.Store(ref misc, 0, runMax);
+                    TO.Store(misc, 0, runMax);
                     float blockMax = float.NegativeInfinity;
                     for (int t = 0; t < lanes; t++)
                     {
-                        float lane = Unsafe.Add(ref misc, t);
+                        float lane = misc[t];
                         blockMax = lane > blockMax ? lane : blockMax;
                     }
-                    float mOld = mS[r];
+
+                    float mOld = mRun[r];
                     float mNew = blockMax > mOld ? blockMax : mOld;
 
                     // A row with nothing but -inf so far contributes nothing; shifting by 0 avoids (-inf) - (-inf).
                     float shift = float.IsNegativeInfinity(mNew) ? 0f : mNew;
-                    mS[r] = mNew;
+                    mRun[r] = mNew;
 
                     // exp(-inf) = 0 and exp(0) = 1 exactly, so the two common cases skip the exponential without changing a bit.
                     float alpha;
@@ -416,51 +390,52 @@ internal static class Attention
                     }
                     else
                     {
-                        TO.Store(ref misc, 0, TO.SoftmaxExp(TO.Splat(mOld - shift)));
-                        alpha = misc;
+                        TO.Store(misc, 0, TO.SoftmaxExp(TO.Splat(mOld - shift)));
+                        alpha = misc[0];
                     }
 
                     TV vshift = TO.Splat(shift);
                     for (int c = 0; c < nPad; c += lanes)
                     {
-                        TO.Store(ref srow, (nuint)c, TO.SoftmaxExp(TO.Sub(TO.Load(ref srow, (nuint)c), vshift)));
+                        TO.Store(srow, c, TO.SoftmaxExp(TO.Sub(TO.Load(srow, c), vshift)));
                     }
 
-                    float blockSum = RowReduce.Sum16<TV, TO>(ref srow, nPad);
-                    lS[r] = (lS[r] * alpha) + blockSum;
+                    float blockSum = RowReduce.Sum16<TV, TO>(srow.Slice(0, nPad));
+                    lRun[r] = (lRun[r] * alpha) + blockSum;
 
                     if (alpha != 1f)
                     {
-                        ref float arow = ref Unsafe.Add(ref acc, r * dim);
+                        Span<float> arow = acc.Slice(r * dim, dim);
                         TV va = TO.Splat(alpha);
                         for (int d = 0; d < dim; d += lanes)
                         {
-                            TO.Store(ref arow, (nuint)d, TO.Mul(TO.Load(ref arow, (nuint)d), va));
+                            TO.Store(arow, d, TO.Mul(TO.Load(arow, d), va));
                         }
                     }
                 }
 
                 // O += P V, four rows by two vectors of the head dimension; sequential over the block's keys in increasing order.
+                int vRowStride = (int)s.VRowStride;
                 for (int rg = 0; rg < rowsPadded; rg += 4)
                 {
                     for (int dg = 0; dg < dim; dg += nr)
                     {
-                        ref float ar0 = ref Unsafe.Add(ref acc, (rg * dim) + dg);
-                        TV a00 = TO.Load(ref ar0, 0), a01 = TO.Load(ref ar0, (nuint)lanes);
-                        TV a10 = TO.Load(ref ar0, (nuint)dim), a11 = TO.Load(ref ar0, (nuint)(dim + lanes));
-                        TV a20 = TO.Load(ref ar0, (nuint)(2 * dim)), a21 = TO.Load(ref ar0, (nuint)((2 * dim) + lanes));
-                        TV a30 = TO.Load(ref ar0, (nuint)(3 * dim)), a31 = TO.Load(ref ar0, (nuint)((3 * dim) + lanes));
-                        ref float p0 = ref Unsafe.Add(ref tile, rg * Bc);
-                        ref float vcol = ref Unsafe.Add(ref vBaseRef, (nint)(vBase + (kb * s.VRowStride) + dg));
+                        int a0 = (rg * dim) + dg;
+                        TV a00 = TO.Load(acc, a0), a01 = TO.Load(acc, a0 + lanes);
+                        TV a10 = TO.Load(acc, a0 + dim), a11 = TO.Load(acc, a0 + dim + lanes);
+                        TV a20 = TO.Load(acc, a0 + (2 * dim)), a21 = TO.Load(acc, a0 + (2 * dim) + lanes);
+                        TV a30 = TO.Load(acc, a0 + (3 * dim)), a31 = TO.Load(acc, a0 + (3 * dim) + lanes);
+                        int p0 = rg * Bc;
+                        int vcol = (int)(vBase + (kb * s.VRowStride)) + dg;
                         for (int j = 0; j < n; j++)
                         {
-                            nint vo = (nint)(j * s.VRowStride);
-                            TV b0 = TO.Load(ref vcol, (nuint)vo);
-                            TV b1 = TO.Load(ref vcol, (nuint)(vo + lanes));
-                            TV x0 = TO.Splat(Unsafe.Add(ref p0, j));
-                            TV x1 = TO.Splat(Unsafe.Add(ref p0, Bc + j));
-                            TV x2 = TO.Splat(Unsafe.Add(ref p0, (2 * Bc) + j));
-                            TV x3 = TO.Splat(Unsafe.Add(ref p0, (3 * Bc) + j));
+                            int vo = vcol + (j * vRowStride);
+                            TV b0 = TO.Load(v, vo);
+                            TV b1 = TO.Load(v, vo + lanes);
+                            TV x0 = TO.Splat(tile[p0 + j]);
+                            TV x1 = TO.Splat(tile[p0 + Bc + j]);
+                            TV x2 = TO.Splat(tile[p0 + (2 * Bc) + j]);
+                            TV x3 = TO.Splat(tile[p0 + (3 * Bc) + j]);
                             a00 = TO.Accumulate(a00, x0, b0);
                             a01 = TO.Accumulate(a01, x0, b1);
                             a10 = TO.Accumulate(a10, x1, b0);
@@ -471,14 +446,14 @@ internal static class Attention
                             a31 = TO.Accumulate(a31, x3, b1);
                         }
 
-                        TO.Store(ref ar0, 0, a00);
-                        TO.Store(ref ar0, (nuint)lanes, a01);
-                        TO.Store(ref ar0, (nuint)dim, a10);
-                        TO.Store(ref ar0, (nuint)(dim + lanes), a11);
-                        TO.Store(ref ar0, (nuint)(2 * dim), a20);
-                        TO.Store(ref ar0, (nuint)((2 * dim) + lanes), a21);
-                        TO.Store(ref ar0, (nuint)(3 * dim), a30);
-                        TO.Store(ref ar0, (nuint)((3 * dim) + lanes), a31);
+                        TO.Store(acc, a0, a00);
+                        TO.Store(acc, a0 + lanes, a01);
+                        TO.Store(acc, a0 + dim, a10);
+                        TO.Store(acc, a0 + dim + lanes, a11);
+                        TO.Store(acc, a0 + (2 * dim), a20);
+                        TO.Store(acc, a0 + (2 * dim) + lanes, a21);
+                        TO.Store(acc, a0 + (3 * dim), a30);
+                        TO.Store(acc, a0 + (3 * dim) + lanes, a31);
                     }
                 }
             }
@@ -486,16 +461,16 @@ internal static class Attention
             // O = acc / l. Any NaN (fully masked row, inf or NaN input) becomes the canonical quiet NaN.
             for (int r = 0; r < rows; r++)
             {
-                ref float arow = ref Unsafe.Add(ref acc, r * dim);
-                ref float orow = ref Unsafe.Add(ref oBaseRef, (nint)(oBase + ((rowStart + r) * s.ORowStride)));
-                float l = lS[r];
+                Span<float> arow = acc.Slice(r * dim, dim);
+                Span<float> orow = o.Slice((int)(oBase + ((rowStart + r) * s.ORowStride)), dim);
+                float l = lRun[r];
                 if (TO.Fused)
                 {
                     TV inv = TO.Splat(1f / l);
                     for (int d = 0; d < dim; d += lanes)
                     {
-                        TV res = TO.Mul(TO.Load(ref arow, (nuint)d), inv);
-                        TO.Store(ref orow, (nuint)d, TO.Select(TO.Equal(res, res), res, nanV));
+                        TV res = TO.Mul(TO.Load(arow, d), inv);
+                        TO.Store(orow, d, TO.Select(TO.Equal(res, res), res, nanV));
                     }
                 }
                 else
@@ -503,12 +478,11 @@ internal static class Attention
                     TV vl = TO.Splat(l);
                     for (int d = 0; d < dim; d += lanes)
                     {
-                        TV res = TO.Div(TO.Load(ref arow, (nuint)d), vl);
-                        TO.Store(ref orow, (nuint)d, TO.Select(TO.Equal(res, res), res, nanV));
+                        TV res = TO.Div(TO.Load(arow, d), vl);
+                        TO.Store(orow, d, TO.Select(TO.Equal(res, res), res, nanV));
                     }
                 }
             }
         }
-
     }
 }

@@ -73,6 +73,12 @@ internal static class AttentionSpike
 
         // Subsets for quick looks: ONEMODEL_SPIKE_THREADS=1,32  ONEMODEL_SPIKE_SHAPES=0,2  ONEMODEL_SPIKE_PARTS=attention,softmax,elementwise
         string? tEnv = Environment.GetEnvironmentVariable("ONEMODEL_SPIKE_THREADS");
+        string? iEnv = Environment.GetEnvironmentVariable("ONEMODEL_SPIKE_ISAS");
+        if (iEnv is not null)
+        {
+            isas.RemoveAll(i => !iEnv.Contains(i.ToString(), StringComparison.OrdinalIgnoreCase));
+        }
+
         int[] threadCounts = tEnv is null ? [1, Environment.ProcessorCount] : Array.ConvertAll(tEnv.Split(','), x => int.Parse(x, CultureInfo.InvariantCulture));
         string? sEnv = Environment.GetEnvironmentVariable("ONEMODEL_SPIKE_SHAPES");
         Shape[] shapes = sEnv is null ? Shapes : Array.ConvertAll(sEnv.Split(','), x => Shapes[int.Parse(x, CultureInfo.InvariantCulture)]);

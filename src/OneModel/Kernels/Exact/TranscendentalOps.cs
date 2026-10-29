@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
 namespace RecursiveAI.OneModel.Kernels.Exact;
@@ -17,11 +18,21 @@ internal readonly struct ExactVec128 : IVecOps<Vector128<float>>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector128<float> Splat(float x) => Vector128.Create(x);
 
+    // Bounds: every caller passes an index with 0 <= index and index + Lanes <= p.Length (stated at the kernel entry point); the
+    // Checked build asserts it here. This is the only place in the attention kernels that reads memory without a bounds check.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Vector128<float> Load(ref float p, nuint index) => Vector128.LoadUnsafe(ref p, index);
+    public static Vector128<float> Load(ReadOnlySpan<float> p, int index)
+    {
+        VecChecks.Range(index, Lanes, p.Length);
+        return Vector128.LoadUnsafe(ref MemoryMarshal.GetReference(p), (nuint)index);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Store(ref float p, nuint index, Vector128<float> v) => v.StoreUnsafe(ref p, index);
+    public static void Store(Span<float> p, int index, Vector128<float> v)
+    {
+        VecChecks.Range(index, Lanes, p.Length);
+        v.StoreUnsafe(ref MemoryMarshal.GetReference(p), (nuint)index);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector128<float> Add(Vector128<float> a, Vector128<float> b) => a + b;
@@ -95,11 +106,21 @@ internal readonly struct ExactVec256 : IVecOps<Vector256<float>>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector256<float> Splat(float x) => Vector256.Create(x);
 
+    // Bounds: every caller passes an index with 0 <= index and index + Lanes <= p.Length (stated at the kernel entry point); the
+    // Checked build asserts it here. This is the only place in the attention kernels that reads memory without a bounds check.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Vector256<float> Load(ref float p, nuint index) => Vector256.LoadUnsafe(ref p, index);
+    public static Vector256<float> Load(ReadOnlySpan<float> p, int index)
+    {
+        VecChecks.Range(index, Lanes, p.Length);
+        return Vector256.LoadUnsafe(ref MemoryMarshal.GetReference(p), (nuint)index);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Store(ref float p, nuint index, Vector256<float> v) => v.StoreUnsafe(ref p, index);
+    public static void Store(Span<float> p, int index, Vector256<float> v)
+    {
+        VecChecks.Range(index, Lanes, p.Length);
+        v.StoreUnsafe(ref MemoryMarshal.GetReference(p), (nuint)index);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector256<float> Add(Vector256<float> a, Vector256<float> b) => a + b;
@@ -173,11 +194,21 @@ internal readonly struct ExactVec512 : IVecOps<Vector512<float>>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector512<float> Splat(float x) => Vector512.Create(x);
 
+    // Bounds: every caller passes an index with 0 <= index and index + Lanes <= p.Length (stated at the kernel entry point); the
+    // Checked build asserts it here. This is the only place in the attention kernels that reads memory without a bounds check.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Vector512<float> Load(ref float p, nuint index) => Vector512.LoadUnsafe(ref p, index);
+    public static Vector512<float> Load(ReadOnlySpan<float> p, int index)
+    {
+        VecChecks.Range(index, Lanes, p.Length);
+        return Vector512.LoadUnsafe(ref MemoryMarshal.GetReference(p), (nuint)index);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Store(ref float p, nuint index, Vector512<float> v) => v.StoreUnsafe(ref p, index);
+    public static void Store(Span<float> p, int index, Vector512<float> v)
+    {
+        VecChecks.Range(index, Lanes, p.Length);
+        v.StoreUnsafe(ref MemoryMarshal.GetReference(p), (nuint)index);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector512<float> Add(Vector512<float> a, Vector512<float> b) => a + b;
@@ -263,10 +294,10 @@ internal readonly struct ExactVecScalar : IVecOps<float>
     public static float Splat(float x) => x;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static float Load(ref float p, nuint index) => Unsafe.Add(ref p, index);
+    public static float Load(ReadOnlySpan<float> p, int index) => p[index];
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Store(ref float p, nuint index, float v) => Unsafe.Add(ref p, index) = v;
+    public static void Store(Span<float> p, int index, float v) => p[index] = v;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float Add(float a, float b) => a + b;

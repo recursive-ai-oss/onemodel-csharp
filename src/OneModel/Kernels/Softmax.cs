@@ -1,6 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using RecursiveAI.OneModel.Kernels.Exact;
 
@@ -68,49 +66,39 @@ internal static class Softmax
         }
     }
 
-    // Bounds: Rows() has checked that src and dst hold (rows-1)*stride + cols elements; each access below is inside a row.
+    // Bounds: Rows() has checked that src and dst hold (rows-1)*stride + cols elements; each vector access below is inside a row.
     private static void Run<TV, TO>(ReadOnlySpan<float> src, Span<float> dst, int rows, int cols, int srcStride, int dstStride)
         where TV : struct
         where TO : IVecOps<TV>
     {
         int lanes = TO.Lanes;
-        ref float s0 = ref MemoryMarshal.GetReference(src);
-        ref float d0 = ref MemoryMarshal.GetReference(dst);
         Span<float> tail = stackalloc float[16];
-        ref float tailRef = ref MemoryMarshal.GetReference(tail);
         int body = cols - (cols % lanes);
         float nan = BitConverter.UInt32BitsToSingle(QuietNaNBits);
 
         for (int r = 0; r < rows; r++)
         {
-            ref float x = ref Unsafe.Add(ref s0, (nint)((long)r * srcStride));
-            ref float y = ref Unsafe.Add(ref d0, (nint)((long)r * dstStride));
+            ReadOnlySpan<float> x = src.Slice(r * srcStride, cols);
+            Span<float> y = dst.Slice(r * dstStride, cols);
 
-            float max = RowReduce.Max<TV, TO>(ref x, cols);
+            float max = RowReduce.Max<TV, TO>(x);
             TV vmax = TO.Splat(max);
 
             // e[j] = exp(x[j] - max); the tail (cols % lanes elements) goes through a padded chunk and runs the same vector code.
             for (int j = 0; j < body; j += lanes)
             {
-                TO.Store(ref y, (nuint)j, TO.SoftmaxExp(TO.Sub(TO.Load(ref x, (nuint)j), vmax)));
+                TO.Store(y, j, TO.SoftmaxExp(TO.Sub(TO.Load(x, j), vmax)));
             }
 
             if (body < cols)
             {
                 tail.Clear();
-                for (int j = body; j < cols; j++)
-                {
-                    tail[j - body] = Unsafe.Add(ref x, j);
-                }
-
-                TO.Store(ref tailRef, 0, TO.SoftmaxExp(TO.Sub(TO.Load(ref tailRef, 0), vmax)));
-                for (int j = body; j < cols; j++)
-                {
-                    Unsafe.Add(ref y, j) = tail[j - body];
-                }
+                x.Slice(body).CopyTo(tail);
+                TO.Store(tail, 0, TO.SoftmaxExp(TO.Sub(TO.Load(tail, 0), vmax)));
+                tail.Slice(0, cols - body).CopyTo(y.Slice(body));
             }
 
-            float sum = RowReduce.Sum16<TV, TO>(ref y, cols);
+            float sum = RowReduce.Sum16<TV, TO>(y);
 
             if (TO.Fused)
             {
@@ -118,13 +106,13 @@ internal static class Softmax
                 TV vinv = TO.Splat(inv);
                 for (int j = 0; j < body; j += lanes)
                 {
-                    TO.Store(ref y, (nuint)j, Transcendental.Canonical<TV, TO>(TO.Mul(TO.Load(ref y, (nuint)j), vinv)));
+                    TO.Store(y, j, Transcendental.Canonical<TV, TO>(TO.Mul(TO.Load(y, j), vinv)));
                 }
 
                 for (int j = body; j < cols; j++)
                 {
-                    float v = Unsafe.Add(ref y, j) * inv;
-                    Unsafe.Add(ref y, j) = float.IsNaN(v) ? nan : v;
+                    float v = y[j] * inv;
+                    y[j] = float.IsNaN(v) ? nan : v;
                 }
             }
             else
@@ -132,13 +120,13 @@ internal static class Softmax
                 TV vsum = TO.Splat(sum);
                 for (int j = 0; j < body; j += lanes)
                 {
-                    TO.Store(ref y, (nuint)j, Transcendental.Canonical<TV, TO>(TO.Div(TO.Load(ref y, (nuint)j), vsum)));
+                    TO.Store(y, j, Transcendental.Canonical<TV, TO>(TO.Div(TO.Load(y, j), vsum)));
                 }
 
                 for (int j = body; j < cols; j++)
                 {
-                    float v = Unsafe.Add(ref y, j) / sum;
-                    Unsafe.Add(ref y, j) = float.IsNaN(v) ? nan : v;
+                    float v = y[j] / sum;
+                    y[j] = float.IsNaN(v) ? nan : v;
                 }
             }
         }
@@ -152,28 +140,25 @@ internal static class RowReduce
     /// Sum in the canonical order: 16 partial sums, element j added to partial j mod 16 in increasing j, then combined by halving
     /// (p[t] + p[t+8], then t+4, t+2, t+1). Every lane width reproduces it, because lanes are independent partials.
     /// </summary>
-    /// <remarks>Bounds: reads <paramref name="n"/> floats from <paramref name="x"/>; the caller guarantees them.</remarks>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static float Sum16<TV, TO>(ref float x, int n)
+    public static float Sum16<TV, TO>(ReadOnlySpan<float> x)
         where TV : struct
         where TO : IVecOps<TV>
     {
         Span<float> part = stackalloc float[16];
         part.Clear();
-        ref float p = ref MemoryMarshal.GetReference(part);
         int lanes = TO.Lanes;
-        int full = n & ~15;
+        int full = x.Length & ~15;
         for (int c = 0; c < full; c += 16)
         {
             for (int t = 0; t < 16; t += lanes)
             {
-                TO.Store(ref p, (nuint)t, TO.Add(TO.Load(ref p, (nuint)t), TO.Load(ref x, (nuint)(c + t))));
+                TO.Store(part, t, TO.Add(TO.Load(part, t), TO.Load(x, c + t)));
             }
         }
 
-        for (int j = full; j < n; j++)
+        for (int j = full; j < x.Length; j++)
         {
-            part[j & 15] += Unsafe.Add(ref x, j);
+            part[j & 15] += x[j];
         }
 
         float a0 = part[0] + part[8];
@@ -196,32 +181,30 @@ internal static class RowReduce
     /// <summary>
     /// Maximum of the non-NaN elements (-inf if none). The result does not depend on the order or lane width, since max is exact.
     /// </summary>
-    /// <remarks>Bounds: reads <paramref name="n"/> floats from <paramref name="x"/>; the caller guarantees them.</remarks>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static float Max<TV, TO>(ref float x, int n)
+    public static float Max<TV, TO>(ReadOnlySpan<float> x)
         where TV : struct
         where TO : IVecOps<TV>
     {
         int lanes = TO.Lanes;
-        int body = n - (n % lanes);
+        int body = x.Length - (x.Length % lanes);
         TV m = TO.Splat(float.NegativeInfinity);
         for (int j = 0; j < body; j += lanes)
         {
-            TV v = TO.Load(ref x, (nuint)j);
+            TV v = TO.Load(x, j);
             m = TO.Select(TO.GreaterThan(v, m), v, m);
         }
 
         Span<float> buf = stackalloc float[16];
-        TO.Store(ref MemoryMarshal.GetReference(buf), 0, m);
+        TO.Store(buf, 0, m);
         float max = float.NegativeInfinity;
         for (int t = 0; t < lanes; t++)
         {
             max = buf[t] > max ? buf[t] : max;
         }
 
-        for (int j = body; j < n; j++)
+        for (int j = body; j < x.Length; j++)
         {
-            float v = Unsafe.Add(ref x, j);
+            float v = x[j];
             max = v > max ? v : max;
         }
 
