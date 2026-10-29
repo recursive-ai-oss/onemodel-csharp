@@ -39,7 +39,7 @@ internal readonly record struct ConvShape(
 /// </remarks>
 internal static unsafe class Conv
 {
-    // Rows of the im2col matrix per chunk, and planes per chunk of the depthwise kernel: constants, not derived from the thread count.
+    // Rows of the im2col matrix per chunk, and planes per chunk of the bias add: constants, not derived from the thread count.
     private const int Im2ColRowsPerChunk = 16;
     private const int PlanesPerChunk = 4;
 
@@ -86,7 +86,7 @@ internal static unsafe class Conv
         {
             if (s.IsDepthwise)
             {
-                Depthwise(mode, path, s, pin, pw, pout, threads);
+                Depthwise.Run(mode, path, s, pin, pw, pout, threads);
             }
             else
             {
@@ -120,7 +120,7 @@ internal static unsafe class Conv
         job.Plane = plane;
         job.Canonical = canonicalNaN;
         job.Planes = n * channels;
-        ParallelFor.Run(job, (job.Planes + PlanesPerChunk - 1) / PlanesPerChunk, threads);
+        ParallelFor.Run(job, (job.Planes + PlanesPerChunk - 1) / PlanesPerChunk, threads, (long)job.Planes * plane / 4);
     }
 
     private sealed class BiasJob : ChunkJob
@@ -226,7 +226,7 @@ internal static unsafe class Conv
                     job.CinG = cinG;
                     job.OutH = outH;
                     job.OutW = outW;
-                    ParallelFor.Run(job, (k + Im2ColRowsPerChunk - 1) / Im2ColRowsPerChunk, threads);
+                    ParallelFor.Run(job, (k + Im2ColRowsPerChunk - 1) / Im2ColRowsPerChunk, threads, (long)k * nCols / 2);
                     b = cols;
                 }
 
@@ -287,134 +287,6 @@ internal static unsafe class Conv
                     }
 
                     new Span<float>(row + oxHi + 1, OutW - oxHi - 1).Clear();
-                }
-            }
-        }
-    }
-
-    private static void Depthwise(KernelMode mode, KernelPath path, in ConvShape s, float* input, float* weights, float* output, int threads)
-    {
-        int planes = s.N * s.Cout;
-        int chunks = (planes + PlanesPerChunk - 1) / PlanesPerChunk;
-        bool exact = mode == KernelMode.Exact;
-        bool wide = path is KernelPath.Avx2 or KernelPath.Avx512;
-        bool four = path is KernelPath.Neon or KernelPath.Portable128;
-        ChunkJob job = (exact, wide, four) switch
-        {
-            (true, true, _) => DepthwiseJob<ExactLanes8, ExactLanes1>.Get(s, input, weights, output, true),
-            (true, _, true) => DepthwiseJob<ExactLanes4, ExactLanes1>.Get(s, input, weights, output, true),
-            (true, _, _) => DepthwiseJob<ExactLanes1, ExactLanes1>.Get(s, input, weights, output, true),
-            (_, true, _) => DepthwiseJob<FastLanes8, FastLanes1>.Get(s, input, weights, output, false),
-            (_, _, true) => DepthwiseJob<FastLanes4, FastLanes1>.Get(s, input, weights, output, false),
-            _ => DepthwiseJob<FastLanes1, FastLanes1>.Get(s, input, weights, output, false),
-        };
-        ParallelFor.Run(job, chunks, threads);
-    }
-
-    /// <summary>
-    /// Direct depthwise kernel over <typeparamref name="TV"/> lanes (output columns side by side) with a one-lane tail
-    /// <typeparamref name="TS"/>. Each output is the sum over taps in row-major order of weight * input, accumulated one tap at a time
-    /// from +0 on a zero-padded copy of the input plane.
-    /// </summary>
-    private sealed class DepthwiseJob<TV, TS> : ChunkJob
-        where TV : struct, ILanes<TV>
-        where TS : struct, ILanes<TS>
-    {
-        [ThreadStatic]
-        private static DepthwiseJob<TV, TS>? t_job;
-
-        private ConvShape _s;
-        private float* _input;
-        private float* _weights;
-        private float* _output;
-        private bool _canonicalNaN;
-
-        /// <summary>The calling thread's job object, refilled: a steady-state call allocates nothing.</summary>
-        public static DepthwiseJob<TV, TS> Get(in ConvShape s, float* input, float* weights, float* output, bool canonicalNaN)
-        {
-            DepthwiseJob<TV, TS> job = t_job ??= new DepthwiseJob<TV, TS>();
-            job._s = s;
-            job._input = input;
-            job._weights = weights;
-            job._output = output;
-            job._canonicalNaN = canonicalNaN;
-            return job;
-        }
-
-        public override void RunChunk(int chunk)
-        {
-            ConvShape s = _s;
-            int mult = s.Cout / s.Cin;
-            int outH = s.OutH;
-            int outW = s.OutW;
-            int planes = s.N * s.Cout;
-            bool padded = s.PadTop != 0 || s.PadLeft != 0 || s.PadBottom != 0 || s.PadRight != 0;
-            int wp = s.W + s.PadLeft + s.PadRight;
-            int hp = s.H + s.PadTop + s.PadBottom;
-            float* scratch = padded ? Scratch.Get(Scratch.Plane, (long)hp * wp) : null;
-            for (int q = chunk * PlanesPerChunk; q < Math.Min(planes, (chunk + 1) * PlanesPerChunk); q++)
-            {
-                int img = q / s.Cout;
-                int oc = q % s.Cout;
-                float* plane = _input + ((((long)img * s.Cin) + (oc / mult)) * s.H * s.W);
-                float* src = plane;
-                if (padded)
-                {
-                    new Span<float>(scratch, hp * wp).Clear();
-                    for (int y = 0; y < s.H; y++)
-                    {
-                        Buffer.MemoryCopy(plane + ((long)y * s.W), scratch + ((long)(y + s.PadTop) * wp) + s.PadLeft, s.W * sizeof(float), s.W * sizeof(float));
-                    }
-
-                    src = scratch;
-                }
-
-                float* w = _weights + ((long)oc * s.KH * s.KW);
-                float* dst = _output + ((long)q * outH * outW);
-                int vecEnd = outW - (outW % TV.Width);
-                Rows<TV>(src, wp, w, in s, dst, outH, outW, 0, vecEnd);
-                Rows<TS>(src, wp, w, in s, dst, outH, outW, vecEnd, outW);
-                if (_canonicalNaN)
-                {
-                    uint* bits = (uint*)dst;
-                    for (int i = 0; i < outH * outW; i++)
-                    {
-                        if ((bits[i] & 0x7FFFFFFFu) > 0x7F800000u)
-                        {
-                            bits[i] = 0x7FC00000u;
-                        }
-                    }
-                }
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-        private static void Rows<T>(float* src, int wp, float* w, in ConvShape s, float* dst, int outH, int outW, int ox0, int ox1)
-            where T : struct, ILanes<T>
-        {
-            int width = T.Width;
-            nint strideW = s.StrideW;
-            for (int oy = 0; oy < outH; oy++)
-            {
-                float* rowBase = src + ((long)oy * s.StrideH * wp);
-                float* outRow = dst + ((long)oy * outW);
-                for (int ox = ox0; ox + width <= ox1; ox += width)
-                {
-                    T acc = T.Zero;
-                    float* tap = w;
-                    for (int ky = 0; ky < s.KH; ky++)
-                    {
-                        float* line = rowBase + ((long)ky * s.DilH * wp) + ((long)ox * s.StrideW);
-                        for (int kx = 0; kx < s.KW; kx++)
-                        {
-                            float* p = line + ((long)kx * s.DilW);
-                            T v = s.StrideW == 1 ? T.Load(p) : T.Gather(p, strideW);
-                            acc = T.MulAdd(T.Broadcast(*tap), v, acc);
-                            tap++;
-                        }
-                    }
-
-                    acc.Store(outRow + ox);
                 }
             }
         }

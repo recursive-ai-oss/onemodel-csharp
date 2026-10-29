@@ -122,7 +122,7 @@ internal static unsafe class Gemm
         packJob.NStrips = nStrips;
         packJob.Groups = stripGroups;
         packJob.Dst = packedB;
-        ParallelFor.Run(packJob, kBlocks * stripGroups, threads);
+        ParallelFor.Run(packJob, kBlocks * stripGroups, threads, ((long)k * n) / 2);
 
         // Phase 2: compute tiles of C.
         int tilesM = (m + blk.Mc - 1) / blk.Mc;
@@ -142,7 +142,8 @@ internal static unsafe class Gemm
         job.Ldc = ldc;
         job.TilesN = tilesN;
         job.Micro = SelectMicro(mode, path);
-        ParallelFor.Run(job, tilesM * tilesN, threads);
+        // About 16 multiply-adds per nanosecond per thread: a guess that only decides how many threads are worth waking.
+        ParallelFor.Run(job, tilesM * tilesN, threads, (long)m * n * k / 16);
     }
 
     /// <summary>The register tile and cache blocks of a path.</summary>
