@@ -5,6 +5,24 @@ namespace RecursiveAI.OneModel.Tests.Tensors;
 
 public class PoolTests
 {
+    /// <summary>
+    /// Managed bytes allocated on this thread by one run of <paramref name="loop"/>, the smallest of up to three runs.
+    /// The runtime may allocate on the calling thread while it recompiles a hot method (tiered compilation); that is
+    /// not the code under test, and a steady state that allocates nothing shows a zero run.
+    /// </summary>
+    private static long SteadyStateBytes(Action loop)
+    {
+        long best = long.MaxValue;
+        for (int attempt = 0; attempt < 3 && best != 0; attempt++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            loop();
+            best = Math.Min(best, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+
+        return best;
+    }
+
     [Fact]
     public void ClassSizesAreAlignedBoundedAndMonotonic()
     {
@@ -55,16 +73,16 @@ public class PoolTests
             Tensor.Create(DType.F32, s, pool).Dispose();
         }
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++)
+        Assert.Equal(0, SteadyStateBytes(() =>
         {
-            Tensor t = Tensor.Create(DType.F32, s, pool);
-            Tensor v = t.Permute(1, 0).Slice(0, 0, 32, 2);
-            t.MutableData<float>()[0] = v.Shape[0];
-            t.Dispose();
-        }
-
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            for (int i = 0; i < 1000; i++)
+            {
+                Tensor t = Tensor.Create(DType.F32, s, pool);
+                Tensor v = t.Permute(1, 0).Slice(0, 0, 32, 2);
+                t.MutableData<float>()[0] = v.Shape[0];
+                t.Dispose();
+            }
+        }));
     }
 
     [Fact]
@@ -79,13 +97,13 @@ public class PoolTests
             Run();
         }
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 200; i++)
+        Assert.Equal(0, SteadyStateBytes(() =>
         {
-            Run();
-        }
-
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            for (int i = 0; i < 200; i++)
+            {
+                Run();
+            }
+        }));
 
         void Run()
         {
@@ -126,16 +144,16 @@ public class PoolTests
 
         Assert.Throws<StaleTensorException>(() => stale.Data<float>());
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++)
+        Assert.Equal(0, SteadyStateBytes(() =>
         {
-            arena.Reset();
-            Tensor.Create(DType.F32, Shape.Create(100), arena);
-            Tensor.Create(DType.I64, Shape.Create(33), arena, zero: true);
-            Tensor.Create(DType.F32, Shape.Create(5000), arena);
-        }
-
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            for (int i = 0; i < 100; i++)
+            {
+                arena.Reset();
+                Tensor.Create(DType.F32, Shape.Create(100), arena);
+                Tensor.Create(DType.I64, Shape.Create(33), arena, zero: true);
+                Tensor.Create(DType.F32, Shape.Create(5000), arena);
+            }
+        }));
     }
 
     [Fact]

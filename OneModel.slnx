@@ -14,7 +14,11 @@
     <Project Path="tests/OnnxSweep/OnnxSweep.csproj" />
   </Folder>
   <Folder Name="/bench/">
+    <Project Path="bench/Bar/Bar.csproj" />
     <Project Path="bench/Micro/Micro.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/GoldenDemo/GoldenDemo.csproj" />
   </Folder>
   <Folder Name="/fuzz/">
     <Project Path="fuzz/OneModel.Fuzz/OneModel.Fuzz.csproj" />
