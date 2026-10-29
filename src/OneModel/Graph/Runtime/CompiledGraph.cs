@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using RecursiveAI.OneModel.Kernels;
 using RecursiveAI.OneModel.Tensors;
 
 namespace RecursiveAI.OneModel.Graph.Runtime;
@@ -27,7 +28,7 @@ internal sealed class CompiledNode
 
 /// <summary>
 /// A graph with its operators resolved and its weights loaded: everything about a model that does not depend on input shapes.
-/// Immutable after <see cref="Create"/>; an <see cref="ExecutionPlan"/> adds the shape-dependent part.
+/// Immutable after the <c>Create</c> factory; an <see cref="ExecutionPlan"/> adds the shape-dependent part.
 /// </summary>
 internal sealed class CompiledGraph : IDisposable
 {
@@ -62,12 +63,16 @@ internal sealed class CompiledGraph : IDisposable
     /// Resolves operators, checks the mode, and loads initializers.
     /// </summary>
     /// <exception cref="SessionException">An operator is missing, or exact mode lacks a kernel, or the model is malformed.</exception>
-    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ExecutionMode mode, CancellationToken ct)
+    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ExecutionMode mode, CancellationToken ct) =>
+        Create(graph, registry, mode, WeightStorage.Original, ct);
+
+    /// <summary>As above, also storing large float32 weights as <paramref name="storage"/> says.</summary>
+    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ExecutionMode mode, WeightStorage storage, CancellationToken ct)
     {
         var g = new CompiledGraph();
         try
         {
-            g.Build(graph, registry, mode, ct);
+            g.Build(graph, registry, mode, storage, ct);
             return g;
         }
         catch
@@ -79,7 +84,7 @@ internal sealed class CompiledGraph : IDisposable
 
     private readonly List<OpKernel> _kernels = [];
 
-    private void Build(IrGraph graph, OpRegistry registry, ExecutionMode mode, CancellationToken ct)
+    private void Build(IrGraph graph, OpRegistry registry, ExecutionMode mode, WeightStorage storage, CancellationToken ct)
     {
         var ids = new Dictionary<IrValue, int>(ReferenceEqualityComparer.Instance);
         ValueNames = new string[graph.Values.Length];
@@ -252,6 +257,106 @@ internal sealed class CompiledGraph : IDisposable
                 Constants[id] = init.ToTensor();
             }
         }
+
+        UseHalfPrecision(graph, storage, ct);
+    }
+
+    // Half-precision support: weights that the session was asked to keep compact are rounded now, and when the model has half-precision
+    // values anywhere (or weights were compacted) every kernel that can be is wrapped in the adapter that widens its half-precision inputs.
+    private void UseHalfPrecision(IrGraph graph, WeightStorage storage, CancellationToken ct)
+    {
+        var keep = new bool[Nodes.Length][];
+        bool anyCompact = false;
+        if (storage != WeightStorage.Original)
+        {
+            DType target = storage == WeightStorage.Binary16 ? DType.F16 : DType.BF16;
+            var outputs = new HashSet<int>(OutputIds);
+            for (int id = 0; id < ValueCount; id++)
+            {
+                ct.ThrowIfCancellationRequested();
+                Tensor w = Constants[id];
+                if (w.IsEmpty || w.DType != DType.F32 || w.Shape.Length < CompactMinElements || outputs.Contains(id))
+                {
+                    continue;
+                }
+
+                // Only when every reader is a matrix product or convolution reading it as its weight (input 1).
+                bool ok = true;
+                bool read = false;
+                foreach (CompiledNode n in Nodes)
+                {
+                    for (int i = 0; i < n.Inputs.Length; i++)
+                    {
+                        if (n.Inputs[i] == id)
+                        {
+                            read = true;
+                            ok &= i == 1 && n.Info.OpType is "MatMul" or "Gemm" or "Conv" && n.Info.Ir.IsDefaultDomain;
+                        }
+                    }
+                }
+
+                if (!ok || !read)
+                {
+                    continue;
+                }
+
+                Tensor compact = Tensor.Create(target, w.Shape);
+                HalfConvert.Narrow(w, compact);
+                w.Dispose();
+                Constants[id] = compact;
+                for (int ni = 0; ni < Nodes.Length; ni++)
+                {
+                    if (Nodes[ni].Inputs.Length > 1 && Nodes[ni].Inputs[1] == id)
+                    {
+                        (keep[ni] ??= new bool[Nodes[ni].Inputs.Length])[1] = true;
+                        anyCompact = true;
+                    }
+                }
+            }
+        }
+
+        if (!anyCompact && !HasHalfPrecision(graph))
+        {
+            return;
+        }
+
+        for (int ni = 0; ni < Nodes.Length; ni++)
+        {
+            CompiledNode n = Nodes[ni];
+            if (HalfAdapterKernel.CanWrap(n.Info.OpType, n.Kernel))
+            {
+                Nodes[ni] = new CompiledNode(n.Info, HalfAdapterKernel.Wrap(n.Info.OpType, n.Kernel, keep[ni] ?? []), n.Inputs, n.Outputs);
+            }
+        }
+    }
+
+    private const int CompactMinElements = 1024;
+
+    private static bool HasHalfPrecision(IrGraph graph)
+    {
+        static bool Half(int onnxType) => onnxType is (int)DType.F16 or (int)DType.BF16;
+        foreach (IrValue v in graph.Values)
+        {
+            if ((v.Type is { } t && Half(t.ElemType)) || (v.Initializer is { } init && Half((int)init.DataType)))
+            {
+                return true;
+            }
+        }
+
+        foreach (IrNode n in graph.Nodes)
+        {
+            if (n.OpType is "Cast" or "CastLike" && n.FindAttribute("to") is { Type: IrAttributeType.Whole } to && Half((int)to.Whole))
+            {
+                return true;
+            }
+
+            if (n.OpType == "Constant" && n.FindAttribute("value") is { Type: IrAttributeType.Tensor } v && Half((int)v.Tensor.DataType))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static int[] IdsOf(System.Collections.Immutable.ImmutableArray<IrValue?> values, Dictionary<IrValue, int> ids)
