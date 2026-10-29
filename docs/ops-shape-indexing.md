@@ -45,7 +45,7 @@ Starts, ends, axes and steps come from attributes (opset 1-9) or inputs (10+). P
 
 - A negative start or end adds n first. For a positive step both then clamp to [0, n]; for a negative step the start clamps to [0, n-1] and the end to [-1, n-1] (the end -1 means "through element 0"). The step is clamped to the int32 range first (a larger step selects at most one element anyway), so INT64_MAX steps work. Step 0 is an error. An axis of extent 0 gives an empty result.
 - Count = `ceil((end - start) / step)` for a positive step, `ceil((start - end) / -step)` for a negative one, at least 0.
-- **ONNX Runtime's reading of the end sentinels (black box).** With a negative step an end of exactly INT32_MAX or INT64_MAX means "to the beginning", the same as INT_MIN, not "clamped to n-1" (`x[INT64_MAX : INT32_MAX : -1]` of five elements gives all five, reversed; an end of 100 gives nothing). The spec's clamping alone would give an empty slice; models rely on the sentinel, so we follow ONNX Runtime. 400 random start/end/step combinations plus the probes agree.
+- **ONNX Runtime's reading of the end sentinels (black box).** With a negative step an end of exactly INT32_MAX or INT64_MAX means "to the beginning", the same as INT_MIN, not "clamped to n-1" (`x[INT64_MAX : INT32_MAX : -1]` of five elements gives all five, reversed; an end of 100 gives nothing). The spec's clamping alone would give an empty slice; models rely on the sentinel, so we follow ONNX Runtime. The 214 slice cases of the comparison suite, which include random start/end/step combinations with these sentinels, agree.
 - Axes may be negative (11+) and must not repeat. Unlisted axes are taken whole.
 
 ## 4. Pad
