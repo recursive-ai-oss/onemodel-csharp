@@ -113,12 +113,9 @@ internal sealed class ConvTransposeOp : OpKernel
             long total;
             if (_outputShape.Length > 0)
             {
-                total = natural - _outputShape[i];
-                if (total < 0)
-                {
-                    throw Fail(ctx, $"axis {i}: the output size {_outputShape[i]} is larger than the kernel can produce ({natural})");
-                }
-
+                // A requested size larger than the kernel reaches is allowed: the extra rows and columns are zero (the effect of
+                // output_padding), and no padding is removed.
+                total = Math.Max(0, natural - _outputShape[i]);
                 outDims[i] = (int)_outputShape[i];
                 padB[i] = Begin(total);
             }

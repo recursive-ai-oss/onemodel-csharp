@@ -37,7 +37,7 @@ For one spatial axis with input `n`, effective kernel `e = dilation * (kernel - 
   and also those where ONNX Runtime's size disagrees with the text (reported as a count when it runs).
 * ConvTranspose: `s * (n - 1) + output_padding + e - b - a`. With `output_shape`, the total padding is the difference to the natural
   size and is split with the extra element **before** the output (the operator text's "otherwise" branch, confirmed by ONNX Runtime's
-  values). With `SAME_*` the output is `n * s` when the kernel reaches that far, else as large as it gets (padding 0), as ONNX Runtime
+  values); a size larger than the kernel reaches is allowed and the surplus is zero (backend case `convtranspose_output_shape`). With `SAME_*` the output is `n * s` when the kernel reaches that far, else as large as it gets (padding 0), as ONNX Runtime
   does; `SAME_UPPER` puts the extra element after, `SAME_LOWER` before.
 
 ## Conv, ConvTranspose
@@ -90,7 +90,7 @@ result of a separable interpolation equals the multi-dimensional one up to round
 * output size per axis: `floor(in * scale)` for scales, `size` for sizes; `keep_aspect_ratio_policy` `not_larger` / `not_smaller`
   takes the smaller / larger of `size / in` over the listed axes as the scale and rounds `in * scale` half away from zero.
 * input coordinate `x` of output position `j` (scale `s`, `in`, `out`): `half_pixel` `(j + 0.5)/s - 0.5`; `pytorch_half_pixel` the same
-  unless `out == 1` (then 0); `align_corners` `j * (in - 1) / (out - 1)` (0 if `out == 1`); `asymmetric` `j / s`;
+  unless `out == 1` (then 0); `align_corners` `j * (in - 1) / (out - 1)` with the rounded-down output size (0 if `out == 1`). **Open:** the backend cases `downsample_scales_{linear,cubic}_align_corners` expect the unrounded size `in * s` in the divisor (scales 0.6 on 4 elements); ONNX Runtime 1.31.1 uses the output size, as here, and so do we, so those two cases fail by design; `asymmetric` `j / s`;
   `half_pixel_symmetric` `offset + (j + 0.5)/s - 0.5` with `offset = in/2 * (1 - out / (s * in))`; `tf_crop_and_resize` from `roi`.
   Opset 10 and Upsample are `asymmetric` with nearest mode `floor`.
 * nearest: `floor`, `ceil`, `round_prefer_floor` (`x - floor(x) > 0.5` rounds up), `round_prefer_ceil` (`>= 0.5` rounds up); the index
