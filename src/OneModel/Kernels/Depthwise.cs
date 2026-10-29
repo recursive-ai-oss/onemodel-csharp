@@ -138,9 +138,9 @@ internal static unsafe class Depthwise
                 }
             }
 
-            int q0 = chunk * _planesPerChunk;
-            int q1 = Math.Min(planes, q0 + _planesPerChunk);
-            for (int q = q0; q < q1; q++)
+            int firstPlane = chunk * _planesPerChunk;
+            int endPlane = Math.Min(planes, firstPlane + _planesPerChunk);
+            for (int q = firstPlane; q < endPlane; q++)
             {
                 int img = q / s.Cout;
                 int oc = q % s.Cout;

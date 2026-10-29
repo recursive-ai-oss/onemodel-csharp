@@ -3,6 +3,7 @@
 #
 #   run-bar.sh --what "minilm+resnet fp32 b1" --minutes 10 --out DIR \
 #              --rows "minilm_l6:fp32:1 resnet50:fp32:1" [--threads "1 all"] [--side ort|ours] [--mode fast|exact] [--reps 3] [--weights original|fp16|bf16]
+#              [--bar PREBUILT_Bar.dll] [--tag LABEL]    (--bar times an earlier build, e.g. of a baseline commit; --tag marks its row ids)
 #
 # * Builds Bar first (before taking the lock), then claims the lock atomically from inside this
 #   script, and removes it on exit. It refuses to start when the lock exists or the machine is busy.
@@ -15,11 +16,11 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tools="$here/../../tools"
 . "$tools/env.sh"
 
-what="bar"; minutes=15; out=""; rows=""; threads="1 all"; side="ort"; mode="fast"; reps=3; weights=original
+what="bar"; minutes=15; out=""; rows=""; threads="1 all"; side="ort"; mode="fast"; reps=3; weights=original; prebuilt=""; tag=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --what) what="$2";; --minutes) minutes="$2";; --out) out="$2";; --rows) rows="$2";;
-    --threads) threads="$2";; --side) side="$2";; --mode) mode="$2";; --reps) reps="$2";; --weights) weights="$2";;
+    --threads) threads="$2";; --side) side="$2";; --mode) mode="$2";; --reps) reps="$2";; --weights) weights="$2";; --bar) prebuilt="$2";; --tag) tag="$2";;
     *) echo "unknown option $1" >&2; exit 2;;
   esac
   shift 2
@@ -30,8 +31,10 @@ mkdir -p "$out"
 lock="${ONEMODEL_LOCK:-$HOME/WORKER-BENCH.lock}"
 if [ -e "$lock" ]; then echo "lock held: $(cat "$lock"); not starting" >&2; exit 75; fi
 
-dotnet build -c Release "$here/Bar.csproj" -o "$out/bin" -v q -clp:NoSummary
-bar="$out/bin/Bar.dll"
+if [ -n "$prebuilt" ]; then bar="$prebuilt"; else
+  dotnet build -c Release "$here/Bar.csproj" -o "$out/bin" -v q -clp:NoSummary
+  bar="$out/bin/Bar.dll"
+fi
 sdk="$(dotnet --version)"
 
 if [ "$(uname -s)" = Darwin ]; then
@@ -59,7 +62,7 @@ for spec in $rows; do
   IFS=: read -r name variant batch <<<"$spec"
   for t in $threads; do
     n="$t"; [ "$t" = all ] && n="$cores"
-    id="${name}_${variant}_b${batch}_t${t}_${side}"; [ "$side" = ours ] && id="${id}-${mode}"; [ "$weights" != original ] && id="${id}-w${weights}"
+    id="${name}_${variant}_b${batch}_t${t}_${side}${tag:+-$tag}"; [ "$side" = ours ] && id="${id}-${mode}"; [ "$weights" != original ] && id="${id}-w${weights}"
     time_out="$out/$id.time"; row="$out/$id.json"
     "${tm[@]}" "$time_out" dotnet "$bar" run --model "$model_file" --ref "$ref_dir" --model-name "$name" \
       --variant "$variant" --batch "$batch" --threads "$n" --side "$side" --mode "$mode" --weights "$weights" --reps "$reps" \
