@@ -12,7 +12,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
-- Matrix products, convolutions and the normalisation operators use no more threads than their work can use (about 60 microseconds of work per thread), so small shapes no longer run slower on many threads; the parallel-for allocates nothing per call.
+- Matrix products, convolutions and the normalisation operators use no more threads than their work can use (about 80 microseconds of work per thread), so small shapes no longer run slower on many threads; the parallel-for allocates nothing per call.
 
 ## [0.1.0-preview.1] - 2026-10-29
 

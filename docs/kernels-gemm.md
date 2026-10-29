@@ -44,8 +44,8 @@ which thread ran a chunk or on how many threads there were. `k` is never split a
 chunks run on the calling thread, with the same result.
 
 How many threads a call uses is a separate matter: the caller passes an estimate of the work (in nanoseconds on one thread), and the pool
-wakes at most one thread per 60 000 ns of it, so a small matrix product or convolution stays on the calling thread instead of paying
-for wake-ups. The estimates are about 16 multiply-adds per nanosecond for the matrix product tiles, half a nanosecond per element
+wakes at most one thread per 80 000 ns of it, so a small matrix product or convolution stays on the calling thread instead of paying
+for wake-ups. The estimates are about 40 multiply-adds per nanosecond for the matrix product tiles, half a nanosecond per element
 packed or copied, and a fixed rate per tap for depthwise. The number of threads only decides who runs a chunk, never what a chunk
 computes, so it cannot change a result.
 

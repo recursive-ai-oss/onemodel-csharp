@@ -142,8 +142,8 @@ internal static unsafe class Gemm
         job.Ldc = ldc;
         job.TilesN = tilesN;
         job.Micro = SelectMicro(mode, path);
-        // About 16 multiply-adds per nanosecond per thread: a guess that only decides how many threads are worth waking.
-        ParallelFor.Run(job, tilesM * tilesN, threads, (long)m * n * k / 16);
+        // About 40 multiply-adds per nanosecond per thread (a good core on 256-bit FMA): a guess that only decides how many threads are worth waking.
+        ParallelFor.Run(job, tilesM * tilesN, threads, (long)m * n * k / 40);
     }
 
     /// <summary>The register tile and cache blocks of a path.</summary>
