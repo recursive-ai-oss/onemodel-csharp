@@ -99,7 +99,7 @@ public partial class BackendNodeTests
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
     }
 
-    private static string RunCase(string dir, ExecutionMode mode, out long opset)
+    internal static string RunCase(string dir, ExecutionMode mode, out long opset)
     {
         using IrModel model = OnnxImporter.Load(Path.Combine(dir, "model.onnx"));
         opset = model.DefaultOpset;
@@ -176,6 +176,10 @@ public partial class BackendNodeTests
                 return Close(got.ToArray<float>(), want.ToArray<float>(), out why);
             case DType.F64:
                 return Close(got.ToArray<double>(), want.ToArray<double>(), out why);
+            case DType.F16:
+                return Close(got.ToArray<Half>().Select(v => (double)v).ToArray(), want.ToArray<Half>().Select(v => (double)v).ToArray(), out why);
+            case DType.BF16:
+                return Close(got.ToArray<BFloat16>().Select(v => (double)(float)v).ToArray(), want.ToArray<BFloat16>().Select(v => (double)(float)v).ToArray(), out why);
             case DType.I8: return Exactly(got.ToArray<sbyte>(), want.ToArray<sbyte>(), out why);
             case DType.U8: return Exactly(got.ToArray<byte>(), want.ToArray<byte>(), out why);
             case DType.I16: return Exactly(got.ToArray<short>(), want.ToArray<short>(), out why);
