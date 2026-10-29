@@ -643,7 +643,8 @@ internal sealed class ExecutionPlan : IDisposable
                     unshared += bytes;
                     int inPlace = o == 0 ? k.InPlaceInput : -1;
                     if (inPlace >= 0 && st.Node.Inputs[inPlace] is int pin and >= 0 && Kinds[pin] == ValueKind.Static &&
-                        blockOf[pin] is { Refs: 1 } pb && lastUse[pin] == i && pb.Size >= bytes && Types[pin] == Types[id])
+                        blockOf[pin] is { Refs: 1 } pb && lastUse[pin] == i && pb.Size >= bytes && Types[pin] == Types[id] &&
+                        Shapes[pin].Length == Shapes[id].Length)
                     {
                         blockOf[id] = pb;
                         pb.Refs++;
