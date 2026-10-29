@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Imports every model in a directory tree and writes a structural dump of each, so the importer can be checked against the
+       onnx Python package (tools/onnx_dump.py). Not shipped. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>$(PackagePrefix).$(LibName).OnnxSweep</RootNamespace>
+    <AssemblyName>$(PackagePrefix).$(LibName).OnnxSweep</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+  </ItemGroup>
+
+</Project>

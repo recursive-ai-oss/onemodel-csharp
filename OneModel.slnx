@@ -11,6 +11,7 @@
     <Project Path="tests/OneModel.Tests/OneModel.Tests.csproj" />
     <Project Path="tests/AotSmoke/AotSmoke.csproj" />
     <Project Path="tests/WasmSmoke/WasmSmoke.csproj" />
+    <Project Path="tests/OnnxSweep/OnnxSweep.csproj" />
   </Folder>
   <Folder Name="/bench/">
     <Project Path="bench/Micro/Micro.csproj" />

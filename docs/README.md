@@ -4,4 +4,4 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 
 | Topic | File |
 |---|---|
-| (none yet) | |
+| ONNX import: protobuf reading, tensors, graph resolution, external data, errors | [onnx-import.md](onnx-import.md) |
