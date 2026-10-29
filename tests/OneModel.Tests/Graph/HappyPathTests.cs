@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using RecursiveAI.OneModel;
+using RecursiveAI.OneModel.Graph;
+using RecursiveAI.OneModel.Tensors;
 using Xunit;
 
 namespace RecursiveAI.OneModel.Tests.Graph;
@@ -27,6 +29,50 @@ public class HappyPathTests
         long[] y = m.Run<long, long>(new long[] { 5, 6, 7 });
         Assert.Equal([6L, 7L, 8L], y);
         Assert.Equal([6L, 7L, 8L, 9L], m.Run<long, long>(new long[] { 5, 6, 7, 8 }, [2, 2]));
+    }
+
+    /// <summary>Steady-state session runs of a real encoder allocate nothing (ONEMODEL_MINILM, one thread).</summary>
+    [Fact]
+    public void MiniLmSteadyStateRunAllocatesNothing()
+    {
+        string? path = Environment.GetEnvironmentVariable("ONEMODEL_MINILM");
+        Assert.SkipUnless(!string.IsNullOrEmpty(path) && File.Exists(path), "ONEMODEL_MINILM not set");
+        using var s = Session.Load(path!, new SessionOptions { IntraOpThreads = 1 });
+        var shape = Shape.Create([1, 16]);
+        long[] ids = new long[16];
+        for (int i = 0; i < ids.Length; i++)
+        {
+            ids[i] = 100 + i;
+        }
+
+        long[] ones = new long[16];
+        Array.Fill(ones, 1L);
+        using var tIds = Tensor.FromSpan<long>(ids, shape);
+        using var tMask = Tensor.FromSpan<long>(ones, shape);
+        using var tSeg = Tensor.FromSpan<long>(new long[16], shape);
+        string[] names = ["input_ids", "attention_mask", "token_type_ids"];
+        Tensor[] ins = [tIds, tMask, tSeg];
+        string[] outNames = [s.Outputs[0].Name];
+        Tensor[] outs = new Tensor[1];
+        for (int i = 0; i < 5; i++)
+        {
+            s.Run(names, ins, outNames, outs);
+        }
+
+        long best = long.MaxValue;
+        for (int attempt = 0; attempt < 3 && best != 0; attempt++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 5; i++)
+            {
+                s.Run(names, ins, outNames, outs);
+            }
+
+            best = Math.Min(best, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+
+        outs[0].Dispose();
+        Assert.Equal(0, best);
     }
 
     /// <summary>The README's one-liner on a real encoder, when its file is supplied (ONEMODEL_MINILM=path to the fp32 export).</summary>
