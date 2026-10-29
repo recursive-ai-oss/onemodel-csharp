@@ -57,7 +57,7 @@ internal static class Program
             "usage: Bar run --model FILE --ref DIR --model-name N --variant V --batch B --threads T [--side ort|ours] [--mode fast|exact]\n" +
             "               [--reps 3] [--warmup 3] [--target-ms 1000] --row-out FILE [--sdk X] [--lock-label L]\n" +
             "       Bar emit --row FILE --rss-mb X [--csv FILE] [--md FILE]\n" +
-            "       Bar check --model FILE --ref DIR --threads T [--mode fast|exact] [--tol 1e-4]   (ours vs the stored ONNX Runtime outputs)");
+            "       Bar check --model FILE --ref DIR --threads T [--mode fast|exact] [--tol 1e-4] [--dump DIR]   (ours vs the stored ONNX Runtime outputs)");
         return 2;
     }
 
@@ -214,6 +214,12 @@ internal static class Program
                 }
 
                 NpyArray want = NpyArray.Load(files[k]);
+                if (got is not null && o.TryGetValue("dump", out string? dumpDir))
+                {
+                    Directory.CreateDirectory(dumpDir);
+                    File.WriteAllBytes(Path.Combine(dumpDir, name + ".f32"), System.Runtime.InteropServices.MemoryMarshal.AsBytes<float>(got).ToArray());
+                }
+
                 if (want.F32 is null || got is null || got.Length != want.F32.Length)
                 {
                     Console.WriteLine($"  {name}: FAIL missing or wrong size (want {want.F32?.Length}, got {got?.Length})");
