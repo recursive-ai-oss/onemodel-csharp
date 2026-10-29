@@ -1,0 +1,191 @@
+{
+  "_comment": "Sources, pins and hashes for the reference models. 'sha256' fields are filled by `export_models.py --record` / `quantize_models.py --record` and checked on every later run. Nothing here is a model file; models live under the cache directory and are never committed.",
+  "onnxOpset": 17,
+  "models": {
+    "resnet50": {
+      "task": "image classification",
+      "source": {
+        "kind": "torchvision",
+        "weightsUrl": "https://download.pytorch.org/models/resnet50-0676ba61.pth",
+        "weightsName": "ResNet50_Weights.IMAGENET1K_V1",
+        "weightsSha256": "0676ba61b6795bbe1773cffd859882e5e297624d384b6993f7c9e683e722fb8a",
+        "licence": "torchvision code: BSD-3-Clause. Weights: no separate licence stated in the torchvision model docs; terms review pending."
+      },
+      "batch": 8,
+      "files": {
+        "fp32": {
+          "path": "resnet50/resnet50.onnx",
+          "sha256": "052b5987ee1fab682ae9530283bb4ae38cb8bed1889e4d6d0fc25cec283a517a",
+          "bytes": 102146383
+        },
+        "int8_qdq": {
+          "quantization": "static",
+          "sha256": "8788be7fa81cdc1229170feae233d3a04f2950f16dfa7f752f0ac688fe856c5a",
+          "bytes": 26080934,
+          "path": "resnet50/resnet50_int8_qdq.onnx"
+        }
+      }
+    },
+    "mobilenet_v3_large": {
+      "task": "image classification",
+      "source": {
+        "kind": "torchvision",
+        "weightsUrl": "https://download.pytorch.org/models/mobilenet_v3_large-8738ca79.pth",
+        "weightsName": "MobileNet_V3_Large_Weights.IMAGENET1K_V1",
+        "weightsSha256": "8738ca797c879b547d18bbd15da5736ff2557b2036a9af72225393ca61759a04",
+        "licence": "torchvision code: BSD-3-Clause. Weights: no separate licence stated in the torchvision model docs; terms review pending."
+      },
+      "batch": 8,
+      "files": {
+        "fp32": {
+          "path": "mobilenet_v3_large/mobilenet_v3_large.onnx",
+          "sha256": "371d93ee9876d6de247cf85191fd33212bed8bcd8fb06e7787715067fac593bf",
+          "bytes": 21922145
+        },
+        "int8_qdq": {
+          "quantization": "static",
+          "sha256": "73e0e41eaeee9eff4df91eefa154e4ae3dbf806239bf379c953c30ebd4fbb623",
+          "bytes": 5985408,
+          "path": "mobilenet_v3_large/mobilenet_v3_large_int8_qdq.onnx"
+        }
+      }
+    },
+    "bert_base": {
+      "task": "encoder",
+      "source": {
+        "kind": "huggingface",
+        "repo": "google-bert/bert-base-uncased",
+        "revision": "86b5e0934494bd15c9632b12f734a8a67f723594",
+        "weightsFile": "model.safetensors",
+        "weightsSha256": "68d45e234eb4a928074dfd868cead0219ab85354cc53d20e772753c6bb9169d3",
+        "licence": "apache-2.0 (model card metadata and LICENSE file in the repository)"
+      },
+      "batch": 32,
+      "seqLen": 128,
+      "files": {
+        "fp32": {
+          "path": "bert_base/bert_base.onnx",
+          "sha256": "bd9427a2f006b9ec0e0c74fe3c93530041a5fffea20d17117e7de45eff994030",
+          "bytes": 435751065
+        },
+        "int8_dyn": {
+          "quantization": "dynamic",
+          "sha256": "4512ba851fd8dbe940870bf534c5145234f87692bd6adc1341935fa219e911a5",
+          "bytes": 110020822,
+          "path": "bert_base/bert_base_int8_dyn.onnx"
+        }
+      }
+    },
+    "minilm_l6": {
+      "task": "encoder",
+      "source": {
+        "kind": "huggingface",
+        "repo": "sentence-transformers/all-MiniLM-L6-v2",
+        "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+        "weightsFile": "model.safetensors",
+        "weightsSha256": "53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db",
+        "licence": "apache-2.0 (model card metadata)"
+      },
+      "batch": 32,
+      "seqLen": 128,
+      "files": {
+        "fp32": {
+          "path": "minilm_l6/minilm_l6.onnx",
+          "sha256": "446f5654b45fadf0321400f5e8ca105fe73c9bfab365d30fe4287b7ec5c98234",
+          "bytes": 90359539
+        },
+        "int8_dyn": {
+          "quantization": "dynamic",
+          "sha256": "c0ae56495a1352a51de579c979c3b34bc17ef1b52ab02e8893ab6f2585e9c703",
+          "bytes": 22944316,
+          "path": "minilm_l6/minilm_l6_int8_dyn.onnx"
+        }
+      }
+    },
+    "whisper_small": {
+      "task": "encoder-decoder (speech)",
+      "source": {
+        "kind": "huggingface",
+        "repo": "openai/whisper-small",
+        "revision": "973afd24965f72e36ca33b3055d56a652f456b4d",
+        "weightsFile": "model.safetensors",
+        "weightsSha256": "1d7734884874f1a1513ed9aa760a4f8e97aaa02fd6d93a3a85d27b2ae9ca596b",
+        "licence": "apache-2.0 (model card metadata)"
+      },
+      "batch": 1,
+      "decoderLen": 16,
+      "files": {
+        "encoder_fp32": {
+          "path": "whisper_small/whisper_small_encoder.onnx",
+          "sha256": "f0844455901839b4b0cce41345de7d9cc5e6d70e5713cb31693a06ca5f24df33",
+          "bytes": 352749760
+        },
+        "decoder_fp32": {
+          "path": "whisper_small/whisper_small_decoder.onnx",
+          "sha256": "6ef07631aac6a7a1135f0c363de3765a887c7783edb3dfa861778e517a43c0e6",
+          "bytes": 773903440
+        },
+        "encoder_int8_dyn": {
+          "quantization": "dynamic",
+          "sha256": "06a635c24a6294baa129328532df6f0173e087d242ae39388fe86890bcfab0db",
+          "bytes": 92635730,
+          "path": "whisper_small/whisper_small_encoder_int8_dyn.onnx"
+        },
+        "decoder_int8_dyn": {
+          "quantization": "dynamic",
+          "sha256": "fef5337c26f3f5f327b1aa3d377915d97d096d80cd58db367d013bcccfdbd1a9",
+          "bytes": 195237331,
+          "path": "whisper_small/whisper_small_decoder_int8_dyn.onnx"
+        }
+      }
+    },
+    "dbnet": {
+      "task": "text detection",
+      "source": {
+        "kind": "external",
+        "note": "supplied later; add the file under models/dbnet/ and record it"
+      },
+      "files": {}
+    },
+    "crnn": {
+      "task": "text recognition",
+      "source": {
+        "kind": "external",
+        "note": "supplied later; add the file under models/crnn/ and record it"
+      },
+      "files": {}
+    }
+  },
+  "backendTest": {
+    "onnxVersion": "1.22.0",
+    "note": "Frozen test data from the last ONNX release that still ships onnx/backend/test/data/node. Releases from 1.23 generate node cases in memory at run time (expected outputs then come from the installed package), so no frozen node data exists for them; cases added after 1.22.0 are not covered here.",
+    "archiveUrl": "https://files.pythonhosted.org/packages/04/19/8ea73a64b368b75fe339771a20a02bc61ea1f551484c9e3d9d0bfbd0450f/onnx-1.22.0.tar.gz",
+    "archiveSha256": "ef40c0aaf0b643857ea9306fc7eddce17eaf9fb0407e4801f1fc5758443a38e0",
+    "counts": {
+      "light": {
+        "cases": 9,
+        "withModel": 9
+      },
+      "node": {
+        "cases": 1765,
+        "withModel": 1765
+      },
+      "pytorch-converted": {
+        "cases": 82,
+        "withModel": 82
+      },
+      "pytorch-operator": {
+        "cases": 35,
+        "withModel": 35
+      },
+      "real": {
+        "cases": 9,
+        "withModel": 0
+      },
+      "simple": {
+        "cases": 23,
+        "withModel": 23
+      }
+    }
+  }
+}
