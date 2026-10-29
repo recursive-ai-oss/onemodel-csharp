@@ -27,6 +27,11 @@ os.makedirs(os.path.join(a.out, "ref", "outputs"), exist_ok=True)
 m0 = onnx.load(a.model)
 inputs = [i.name for i in m0.graph.input if i.name not in {x.name for x in m0.graph.initializer}]
 target = a.tensor
+if target.startswith("@"):
+    # @N: the quantized output of the Nth (from 0) Conv, Gemm or MatMul node in the graph's order
+    heavy = [n for n in m0.graph.node if n.op_type in ("Conv", "Gemm", "MatMul")]
+    q = next(n for n in m0.graph.node if n.op_type == "QuantizeLinear" and n.input[0] == heavy[int(target[1:])].output[0])
+    a.tensor = target = q.output[0]
 if a.dq:
     # the DequantizeLinear that reads this tensor
     dq = next(n for n in m0.graph.node if n.op_type == "DequantizeLinear" and n.input[0] == a.tensor)
