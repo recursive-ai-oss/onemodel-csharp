@@ -237,6 +237,7 @@ internal sealed class CompiledGraph : IDisposable
             used.Add(id);
         }
 
+        var compact = new bool[Nodes.Length][];
         foreach (int id in used)
         {
             ct.ThrowIfCancellationRequested();
@@ -254,73 +255,68 @@ internal sealed class CompiledGraph : IDisposable
                         $"Initializer '{v.Name}' has element type {DTypes.OnnxName(init.DataType)}, which this library cannot store.");
                 }
 
-                Constants[id] = init.ToTensor();
+                Constants[id] = CompactWeight(id, init, storage, compact) ?? init.ToTensor();
             }
         }
 
-        UseHalfPrecision(graph, storage, ct);
+        UseHalfPrecision(graph, compact);
     }
 
-    // Half-precision support: weights that the session was asked to keep compact are rounded now, and when the model has half-precision
-    // values anywhere (or weights were compacted) every kernel that can be is wrapped in the adapter that widens its half-precision inputs.
-    private void UseHalfPrecision(IrGraph graph, WeightStorage storage, CancellationToken ct)
+    // A float32 weight that the session was asked to keep compact is rounded straight from the model's bytes, so the binary32 copy never
+    // exists. Returns null when the weight does not qualify: it must be float32 with enough values, read by nothing but MatMul, Gemm or
+    // Conv as their weight (input 1), not be a graph output, and survive the rounding as finite values.
+    private Tensor? CompactWeight(int id, TensorData init, WeightStorage storage, bool[][] compact)
     {
-        var keep = new bool[Nodes.Length][];
-        bool anyCompact = false;
-        if (storage != WeightStorage.Original)
+        if (storage == WeightStorage.Original || init.DataType != (int)DType.F32 || init.ElementCount < CompactMinElements ||
+            init.RawData.Length != init.ElementCount * 4 || Array.IndexOf(OutputIds, id) >= 0)
         {
-            DType target = storage == WeightStorage.Binary16 ? DType.F16 : DType.BF16;
-            var outputs = new HashSet<int>(OutputIds);
-            for (int id = 0; id < ValueCount; id++)
+            return null;
+        }
+
+        bool read = false;
+        foreach (CompiledNode n in Nodes)
+        {
+            for (int i = 0; i < n.Inputs.Length; i++)
             {
-                ct.ThrowIfCancellationRequested();
-                Tensor w = Constants[id];
-                if (w.IsEmpty || w.DType != DType.F32 || w.Shape.Length < CompactMinElements || outputs.Contains(id))
+                if (n.Inputs[i] == id)
                 {
-                    continue;
-                }
-
-                // Only when every reader is a matrix product or convolution reading it as its weight (input 1).
-                bool ok = true;
-                bool read = false;
-                foreach (CompiledNode n in Nodes)
-                {
-                    for (int i = 0; i < n.Inputs.Length; i++)
+                    read = true;
+                    if (i != 1 || n.Info.OpType is not ("MatMul" or "Gemm" or "Conv") || !n.Info.Ir.IsDefaultDomain)
                     {
-                        if (n.Inputs[i] == id)
-                        {
-                            read = true;
-                            ok &= i == 1 && n.Info.OpType is "MatMul" or "Gemm" or "Conv" && n.Info.Ir.IsDefaultDomain;
-                        }
-                    }
-                }
-
-                if (!ok || !read)
-                {
-                    continue;
-                }
-
-                // A weight that float16 cannot hold stays as it is.
-                if (target == DType.F16 && !FitsBinary16(w.Data<float>()))
-                {
-                    continue;
-                }
-
-                Tensor compact = Tensor.Create(target, w.Shape);
-                HalfConvert.Narrow(w, compact);
-                w.Dispose();
-                Constants[id] = compact;
-                for (int ni = 0; ni < Nodes.Length; ni++)
-                {
-                    if (Nodes[ni].Inputs.Length > 1 && Nodes[ni].Inputs[1] == id)
-                    {
-                        (keep[ni] ??= new bool[Nodes[ni].Inputs.Length])[1] = true;
-                        anyCompact = true;
+                        return null;
                     }
                 }
             }
         }
 
+        if (!read)
+        {
+            return null;
+        }
+
+        Tensor t = Tensor.Create(storage == WeightStorage.Binary16 ? DType.F16 : DType.BF16, Shape.Create(init.Dims.AsSpan()));
+        if (!HalfConvert.NarrowBytes(init.RawData, t))
+        {
+            t.Dispose();
+            return null;
+        }
+
+        for (int ni = 0; ni < Nodes.Length; ni++)
+        {
+            if (Nodes[ni].Inputs.Length > 1 && Nodes[ni].Inputs[1] == id)
+            {
+                (compact[ni] ??= new bool[Nodes[ni].Inputs.Length])[1] = true;
+            }
+        }
+
+        return t;
+    }
+
+    // Half-precision support: when the model has half-precision values anywhere, or weights were kept compact, every kernel that can be is
+    // wrapped in the adapter that widens its half-precision inputs.
+    private void UseHalfPrecision(IrGraph graph, bool[][] compact)
+    {
+        bool anyCompact = Array.Exists(compact, c => c is not null);
         if (!anyCompact && !HasHalfPrecision(graph))
         {
             return;
@@ -331,25 +327,12 @@ internal sealed class CompiledGraph : IDisposable
             CompiledNode n = Nodes[ni];
             if (HalfAdapterKernel.CanWrap(n.Info.OpType, n.Kernel))
             {
-                Nodes[ni] = new CompiledNode(n.Info, HalfAdapterKernel.Wrap(n.Info.OpType, n.Kernel, keep[ni] ?? []), n.Inputs, n.Outputs);
+                Nodes[ni] = new CompiledNode(n.Info, HalfAdapterKernel.Wrap(n.Info.OpType, n.Kernel, compact[ni] ?? []), n.Inputs, n.Outputs);
             }
         }
     }
 
     private const int CompactMinElements = 1024;
-
-    private static bool FitsBinary16(ReadOnlySpan<float> values)
-    {
-        foreach (float v in values)
-        {
-            if (!(MathF.Abs(v) < 65504f))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
 
     private static bool HasHalfPrecision(IrGraph graph)
     {

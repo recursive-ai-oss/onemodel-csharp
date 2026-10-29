@@ -28,6 +28,9 @@ internal sealed class HalfAdapterKernel : OpKernel
     [ThreadStatic]
     private static Tensor[]? t_outputs;
 
+    [ThreadStatic]
+    private static Tensor[]? t_temps;
+
     private HalfAdapterKernel(OpKernel inner, string opType, bool[] keepCompact)
     {
         _inner = inner;
@@ -184,37 +187,60 @@ internal sealed class HalfAdapterKernel : OpKernel
         int nOut = run.Outputs.Length;
         Tensor[] ins = t_inputs is { } a && a.Length >= nIn ? a : (t_inputs = new Tensor[Math.Max(nIn, 16)]);
         Tensor[] outs = t_outputs is { } b && b.Length >= nOut ? b : (t_outputs = new Tensor[Math.Max(nOut, 8)]);
-        for (int i = 0; i < nIn; i++)
+        Tensor[] temps = t_temps is { } c && c.Length >= nIn + nOut ? c : (t_temps = new Tensor[Math.Max(nIn + nOut, 24)]);
+        int nTemps = 0;
+        try
         {
-            Tensor t = inputs[i];
-            if (!t.IsEmpty && IsHalf(t.DType))
+            // Temporary binary32 copies come from the buffer pool and go back to it as soon as this node is done, so a model's
+            // half-precision values never exist as binary32 all at once.
+            for (int i = 0; i < nIn; i++)
             {
-                Tensor w = state is not null && i < state.Widened.Length ? state.Widened[i] : default;
-                if (w.IsEmpty)
+                Tensor t = inputs[i];
+                if (!t.IsEmpty && IsHalf(t.DType))
                 {
-                    w = run.Scratch(DType.F32, t.Shape);
-                    HalfConvert.Widen(t, w);
+                    Tensor w = state is not null && i < state.Widened.Length ? state.Widened[i] : default;
+                    if (w.IsEmpty)
+                    {
+                        w = Tensor.Create(DType.F32, t.Shape);
+                        temps[nTemps++] = w;
+                        HalfConvert.Widen(t, w);
+                    }
+
+                    t = w;
                 }
 
-                t = w;
+                ins[i] = t;
             }
 
-            ins[i] = t;
-        }
-
-        for (int o = 0; o < nOut; o++)
-        {
-            Tensor t = run.Outputs[o];
-            outs[o] = !t.IsEmpty && IsHalf(t.DType) ? run.Scratch(DType.F32, t.Shape) : t;
-        }
-
-        _inner.Run(run.With(ins.AsSpan(0, nIn), outs.AsSpan(0, nOut), state?.Inner));
-        for (int o = 0; o < nOut; o++)
-        {
-            Tensor t = run.Outputs[o];
-            if (!t.IsEmpty && IsHalf(t.DType))
+            for (int o = 0; o < nOut; o++)
             {
-                HalfConvert.Narrow(outs[o], t);
+                Tensor t = run.Outputs[o];
+                if (!t.IsEmpty && IsHalf(t.DType))
+                {
+                    Tensor w = Tensor.Create(DType.F32, t.Shape);
+                    temps[nTemps++] = w;
+                    t = w;
+                }
+
+                outs[o] = t;
+            }
+
+            _inner.Run(run.With(ins.AsSpan(0, nIn), outs.AsSpan(0, nOut), state?.Inner));
+            for (int o = 0; o < nOut; o++)
+            {
+                Tensor t = run.Outputs[o];
+                if (!t.IsEmpty && IsHalf(t.DType))
+                {
+                    HalfConvert.Narrow(outs[o], t);
+                }
+            }
+        }
+        finally
+        {
+            for (int i = 0; i < nTemps; i++)
+            {
+                temps[i].Dispose();
+                temps[i] = default;
             }
         }
     }

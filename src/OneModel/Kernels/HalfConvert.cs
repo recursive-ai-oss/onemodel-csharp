@@ -217,6 +217,46 @@ internal static unsafe class HalfConvert
         }
     }
 
+    /// <summary>
+    /// Rounds little-endian binary32 values in <paramref name="source"/> (a model file's bytes, so possibly unaligned) into the binary16 or
+    /// bfloat16 tensor <paramref name="destination"/>. Returns false, leaving the destination undefined, when a value is not finite after
+    /// rounding (a binary16 overflow, an infinity or a NaN).
+    /// </summary>
+    /// <exception cref="ArgumentException">The byte count is not four times the element count of <paramref name="destination"/>.</exception>
+    public static bool NarrowBytes(ReadOnlySpan<byte> source, Tensor destination)
+    {
+        Span<ushort> d = destination.RawMutableData<ushort>();
+        if (!BitConverter.IsLittleEndian || source.Length != d.Length * 4L)
+        {
+            throw new ArgumentException("The source is not little-endian binary32 data of the destination's length.", nameof(source));
+        }
+
+        fixed (byte* ps = source)
+        fixed (ushort* pd = d)
+        {
+            if (destination.DType == DType.F16)
+            {
+                SingleToHalf((float*)ps, pd, d.Length);
+            }
+            else
+            {
+                SingleToBFloat((float*)ps, pd, d.Length);
+            }
+
+            // An exponent field of all ones is infinity or NaN (binary16: 0x7C00, bfloat16: 0x7F80).
+            ushort mask = destination.DType == DType.F16 ? (ushort)0x7C00 : (ushort)0x7F80;
+            for (int i = 0; i < d.Length; i++)
+            {
+                if ((pd[i] & mask) == mask)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>Widens a binary16 or bfloat16 tensor into a binary32 tensor of the same shape.</summary>
     public static void Widen(Tensor src, Tensor dst)
     {
