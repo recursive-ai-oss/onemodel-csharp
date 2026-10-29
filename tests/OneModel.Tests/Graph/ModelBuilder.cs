@@ -53,7 +53,14 @@ internal sealed class ModelBuilder
         return this;
     }
 
-    /// <summary>Adds a node. Attributes are (name, value) pairs where value is long, float, long[] or a tensor message from <see cref="TensorValue"/>.</summary>
+    /// <summary>Adds an initializer of any element type from its little-endian bytes.</summary>
+    public ModelBuilder RawInitializer(string name, int elemType, long[] dims, byte[] raw)
+    {
+        _inits.Add(Tensor(name, elemType, dims, raw));
+        return this;
+    }
+
+    /// <summary>Adds a node. Attributes are (name, value) pairs where value is long, float, string, long[] or a tensor message from <see cref="TensorValue"/>.</summary>
     public ModelBuilder Node(string opType, string[] inputs, string[] outputs, params (string Name, object Value)[] attributes)
     {
         var w = new Msg();
@@ -86,6 +93,10 @@ internal sealed class ModelBuilder
                 case float f:
                     a.Fixed32(2, BitConverter.SingleToUInt32Bits(f));
                     a.Varint(20, 1);
+                    break;
+                case string str:
+                    a.Bytes(4, Encoding.UTF8.GetBytes(str));
+                    a.Varint(20, 3);
                     break;
                 case long[] ls:
                     foreach (long l in ls)

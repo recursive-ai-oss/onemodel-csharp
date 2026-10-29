@@ -26,7 +26,19 @@ internal static class Broadcast
     public static void Binary<T, TRow>(KernelPath path, bool canonicalNaN, Shape outShape, Shape aShape, Shape bShape,
         ReadOnlySpan<T> a, ReadOnlySpan<T> b, Span<T> c)
         where T : unmanaged, INumber<T>
-        where TRow : IRowKernel<T>
+        where TRow : IRowKernel<T> =>
+        Binary<T, T, T, SameTypeRow<T, TRow>>(path, canonicalNaN, outShape, aShape, bShape, a, b, c);
+
+    /// <summary>
+    /// The same traversal for operands and result of different element types (comparisons produce bool, Pow mixes base and exponent
+    /// types). <typeparamref name="TRow"/> computes one row.
+    /// </summary>
+    public static void Binary<TA, TB, TC, TRow>(KernelPath path, bool canonicalNaN, Shape outShape, Shape aShape, Shape bShape,
+        ReadOnlySpan<TA> a, ReadOnlySpan<TB> b, Span<TC> c)
+        where TA : unmanaged
+        where TB : unmanaged
+        where TC : unmanaged
+        where TRow : IRowKernel<TA, TB, TC>
     {
         int total = outShape.Length;
         if (total == 0)
@@ -112,6 +124,19 @@ internal static class Broadcast
             }
         }
     }
+}
+
+/// <summary>Computes one row of a broadcast operation on operands and result of any element types.</summary>
+internal interface IRowKernel<TA, TB, TC> where TA : unmanaged where TB : unmanaged where TC : unmanaged
+{
+    static abstract void Row(KernelPath path, bool canonicalNaN, ReadOnlySpan<TA> a, int sa, ReadOnlySpan<TB> b, int sb, Span<TC> c, int n);
+}
+
+/// <summary>Adapts a one-type row kernel to the three-type traversal.</summary>
+internal readonly struct SameTypeRow<T, TRow> : IRowKernel<T, T, T> where T : unmanaged where TRow : IRowKernel<T>
+{
+    public static void Row(KernelPath path, bool canonicalNaN, ReadOnlySpan<T> a, int sa, ReadOnlySpan<T> b, int sb, Span<T> c, int n) =>
+        TRow.Row(path, canonicalNaN, a, sa, b, sb, c, n);
 }
 
 /// <summary>Computes one row of a broadcast operation: n elements, each operand stepping by 0 or 1.</summary>
