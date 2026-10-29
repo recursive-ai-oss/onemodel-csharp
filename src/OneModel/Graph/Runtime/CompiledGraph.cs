@@ -300,6 +300,12 @@ internal sealed class CompiledGraph : IDisposable
                     continue;
                 }
 
+                // A weight that float16 cannot hold stays as it is.
+                if (target == DType.F16 && !FitsBinary16(w.Data<float>()))
+                {
+                    continue;
+                }
+
                 Tensor compact = Tensor.Create(target, w.Shape);
                 HalfConvert.Narrow(w, compact);
                 w.Dispose();
@@ -331,6 +337,19 @@ internal sealed class CompiledGraph : IDisposable
     }
 
     private const int CompactMinElements = 1024;
+
+    private static bool FitsBinary16(ReadOnlySpan<float> values)
+    {
+        foreach (float v in values)
+        {
+            if (!(MathF.Abs(v) < 65504f))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static bool HasHalfPrecision(IrGraph graph)
     {

@@ -11,6 +11,8 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 | exp, log, tanh, erf, sigmoid, GELU: polynomials and error | [exact-transcendentals.md](exact-transcendentals.md) |
 | Reference oracles, pinned versions, comparison metrics | [oracles.md](oracles.md) |
 | Benchmark method | [bench-method.md](bench-method.md) |
+| Depthwise convolution: phase planes, lane layout, bits | [kernels-depthwise.md](kernels-depthwise.md) |
+| Half-precision storage: conversions, the widening adapter, compact weights | [fp16.md](fp16.md) |
 | ONNX import: protobuf reading, tensors, graph resolution, external data, errors | [onnx-import.md](onnx-import.md) |
 | Operator contract, plans, sessions, memory reuse | [graph-runtime.md](graph-runtime.md) |
 | Reference models: method, operators used, results | [reference-models.md](reference-models.md) |

@@ -101,8 +101,17 @@ internal sealed class OursSide : ISide
     private RecursiveAI.OneModel.Tensors.Tensor[] _inputs = [];
     private RecursiveAI.OneModel.Tensors.Tensor[] _outputs = [];
 
-    public OursSide(string mode)
+    private readonly RecursiveAI.OneModel.Graph.WeightStorage _weights;
+
+    public OursSide(string mode, string weights = "original")
     {
+        _weights = weights switch
+        {
+            "original" => RecursiveAI.OneModel.Graph.WeightStorage.Original,
+            "fp16" => RecursiveAI.OneModel.Graph.WeightStorage.Binary16,
+            "bf16" => RecursiveAI.OneModel.Graph.WeightStorage.BFloat16,
+            _ => throw new ArgumentException($"unknown weights {weights} (original, fp16 or bf16)"),
+        };
         _mode = mode switch
         {
             "fast" => RecursiveAI.OneModel.Graph.ExecutionMode.Fast,
@@ -120,7 +129,7 @@ internal sealed class OursSide : ISide
     public void Load(string modelPath, int threads)
     {
         _session = RecursiveAI.OneModel.Graph.Session.Load(modelPath,
-            new RecursiveAI.OneModel.Graph.SessionOptions { Mode = _mode, IntraOpThreads = threads });
+            new RecursiveAI.OneModel.Graph.SessionOptions { Mode = _mode, IntraOpThreads = threads, WeightStorage = _weights });
         _outputNames = [.. _session.Outputs.Select(o => o.Name)];
         _outputs = new RecursiveAI.OneModel.Tensors.Tensor[_outputNames.Length];
     }

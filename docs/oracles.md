@@ -101,3 +101,23 @@ Reference outputs are per machine class: ONNX Runtime's results differ in the la
 So for fp32, **a 1e-4 relative bound is only meaningful against the scale of the output** (scaled error): ONNX Runtime itself is within ~2e-6 of its unoptimized self on that metric, but an element-wise relative error floored at 1e-3 of the maximum already reaches 1e-4 to 3e-3 between its two optimization levels, because small elements are computed as differences of large terms. The fp32 conformance metric should therefore be the scaled one (or an element-wise one with a floor at least 1e-2 of the maximum).
 
 int8 outputs are much noisier. Between ONNX Runtime's own levels the scaled difference is 7e-3 to 2e-2 (ResNet-50), 8e-2 to 1e-1 (MobileNetV3), 6e-2 to 2e-1 (BERT-base dynamic), 3e-2 to 7e-2 (MiniLM dynamic, x64), and 0.7 for the dynamically quantized Whisper encoder (the dynamic scheme is sensitive to activation outliers). Comparing int8 against ONNX Runtime's int8 output element by element is not a stable metric for these models; the int8 metric must be defined relative to each model's own quantization error (for example cosine similarity or top-k agreement for classifiers, plus the scaled error against the fp32 output of the same model), and gets its final definition when the int8 kernels land.
+
+## float16 files
+
+`tools/export_models.py --fp16` writes `<model>_fp16.onnx` next to the float32 file (MiniLM-L6 and ResNet-50): float16 weights and
+float16 activations, float32 graph inputs and outputs with a `Cast` at each end, finite values beyond the float16 range clamped to
+±65504. `make_reference.py --variant fp16` stores ONNX Runtime's output on the same file and inputs. Both engines widen, compute in
+float32 and round per operator on the CPU.
+
+Gate: scaled error of ours against ONNX Runtime on the same file ≤ 4e-3, and our error against the float32 model's output ≤ 1.5 times
+ONNX Runtime's. Reason: half precision has 11 significant bits (4.9e-4 per rounding), the models chain dozens of roundings, and two
+correct engines that round in slightly different places differ by that much. Measured on x64 (AVX-512), fast mode, scaled errors:
+
+| Model (batch) | Ours vs ORT fp16 | ORT fp16 vs ORT fp32 | Ours fp16 vs ORT fp32 | ORT fp16, enabled vs disabled |
+|---|---|---|---|---|
+| MiniLM-L6 (1) | 9.8e-4 | 7.9e-4 | 1.05e-3 | 6.6e-4 |
+| MiniLM-L6 (32) | 1.9e-3 | 1.33e-3 | 1.72e-3 | 1.26e-3 |
+| ResNet-50 (1) | 3.6e-4 | 1.37e-3 | 1.02e-3 | 2.9e-7 |
+| ResNet-50 (8) | 4.8e-4 | 1.49e-3 | 1.75e-3 | 2.7e-7 |
+
+Output hashes are equal at 1 and 8 threads. ResNet-50's top-1 class agrees with float32 on all eight batch samples.

@@ -32,18 +32,22 @@ The scalar and 4-lane paths run wherever .NET runs; the 4-lane path is what brow
   of a `(Cin/G*KH*KW) x (OutH*OutW)` matrix, rows ordered channel, kernel row, kernel column; the group's weights are A and
   the group's output channels are C. Rows of the im2col matrix are built in chunks of 16. A 1x1, stride-1, unpadded
   convolution uses the input directly as B.
-* **Depthwise** (`Groups == Cin`, any channel multiplier): a direct kernel over output columns (lanes are different columns), taps
-  added in row-major order. The input plane is copied into a zero-padded plane first so that no tap needs a bounds check; planes
-  are processed in chunks of 4.
+* **Depthwise** (`Groups == Cin`, any channel multiplier): a direct kernel, described in [kernels-depthwise.md](kernels-depthwise.md).
 
 ## Fixed chunks and thread independence
 
-Chunk sizes (8 strips of B per packing chunk, one `MC x NC` tile per compute chunk, 16 im2col rows, 4 depthwise planes) are
+Chunk sizes (8 strips of B per packing chunk, one `MC x NC` tile per compute chunk, 16 im2col rows, planes per depthwise chunk from the plane size) are
 constants of the kernel and the shape. They are never derived from the number of threads or processors. Every output is computed
 by exactly one chunk, with the whole of `k` in one order, so there are no partial results to combine and a result cannot depend on
 which thread ran a chunk or on how many threads there were. `k` is never split across threads. A fixed-chunk parallel-for
 (`Threading/ParallelFor.cs`) hands out chunk indices through an atomic counter; if the pool is busy serving another caller the
 chunks run on the calling thread, with the same result.
+
+How many threads a call uses is a separate matter: the caller passes an estimate of the work (in nanoseconds on one thread), and the pool
+wakes at most one thread per 60 000 ns of it, so a small matrix product or convolution stays on the calling thread instead of paying
+for wake-ups. The estimates are about 16 multiply-adds per nanosecond for the matrix product tiles, half a nanosecond per element
+packed or copied, and a fixed rate per tap for depthwise. The number of threads only decides who runs a chunk, never what a chunk
+computes, so it cannot change a result.
 
 ## Fast mode
 
