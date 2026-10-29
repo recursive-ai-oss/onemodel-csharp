@@ -46,12 +46,15 @@ internal static unsafe class Conv
     /// <summary>
     /// Computes the convolution of <paramref name="input"/> (N x Cin x H x W) with <paramref name="weights"/>
     /// (Cout x Cin/Groups x KH x KW) into <paramref name="output"/> (N x Cout x OutH x OutW). When <paramref name="bias"/> is not
-    /// empty (Cout values) it is added to each output channel after the taps, as one rounded addition per output.
+    /// empty (Cout values) it is added to each output channel after the taps, as one rounded addition per output. When
+    /// <paramref name="activation"/> is given it is applied to every output after the bias (on each finished tile of the matrix
+    /// product, or on each plane after the direct depthwise kernel).
     /// </summary>
     /// <exception cref="ArgumentException">A dimension is not positive, groups do not divide the channels, the output would be empty, or a buffer is too small.</exception>
     public static void Run(
         KernelMode mode, KernelPath path, in ConvShape s,
-        ReadOnlySpan<float> input, ReadOnlySpan<float> weights, Span<float> output, int threads, ReadOnlySpan<float> bias = default)
+        ReadOnlySpan<float> input, ReadOnlySpan<float> weights, Span<float> output, int threads, ReadOnlySpan<float> bias = default,
+        FusedActivation? activation = null)
     {
         Validate(s);
         long inLen = (long)s.N * s.Cin * s.H * s.W;
@@ -87,21 +90,103 @@ internal static unsafe class Conv
             if (s.IsDepthwise)
             {
                 Depthwise(mode, path, s, pin, pw, pout, threads);
+                if (!bias.IsEmpty)
+                {
+                    AddChannelBias(mode == KernelMode.Exact, pbias, pout, s.N, s.Cout, s.OutH * s.OutW, threads);
+                }
+
+                if (activation is not null)
+                {
+                    ActivatePlanes(path, mode == KernelMode.Exact, activation, pout, s.N * s.Cout, s.OutH * s.OutW, threads);
+                }
             }
             else
             {
-                ViaGemm(mode, path, s, pin, pw, pout, threads);
-            }
+                // The bias and activation go in as the product's tile epilogue: the tile is still in cache, and no second pass over
+                // the output is needed.
+                ConvEpilogue? ep = null;
+                if (!bias.IsEmpty || activation is not null)
+                {
+                    ep = t_convEpilogue ??= new ConvEpilogue();
+                    ep.Bias = pbias;
+                    ep.Activation = activation;
+                    ep.Path = path;
+                }
 
-            if (!bias.IsEmpty)
-            {
-                AddChannelBias(mode == KernelMode.Exact, pbias, pout, s.N, s.Cout, s.OutH * s.OutW, threads);
+                ViaGemm(mode, path, s, pin, pw, pout, threads, ep);
+                if (ep is not null)
+                {
+                    ep.Activation = null;
+                }
             }
         }
     }
 
     [ThreadStatic]
     private static BiasJob? t_biasJob;
+
+    [ThreadStatic]
+    private static ConvEpilogue? t_convEpilogue;
+
+    [ThreadStatic]
+    private static ActivationJob? t_activationJob;
+
+    // Bias per output channel (a row of the product) then the activation, on a finished tile. The object is kept per thread and
+    // refilled by each call, so a steady-state call allocates nothing; the tile jobs only read it while the call is running.
+    private sealed class ConvEpilogue : IGemmEpilogue
+    {
+        public float* Bias;
+        public int RowOffset;
+        public FusedActivation? Activation;
+        public KernelPath Path;
+
+        public void Apply(float* tile, nint ldc, int row0, int col0, int rows, int cols, KernelMode mode)
+        {
+            bool exact = mode == KernelMode.Exact;
+            for (int r = 0; r < rows; r++)
+            {
+                var row = new Span<float>(tile + (r * ldc), cols);
+                if (Bias != null)
+                {
+                    BiasActivationEpilogue.AddScalar(row, Bias[RowOffset + row0 + r], exact);
+                }
+
+                Activation?.Apply(Path, exact, row);
+            }
+        }
+    }
+
+    private static void ActivatePlanes(KernelPath path, bool exact, FusedActivation activation, float* output, int planes, int plane, int threads)
+    {
+        ActivationJob job = t_activationJob ??= new ActivationJob();
+        job.Activation = activation;
+        job.Path = path;
+        job.Exact = exact;
+        job.Output = output;
+        job.Plane = plane;
+        job.Planes = planes;
+        ParallelFor.Run(job, (planes + PlanesPerChunk - 1) / PlanesPerChunk, threads);
+        job.Activation = null;
+    }
+
+    private sealed class ActivationJob : ChunkJob
+    {
+        public FusedActivation? Activation;
+        public KernelPath Path;
+        public bool Exact;
+        public float* Output;
+        public int Plane;
+        public int Planes;
+
+        public override void RunChunk(int chunk)
+        {
+            int qEnd = Math.Min(Planes, (chunk + 1) * PlanesPerChunk);
+            for (int q = chunk * PlanesPerChunk; q < qEnd; q++)
+            {
+                Activation!.Apply(Path, Exact, new Span<float>(Output + ((long)q * Plane), Plane));
+            }
+        }
+    }
 
     [ThreadStatic]
     private static Im2ColJob? t_im2colJob;
@@ -198,7 +283,7 @@ internal static unsafe class Conv
         }
     }
 
-    private static void ViaGemm(KernelMode mode, KernelPath path, in ConvShape s, float* input, float* weights, float* output, int threads)
+    private static void ViaGemm(KernelMode mode, KernelPath path, in ConvShape s, float* input, float* weights, float* output, int threads, ConvEpilogue? epilogue)
     {
         int cinG = s.Cin / s.Groups;
         int coutG = s.Cout / s.Groups;
@@ -232,7 +317,12 @@ internal static unsafe class Conv
 
                 float* a = weights + ((long)g * coutG * k);
                 float* c = output + ((((long)img * s.Cout) + (g * coutG)) * nCols);
-                Gemm.RunCore(mode, path, coutG, nCols, k, a, k, b, nCols, c, nCols, threads);
+                if (epilogue is not null)
+                {
+                    epilogue.RowOffset = g * coutG;
+                }
+
+                Gemm.RunCore(mode, path, coutG, nCols, k, a, k, b, nCols, c, nCols, threads, null, epilogue);
             }
         }
     }

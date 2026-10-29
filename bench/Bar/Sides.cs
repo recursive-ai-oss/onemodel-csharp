@@ -101,8 +101,17 @@ internal sealed class OursSide : ISide
     private RecursiveAI.OneModel.Tensors.Tensor[] _inputs = [];
     private RecursiveAI.OneModel.Tensors.Tensor[] _outputs = [];
 
-    public OursSide(string mode)
+    private readonly RecursiveAI.OneModel.Graph.OptimizationLevel _opt;
+
+    public OursSide(string mode, string opt = "all")
     {
+        _opt = opt switch
+        {
+            "none" => RecursiveAI.OneModel.Graph.OptimizationLevel.None,
+            "basic" => RecursiveAI.OneModel.Graph.OptimizationLevel.Basic,
+            "all" => RecursiveAI.OneModel.Graph.OptimizationLevel.All,
+            _ => throw new ArgumentException($"unknown optimization level {opt} (none, basic or all)"),
+        };
         _mode = mode switch
         {
             "fast" => RecursiveAI.OneModel.Graph.ExecutionMode.Fast,
@@ -120,7 +129,7 @@ internal sealed class OursSide : ISide
     public void Load(string modelPath, int threads)
     {
         _session = RecursiveAI.OneModel.Graph.Session.Load(modelPath,
-            new RecursiveAI.OneModel.Graph.SessionOptions { Mode = _mode, IntraOpThreads = threads });
+            new RecursiveAI.OneModel.Graph.SessionOptions { Mode = _mode, IntraOpThreads = threads, OptimizationLevel = _opt });
         _outputNames = [.. _session.Outputs.Select(o => o.Name)];
         _outputs = new RecursiveAI.OneModel.Tensors.Tensor[_outputNames.Length];
     }

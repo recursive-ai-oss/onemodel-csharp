@@ -174,6 +174,11 @@ internal static class GraphPasses
     private static readonly IGraphPass[] s_all =
     [
         new ConstantFoldPass(),
+        new ConvBatchNormFoldPass(),
+        new ConstantFoldPass(),
+        new GeluFusionPass(),
+        new LinearFusionPass(),
+        new ConvActivationFusionPass(),
     ];
 
     /// <summary>The names of the passes that run for a level and mode, in order.</summary>

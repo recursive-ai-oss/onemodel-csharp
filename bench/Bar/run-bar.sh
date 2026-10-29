@@ -2,24 +2,24 @@
 # Runs bar rows under the benchmark lock.
 #
 #   run-bar.sh --what "minilm+resnet fp32 b1" --minutes 10 --out DIR \
-#              --rows "minilm_l6:fp32:1 resnet50:fp32:1" [--threads "1 all"] [--side ort|ours] [--mode fast|exact] [--reps 3]
+#              --rows "minilm_l6:fp32:1 resnet50:fp32:1" [--threads "1 all"] [--side ort|ours] [--mode fast|exact] [--opt none|basic|all] [--reps 3]
 #
 # * Builds Bar first (before taking the lock), then claims the lock atomically from inside this
 #   script, and removes it on exit. It refuses to start when the lock exists or the machine is busy.
 # * Each row runs in its own process under /usr/bin/time so peak RSS is that engine's alone.
 # * Results append to DIR/bar.csv and DIR/bar.md.
-# Environment: ONEMODEL_LOCK (default ~/WORKER-BENCH.lock), ONEMODEL_IGNORE_LOAD=1 to skip the
+# Environment: ONEMODEL_LOCK (default ~/WORKER-BENCH.lock; under a job queue that holds the shared lock, point this at a private file), ONEMODEL_IGNORE_LOAD=1 to skip the
 # busy check (the loads are still recorded in every row).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tools="$here/../../tools"
 . "$tools/env.sh"
 
-what="bar"; minutes=15; out=""; rows=""; threads="1 all"; side="ort"; mode="fast"; reps=3
+what="bar"; minutes=15; out=""; rows=""; threads="1 all"; side="ort"; mode="fast"; opt="all"; reps=3
 while [ $# -gt 0 ]; do
   case "$1" in
     --what) what="$2";; --minutes) minutes="$2";; --out) out="$2";; --rows) rows="$2";;
-    --threads) threads="$2";; --side) side="$2";; --mode) mode="$2";; --reps) reps="$2";;
+    --threads) threads="$2";; --side) side="$2";; --mode) mode="$2";; --opt) opt="$2";; --reps) reps="$2";;
     *) echo "unknown option $1" >&2; exit 2;;
   esac
   shift 2
@@ -59,10 +59,10 @@ for spec in $rows; do
   IFS=: read -r name variant batch <<<"$spec"
   for t in $threads; do
     n="$t"; [ "$t" = all ] && n="$cores"
-    id="${name}_${variant}_b${batch}_t${t}_${side}"; [ "$side" = ours ] && id="${id}-${mode}"
+    id="${name}_${variant}_b${batch}_t${t}_${side}"; [ "$side" = ours ] && id="${id}-${mode}-${opt}"
     time_out="$out/$id.time"; row="$out/$id.json"
     "${tm[@]}" "$time_out" dotnet "$bar" run --model "$model_file" --ref "$ref_dir" --model-name "$name" \
-      --variant "$variant" --batch "$batch" --threads "$n" --side "$side" --mode "$mode" --reps "$reps" \
+      --variant "$variant" --batch "$batch" --threads "$n" --side "$side" --mode "$mode" --opt "$opt" --reps "$reps" \
       --row-out "$row" --sdk "$sdk" --lock-label "$label"
     if [ "$(uname -s)" = Darwin ]; then
       rss_mb="$(awk '/maximum resident set size/{printf "%.1f", $1/1048576}' "$time_out")"
