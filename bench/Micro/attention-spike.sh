@@ -36,7 +36,7 @@ if [ -n "${BENCH_QUIET_WAIT:-}" ] && [ -r /proc/stat ]; then
     busy=0; idle=0
     for f in 1 2 3 6 7 8; do busy=$(( busy + after[f] - before[f] )); done
     for f in 4 5; do idle=$(( idle + after[f] - before[f] )); done
-    nproc_=$(nproc); cores=$(awk -v b=$busy -v i=$idle -v n=$nproc_ 'BEGIN{printf "%.2f", (b+i)>0 ? n*b/(b+i) : 0}')
+    nproc_=$(nproc); cores=$(awk -v b=$busy -v i=$idle -v n=$nproc_ 'BEGIN{printf "%.2f", ((b+i) > 0) ? n*b/(b+i) : 0}')
     echo "$(date -u +%T) busy cores $cores (waited ${waited}s)" >> "$out/quiet.log"
     if awk -v c=$cores -v m="${BENCH_QUIET_MAX:-1.5}" 'BEGIN{exit !(c<m)}'; then break; fi
     waited=$((waited+5))
@@ -49,3 +49,12 @@ sampler=$!
 trap 'kill $sampler 2>/dev/null; [ -n "${BENCH_LOCK:-}" ] && rm -f "$BENCH_LOCK"' EXIT
 
 dotnet "$ONEMODEL_ARTIFACTS/bin/Micro/release/RecursiveAI.OneModel.Micro.dll" attention-spike "$reps" "$out/attention-spike.md"
+
+# Optional: the cost of the Checked build's range assertions, same shapes, one thread, 256-bit lanes, in the same window.
+if [ -n "${BENCH_AB:-}" ]; then
+  dotnet build "$here/Micro.csproj" -c Checked -v quiet -clp:NoSummary || exit 1
+  for cfg in release checked; do
+    ONEMODEL_SPIKE_THREADS=1 ONEMODEL_SPIKE_SHAPES=0,1,2,4 ONEMODEL_SPIKE_PARTS=attention ONEMODEL_SPIKE_ISAS=V256 \
+      dotnet "$ONEMODEL_ARTIFACTS/bin/Micro/$cfg/RecursiveAI.OneModel.Micro.dll" attention-spike "$reps" "$out/ab-$cfg.md" > /dev/null
+  done
+fi
