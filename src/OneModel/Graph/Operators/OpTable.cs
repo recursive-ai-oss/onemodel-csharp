@@ -16,5 +16,10 @@ internal static class OpTable
         ReshapeOp.Def,
         IdentityOp.Def,
         ConstantOp.Def,
+
+        // Recurrent family: RNN, GRU, LSTM.
+        LstmOp.Def,
+        GruOp.Def,
+        RnnOp.Def,
     ];
 }

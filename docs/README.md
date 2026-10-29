@@ -13,3 +13,5 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 | Benchmark method | [bench-method.md](bench-method.md) |
 | ONNX import: protobuf reading, tensors, graph resolution, external data, errors | [onnx-import.md](onnx-import.md) |
 | Operator contract, plans, sessions, memory reuse | [graph-runtime.md](graph-runtime.md) |
+| Recurrent operators (RNN, GRU, LSTM): order of operations, open choices | [ops-recurrent.md](ops-recurrent.md) |
+| CTC decoding: greedy and prefix beam search, confidences | [ctc.md](ctc.md) |
