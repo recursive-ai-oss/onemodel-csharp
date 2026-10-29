@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>$(PackagePrefix).$(LibName).Tests</RootNamespace>
+    <AssemblyName>$(PackagePrefix).$(LibName).Tests</AssemblyName>
+    <IsTestProject>true</IsTestProject>
+    <!-- Test results go with the other build output, not into the checkout. -->
+    <TestingPlatformCommandLineArguments>--results-directory "$(ArtifactsPath)/TestResults"</TestingPlatformCommandLineArguments>
+    <NoWarn>$(NoWarn);xUnit1051;xUnit1031</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System" />
+    <Using Include="System.Collections.Generic" />
+    <Using Include="System.IO" />
+    <Using Include="System.Linq" />
+    <Using Include="System.Threading" />
+    <Using Include="System.Threading.Tasks" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+  </ItemGroup>
+
+</Project>

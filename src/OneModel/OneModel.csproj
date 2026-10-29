@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>$(PackagePrefix).$(LibName)</AssemblyName>
+    <RootNamespace>$(PackagePrefix).$(LibName)</RootNamespace>
+    <PackageId>$(PackagePrefix).$(LibName)</PackageId>
+    <Description>A neural-network runtime for .NET in pure managed C# with no dependency beyond the shared framework: ONNX import, graph optimization and SIMD CPU kernels for inference, with training to follow.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageReadmeFile>PACKAGE.md</PackageReadmeFile>
+    <PackageTags>onnx;neural-network;inference;machine-learning;simd;nativeaot;trimmable</PackageTags>
+    <PackageReleaseNotes>See CHANGELOG.md in the repository.</PackageReleaseNotes>
+    <!-- Only the microkernels and the buffer pool use pointers; each entry point states its bounds. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Tests" />
+    <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Fuzz" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../PACKAGE.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE-MIT" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE-APACHE" Pack="true" PackagePath="/" />
+    <None Include="../../THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

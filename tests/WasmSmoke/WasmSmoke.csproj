@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+
+  <!-- A console app for browser-wasm: it runs under the wasm app host (node or a browser engine) with no UI. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>$(PackagePrefix).$(LibName).WasmSmoke</RootNamespace>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <WasmEnableSIMD>true</WasmEnableSIMD>
+    <!-- Invariant globalization would force a native relink with Emscripten; the smoke app does not need it. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+  </ItemGroup>
+
+</Project>

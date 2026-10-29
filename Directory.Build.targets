@@ -1,0 +1,16 @@
+<Project>
+
+  <!-- Package guard: the shipped libraries (projects under src/) depend on the shared framework only. A PackageReference, or a
+       reference to a project outside src/, fails the build. References the SDK adds itself (the trimming analyzers) are not counted; the packed nuspec is checked for zero dependencies at release. P/Invoke in source is checked by the PackageGuardTests test. -->
+  <Target Name="OneModelPackageGuard" BeforeTargets="CollectPackageReferences;ResolvePackageAssets;BeforeBuild" Condition="'$(IsShippedProject)' == 'true'">
+    <ItemGroup>
+      <_GuardPackageRef Include="@(PackageReference)" Condition="'%(PackageReference.IsImplicitlyDefined)' != 'true'" />
+      <_GuardProjectRef Include="@(ProjectReference)" />
+    </ItemGroup>
+    <Error Condition="'@(_GuardPackageRef)' != ''"
+           Text="$(MSBuildProjectName) is a shipped project and must not have a PackageReference (found: @(_GuardPackageRef, ', ')). The runtime depends on the shared framework only." />
+    <Error Condition="'@(_GuardProjectRef)' != '' and !$([System.String]::Copy('%(_GuardProjectRef.FullPath)').Contains('$(_SrcDir)'))"
+           Text="$(MSBuildProjectName) references a project outside src/: %(_GuardProjectRef.Identity)." />
+  </Target>
+
+</Project>
