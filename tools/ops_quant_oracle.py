@@ -103,6 +103,19 @@ def gen(w, rng):
     w.add("quantize_21_u16", "QuantizeLinear", 21, [("x", x)], [("s", np.array(0.001, np.float32)), ("z", zp(np.uint16))], [np.uint16], {})
     w.add("quantize_21_i16", "QuantizeLinear", 21, [("x", x)], [("s", np.array(0.001, np.float32)), ("z", zp(np.int16))], [np.int16], {})
 
+    # Many elements, so a rare rounding disagreement shows up.
+    for i, (dt, sc) in enumerate([(np.int8, 0.0186239), (np.uint8, 0.0113900788), (np.int8, 0.0437)]):
+        x = f32(1, 64, 56, 56, lo=-3, hi=3) * np.float32(1.0)
+        w.add(f"quantize_big_{i}", "QuantizeLinear", 13, [("x", x)], [("s", np.array(sc, np.float32)), ("z", zp(dt))], [dt], {})
+    # DequantizeLinear and Add chains are not operators, but QuantizeLinear of sums is what the rewrite relies on.
+
+    # A quantized residual Add, with the parameters of ResNet-50's first block (zero point -128 on the output clips like a Relu).
+    for i, (sa, za, sb, zb, sy, zy) in enumerate([(0.011185410432517529, -14, 0.04366272687911987, 20, 0.01862390525639057, -128),
+                                                  (0.0113900788128376, 14, 0.015234442427754402, -128, 0.012361573986709118, -128)]):
+        shp = (1, 64, 56, 56)
+        x = [q(np.int8, *shp) for _ in range(2)]
+        w.add_model(f"qdq_add_{i}", qdq_unit("Add", [shp, shp], [sa, sb], [za, zb], sy, zy), {"q0": x[0], "q1": x[1]})
+
     # --- DequantizeLinear ---
     for opset in (10, 13, 19):
         for dt in (np.uint8, np.int8):
@@ -205,6 +218,50 @@ def gen(w, rng):
                         order_in.append(("bias", rng.integers(-5000, 5000, size=m).astype(np.int32)))
                     w.add_ordered(f"qlinearconv_{ci}_{np.dtype(xdt).name}_{np.dtype(wdt).name}_{int(perchan)}_{int(withbias)}", "QLinearConv", 10,
                                   order_in, {"x"}, [ydt], attrs, tolerance=1)
+
+
+def add_model(self, name, m, feeds, tolerance=0):
+    """Adds a whole model: feeds is a dict of graph inputs; ONNX Runtime's reference is the default optimization level (ORT_ENABLE_ALL)."""
+    try:
+        sess = ort.InferenceSession(m.SerializeToString(), providers=["CPUExecutionProvider"])
+        outs = sess.run(None, feeds)
+    except Exception as e:  # noqa: BLE001
+        self.skipped[name] = str(e).splitlines()[0][:200]
+        return
+    d = os.path.join(self.outdir, name)
+    os.makedirs(d, exist_ok=True)
+    onnx.save(m, os.path.join(d, "model.onnx"))
+    meta = {"op": "model", "opset": 17, "tolerance": tolerance, "inputs": [], "outputs": []}
+    for i, gi in enumerate(m.graph.input):
+        a = feeds[gi.name]
+        a.astype(a.dtype.newbyteorder("<")).tofile(os.path.join(d, f"input_{i}.bin"))
+        meta["inputs"].append({"name": gi.name, "dtype": str(a.dtype), "shape": list(a.shape)})
+    for i, o in enumerate(outs):
+        np.ascontiguousarray(o).tofile(os.path.join(d, f"output_{i}.bin"))
+        meta["outputs"].append({"dtype": str(o.dtype), "shape": list(o.shape)})
+    with open(os.path.join(d, "meta.json"), "w") as f:
+        json.dump(meta, f)
+    self.count += 1
+
+
+Writer.add_model = add_model
+
+
+def qdq_unit(op, shapes, sa, za, sy, zy, attrs=None, dt=np.int8, opset=17):
+    """DequantizeLinear for each input, one float op, QuantizeLinear: the shape of one quantized layer in a QDQ model."""
+    tp = T.INT8 if dt == np.int8 else T.UINT8
+    nodes, inits, ins = [], [], []
+    for i, shp in enumerate(shapes):
+        nodes.append(h.make_node("DequantizeLinear", [f"q{i}", f"s{i}", f"z{i}"], [f"d{i}"]))
+        inits += [onnx.numpy_helper.from_array(np.array(sa[i], np.float32), f"s{i}"), onnx.numpy_helper.from_array(np.array(za[i], dt), f"z{i}")]
+        ins.append(h.make_tensor_value_info(f"q{i}", tp, list(shp)))
+    nodes.append(h.make_node(op, [f"d{i}" for i in range(len(shapes))], ["o"], **(attrs or {})))
+    nodes.append(h.make_node("QuantizeLinear", ["o", "sy", "zy"], ["y"]))
+    inits += [onnx.numpy_helper.from_array(np.array(sy, np.float32), "sy"), onnx.numpy_helper.from_array(np.array(zy, dt), "zy")]
+    g = h.make_graph(nodes, "g", ins, [h.make_tensor_value_info("y", tp, None)], initializer=inits)
+    m = h.make_model(g, opset_imports=[h.make_opsetid("", opset)])
+    m.ir_version = 9
+    return m
 
 
 def add_ordered(self, name, op, opset, order_in, runtime_names, out_dtypes, attrs, out_names=("y",), tolerance=0):
