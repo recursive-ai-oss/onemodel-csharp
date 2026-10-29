@@ -4,6 +4,7 @@ message fields). tests/OnnxSweep writes the same text from our importer; the two
 
     onnx_dump.py sweep <root> <outdir>        every model.onnx under <root>
     onnx_dump.py dump <outdir> <model.onnx>...
+    onnx_dump.py tensors <root> <outfile>     every input_N.pb / output_N.pb of the test data sets under <root>
 
 Floats are written as bit patterns and tensor data as SHA-256 of its little-endian bytes (string tensors: each element
 prefixed with its 4-byte length), so no formatting can differ.
@@ -230,7 +231,35 @@ def write(target, path):
         f.write(text)
 
 
+def dump_tensors(root, outfile):
+    lines = []
+    for d, _, names in sorted(os.walk(root)):
+        if "model.onnx" not in names:
+            continue
+        m = onnx.load(os.path.join(d, "model.onnx"), load_external_data=False)
+        for sub, _, files in sorted(os.walk(d)):
+            for n in sorted(files):
+                if not n.endswith(".pb") or not (n.startswith("input_") or n.startswith("output_")):
+                    continue
+                idx = int(n[:-3].rsplit("_", 1)[1])
+                vis = m.graph.input if n.startswith("input_") else m.graph.output
+                key = os.path.relpath(os.path.join(sub, n), root)
+                kind = vis[idx].type.WhichOneof("value") if idx < len(vis) else None
+                if kind is not None and kind != "tensor_type":
+                    lines.append("%s: SKIP" % key)
+                    continue
+                t = onnx.TensorProto()
+                with open(os.path.join(sub, n), "rb") as f:
+                    t.ParseFromString(f.read())
+                lines.append("%s: %s" % (key, tensor(t)))
+    with open(outfile, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def main(argv):
+    if len(argv) == 4 and argv[1] == "tensors":
+        dump_tensors(argv[2], argv[3])
+        return 0
     if len(argv) >= 4 and argv[1] == "sweep":
         root, outdir = argv[2], argv[3]
         os.makedirs(outdir, exist_ok=True)

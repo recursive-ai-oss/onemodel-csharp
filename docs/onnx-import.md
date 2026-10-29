@@ -122,16 +122,19 @@ typed-field data. Importing therefore allocates only the graph itself. Disposing
 afterwards throws. Copying a tensor out (`ToTensor`) is the only step that allocates its bytes. Models up to 1 MiB are read instead of
 mapped. 
 
-Measured on one x64 machine (Ryzen 9 7950X3D, .NET 10, warm file cache), importing the whole graph and touching no tensor data:
+Indicative figures from one Apple M2 (arm64, .NET 10, warm file cache, three runs, the steady ones), importing the whole graph and
+touching no tensor data. Peak resident size is the operating system's figure for the process, including the runtime (about 45 MiB):
 
 | Model (file size) | Mapped: load, peak RSS | Read into memory: load, peak RSS |
 |---|---|---|
-| BERT-base (416 MiB) | 21 ms, 182 MiB | 180 ms, 449 MiB |
-| Whisper-small decoder (738 MiB) | 25 ms, 281 MiB | 300 ms, 773 MiB |
-| Whisper-small encoder (336 MiB) | 21 ms, 183 MiB | 145 ms, 370 MiB |
+| BERT-base (416 MiB) | 17 ms, 48 MiB | 68 ms, 463 MiB |
+| MiniLM-L6 (86 MiB) | 17 ms, 46 MiB | 66 ms, 132 MiB |
+| Whisper-small decoder (738 MiB) | 19 ms, 51 MiB | 110 ms, 787 MiB |
+| Whisper-small encoder (336 MiB) | 18 ms, 48 MiB | 55 ms, 383 MiB |
 
-The managed heap after loading is 3 to 5 MiB in every case; the rest of the mapped figure is the runtime itself and file pages the
-kernel read ahead.
+On an x64 desktop (Ryzen 9 7950X3D, Linux) mapped loads took 21 to 25 ms and peaked at 181 to 281 MiB, because Linux counts the file pages
+it reads ahead around each header; reading took 140 to 300 ms and 370 to 790 MiB. The managed heap after loading is 3 to 5 MiB when mapped.
+These are single-machine, indicative figures, not a gated benchmark.
 
 ## 7. Errors
 

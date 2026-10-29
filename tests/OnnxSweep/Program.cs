@@ -20,12 +20,17 @@ internal static class Program
             return DumpFiles(args[1], args.Skip(2));
         }
 
+        if (args.Length == 3 && args[0] == "tensors")
+        {
+            return DumpTensors(args[1], args[2]);
+        }
+
         if (args.Length >= 2 && args[0] == "load")
         {
             return LoadOne(args[1], args.Length > 2 && args[2] == "nomap");
         }
 
-        Console.Error.WriteLine("usage: sweep <root> [<dumpdir>] | dump <dumpdir> <model.onnx>... | load <model.onnx> [nomap]");
+        Console.Error.WriteLine("usage: sweep <root> [<dumpdir>] | dump <dumpdir> <model.onnx>... | tensors <root> <outfile> | load <model.onnx> [nomap]");
         return 2;
     }
 
@@ -132,6 +137,36 @@ internal static class Program
         }
 
         return models.Length - ok == 0 && tensorFail == 0 ? 0 : 1;
+    }
+
+    /// <summary>Writes one line per input/output .pb under the test data sets, in the format of tools/onnx_dump.py tensors.</summary>
+    private static int DumpTensors(string root, string outFile)
+    {
+        var lines = new List<string>();
+        foreach (string model in Directory.EnumerateFiles(root, "model.onnx", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+        {
+            string dir = Path.GetDirectoryName(model)!;
+            using IrModel m = OnnxImporter.Load(model);
+            foreach (string pb in Directory.EnumerateFiles(dir, "*.pb", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+            {
+                string n = Path.GetFileName(pb);
+                if (!n.StartsWith("input_", StringComparison.Ordinal) && !n.StartsWith("output_", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                int idx = int.Parse(n[..^3][(n.LastIndexOf('_') + 1)..], CultureInfo.InvariantCulture);
+                var list = n.StartsWith("input_", StringComparison.Ordinal) ? m.Graph.Inputs : m.Graph.Outputs;
+                string key = Path.GetRelativePath(root, pb);
+                IrType? declared = idx < list.Length ? list[idx].Type : null;
+                lines.Add(declared is not null && declared.Kind != IrTypeKind.Tensor
+                    ? key + ": SKIP"
+                    : key + ": " + Dump.Tensor(OnnxImporter.LoadTensor(File.ReadAllBytes(pb))));
+            }
+        }
+
+        File.WriteAllText(outFile, string.Join('\n', lines) + "\n");
+        return 0;
     }
 
     private static string Strip(string message)
