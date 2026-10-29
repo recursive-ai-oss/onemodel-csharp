@@ -1,0 +1,13 @@
+# Pinned oracle environment (see docs/oracles.md). Installed by tools/setup-oracles.sh.
+# These packages are black-box tools: they produce reference outputs, export and quantize
+# models. Their code is never read or linked into the library.
+#
+# torch and torchvision are installed first from the CPU wheel index on Linux x64
+# (setup-oracles.sh does this); on macOS arm64 the PyPI wheels are CPU builds.
+onnxruntime==1.31.1
+onnx==1.23.2
+onnxscript==0.7.2
+torch==2.15.0
+torchvision==0.29.2
+transformers==5.22.0
+numpy==2.5.4
