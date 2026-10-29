@@ -16,5 +16,14 @@ public class SelfCheckBenchmarks
 
 internal static class Program
 {
-    private static void Main(string[] args) => BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+    private static int Main(string[] args)
+    {
+        if (args.Length > 0 && args[0] == "spike")
+        {
+            return Spike.Run(args[1..]);
+        }
+
+        BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+        return 0;
+    }
 }
