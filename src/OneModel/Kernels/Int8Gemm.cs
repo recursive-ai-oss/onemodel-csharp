@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 using RecursiveAI.OneModel.Threading;
@@ -106,6 +107,12 @@ internal readonly unsafe struct Int8Zero
         _vector = vector;
     }
 
+    public bool IsScalar => _vector == null;
+
+    public int Scalar => _scalar;
+
+    public int* Vector => _vector;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Get(int i) => _vector == null ? _scalar : _vector[i];
 }
@@ -128,6 +135,12 @@ internal unsafe struct Int8Epilogue
 {
     /// <summary>Destination for the int32 results; null selects the 8-bit output.</summary>
     public int* OutInt32;
+
+    /// <summary>Destination for float32 results (sum * scale, plus <see cref="BiasFloat"/>); used when <see cref="OutInt32"/> is null.</summary>
+    public float* OutFloat;
+
+    /// <summary>A float32 bias per column added after the scaling of a float32 output, or null.</summary>
+    public float* BiasFloat;
 
     /// <summary>Destination for 8-bit results.</summary>
     public byte* OutQuant;
@@ -171,6 +184,7 @@ internal static unsafe class Int8Gemm
     // k block: a kc x nr strip of packed B (8 KB at kc 512, nr 16) stays in the first-level cache while A strips stream by.
     private const int Kc = 512;
     private const int PackStripsPerChunk = 8;
+    private const int PackAStripsPerChunk = 4;
 
     [ThreadStatic]
     private static PackBJob? t_packJob;
@@ -178,16 +192,19 @@ internal static unsafe class Int8Gemm
     [ThreadStatic]
     private static TileJob? t_tileJob;
 
+    [ThreadStatic]
+    private static PackAJob? t_packAJob;
+
     /// <summary>
     /// Scales a 32-bit sum into an 8-bit range: round_half_even(acc * mult) + zeroPoint, saturated to [lo, hi]. The float multiply and
     /// the rounding are single correctly rounded operations, so the result is the same on every machine; a NaN (a NaN scale) gives the
-    /// zero point.
+    /// smallest value, as the vector path does.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int Requant(int acc, float mult, int zeroPoint, int lo, int hi)
     {
         float v = MathF.Round((float)acc * mult) + zeroPoint;
-        return v < lo ? lo : v > hi ? hi : !float.IsNaN(v) ? (int)v : Math.Clamp(zeroPoint, lo, hi);
+        return v < lo ? lo : v > hi ? hi : !float.IsNaN(v) ? (int)v : lo;
     }
 
     /// <summary>The value of a stored 8-bit element in the shifted signed domain: uint8 minus 128, int8 as is.</summary>
@@ -202,13 +219,26 @@ internal static unsafe class Int8Gemm
     /// </summary>
     public static void PackA(in Int8Format f, byte* src, long lda, bool u8, int rows, int k, byte* dst, int* rowSums)
     {
+        int strips = (rows + f.Mr - 1) / f.Mr;
+        PackAStrips(in f, src, lda, u8, rows, k, dst, rowSums, 0, strips);
+    }
+
+    // Packs strips [s0, s1) of A. The loops run k group by k group so every write is sequential and nothing divides in the inner loop.
+    private static void PackAStrips(in Int8Format f, byte* src, long lda, bool u8, int rows, int k, byte* dst, int* rowSums, int s0, int s1)
+    {
         int kp = f.KPad(k);
         int mr = f.Mr;
         int g = f.G;
-        int strips = (rows + mr - 1) / mr;
-        for (int s = 0; s < strips; s++)
+        int groups = kp / g;
+        int* sums = stackalloc int[16];
+        for (int s = s0; s < s1; s++)
         {
             byte* strip = dst + ((long)s * mr * kp * f.ABytes);
+            for (int r = 0; r < mr; r++)
+            {
+                sums[r] = 0;
+            }
+
             for (int r = 0; r < mr; r++)
             {
                 int row = (s * mr) + r;
@@ -216,22 +246,34 @@ internal static unsafe class Int8Gemm
                 int sum = 0;
                 if (f.ABytes == 2)
                 {
-                    short* d = (short*)strip;
-                    for (int p = 0; p < kp; p++)
+                    short* d = (short*)strip + (r * g);
+                    for (int q = 0; q < groups; q++)
                     {
-                        int v = line != null && p < k ? Shift(line[p], u8) : 0;
-                        sum += v;
-                        d[((((p / g) * mr) + r) * g) + (p % g)] = (short)v;
+                        int p = q * g;
+                        for (int j = 0; j < g; j++)
+                        {
+                            int v = line != null && p + j < k ? Shift(line[p + j], u8) : 0;
+                            sum += v;
+                            d[j] = (short)v;
+                        }
+
+                        d += mr * g;
                     }
                 }
                 else
                 {
-                    sbyte* d = (sbyte*)strip;
-                    for (int p = 0; p < kp; p++)
+                    sbyte* d = (sbyte*)strip + (r * g);
+                    for (int q = 0; q < groups; q++)
                     {
-                        int v = line != null && p < k ? Shift(line[p], u8) : 0;
-                        sum += v;
-                        d[((((p / g) * mr) + r) * g) + (p % g)] = (sbyte)v;
+                        int p = q * g;
+                        for (int j = 0; j < g; j++)
+                        {
+                            int v = line != null && p + j < k ? Shift(line[p + j], u8) : 0;
+                            sum += v;
+                            d[j] = (sbyte)v;
+                        }
+
+                        d += mr * g;
                     }
                 }
 
@@ -282,12 +324,35 @@ internal static unsafe class Int8Gemm
     public static void Run(in Int8Format f, int m, int n, int k, in Int8A a, byte* packedB, int* colSums, in Int8Zero zeroA,
         in Int8Zero zeroB, in Int8Epilogue ep, int threads)
     {
+        Int8A a2 = a;
+        if (a.Packed == null)
+        {
+            // Pack all of A once, in parallel, so the tile chunks (one per column block) do not each repack their rows.
+            int aStrips = (m + f.Mr - 1) / f.Mr;
+            byte* pa = Slab.Get(3, f.PackedABytes(m, k));
+            int* rs = (int*)Slab.Get(4, (long)m * sizeof(int));
+            PackAJob pj = t_packAJob ??= new PackAJob();
+            pj.F = f;
+            pj.Src = a.Raw;
+            pj.Lda = a.Ld;
+            pj.U8 = a.U8;
+            pj.Rows = m;
+            pj.K = k;
+            pj.Dst = pa;
+            pj.RowSums = rs;
+            pj.Strips = aStrips;
+            ParallelFor.Run(pj, (aStrips + PackAStripsPerChunk - 1) / PackAStripsPerChunk, threads);
+            a2 = default;
+            a2.Packed = pa;
+            a2.RowSums = rs;
+        }
+
         TileJob job = t_tileJob ??= new TileJob();
         job.F = f;
         job.M = m;
         job.N = n;
         job.K = k;
-        job.A = a;
+        job.A = a2;
         job.PackedB = packedB;
         job.ColSums = colSums;
         job.ZeroA = zeroA;
@@ -353,8 +418,8 @@ internal static unsafe class Int8Gemm
 
         public static byte* Get(int slot, long bytes)
         {
-            t_ptr ??= new void*[3];
-            t_len ??= new long[3];
+            t_ptr ??= new void*[5];
+            t_len ??= new long[5];
             if (bytes < 64)
             {
                 bytes = 64;
@@ -441,6 +506,25 @@ internal static unsafe class Int8Gemm
         }
     }
 
+    private sealed class PackAJob : ChunkJob
+    {
+        public Int8Format F;
+        public byte* Src;
+        public long Lda;
+        public bool U8;
+        public int Rows;
+        public int K;
+        public byte* Dst;
+        public int* RowSums;
+        public int Strips;
+
+        public override void RunChunk(int chunk)
+        {
+            int s0 = chunk * PackAStripsPerChunk;
+            PackAStrips(in F, Src, Lda, U8, Rows, K, Dst, RowSums, s0, Math.Min(Strips, s0 + PackAStripsPerChunk));
+        }
+    }
+
     private sealed class TileJob : ChunkJob
     {
         public Int8Format F;
@@ -470,19 +554,8 @@ internal static unsafe class Int8Gemm
             long stripB = (long)f.Nr * kp;
             int* tile = (int*)Slab.Get(2, (long)f.Mc * f.Nc * sizeof(int));
 
-            byte* aBase;
-            int* rowSums;
-            if (A.Packed != null)
-            {
-                aBase = A.Packed + ((i0 / f.Mr) * stripA);
-                rowSums = A.RowSums + i0;
-            }
-            else
-            {
-                aBase = Slab.Get(0, mStrips * stripA);
-                rowSums = (int*)Slab.Get(1, f.Mc * sizeof(int));
-                PackA(in f, A.Raw + (i0 * A.Ld), A.Ld, A.U8, mc, K, aBase, rowSums);
-            }
+            byte* aBase = A.Packed + ((i0 / f.Mr) * stripA);
+            int* rowSums = A.RowSums + i0;
 
             byte* bBase = PackedB + ((j0 / f.Nr) * stripB);
             if (kp == 0)
@@ -510,6 +583,8 @@ internal static unsafe class Int8Gemm
             Epilogue(tile, f.Nc, i0, j0, mc, nc, rowSums);
         }
 
+        // Applies the zero points and bias to the finished sums of a tile (in place, four lanes at a time), then writes them as int32,
+        // float32 (sum * scale [+ bias]) or scaled, rounded and saturated 8-bit values.
         private void Epilogue(int* tile, int ldt, int i0, int j0, int mc, int nc, int* rowSums)
         {
             ref readonly Int8Epilogue ep = ref Ep;
@@ -520,32 +595,108 @@ internal static unsafe class Int8Gemm
                 int t = unchecked(rowSums[i] - (K * za));
                 int biasRow = ep.Bias != null && !ep.BiasPerCol ? ep.Bias[gi] : 0;
                 int* row = tile + (i * ldt);
+                int* cs = ColSums + j0;
+                int j = 0;
+                if (Vector128.IsHardwareAccelerated)
+                {
+                    Vector128<int> vza = Vector128.Create(za), vt = Vector128.Create(t), vbr = Vector128.Create(biasRow);
+                    Vector128<int> vzbs = Vector128.Create(ZeroB.Scalar);
+                    for (; j + 4 <= nc; j += 4)
+                    {
+                        Vector128<int> zb = ZeroB.IsScalar ? vzbs : Vector128.Load(ZeroB.Vector + j0 + j);
+                        Vector128<int> bias = ep.BiasPerCol ? Vector128.Load(ep.Bias + j0 + j) : vbr;
+                        Vector128<int> acc = Vector128.Load(row + j) - (vza * Vector128.Load(cs + j)) - (zb * vt) + bias;
+                        acc.Store(row + j);
+                    }
+                }
+
+                for (; j < nc; j++)
+                {
+                    int bias = ep.BiasPerCol ? ep.Bias[j0 + j] : biasRow;
+                    row[j] = unchecked(row[j] - (za * cs[j]) - (ZeroB.Get(j0 + j) * t) + bias);
+                }
+
                 if (ep.OutInt32 != null)
                 {
-                    int* dst = ep.OutInt32 + (gi * ep.Ldc) + j0;
-                    for (int j = 0; j < nc; j++)
-                    {
-                        int gj = j0 + j;
-                        int bias = ep.BiasPerCol ? ep.Bias[gj] : biasRow;
-                        dst[j] = unchecked(row[j] - (za * ColSums[gj]) - (ZeroB.Get(gj) * t) + bias);
-                    }
-
-                    continue;
+                    new ReadOnlySpan<int>(row, nc).CopyTo(new Span<int>(ep.OutInt32 + (gi * ep.Ldc) + j0, nc));
                 }
-
-                byte* q = ep.OutQuant + (gi * ep.Ldc) + j0;
-                float mRow = ep.MultVec != null && ep.MultPerRow ? ep.MultVec[gi] : ep.Mult;
-                int lo = ep.QuantUnsigned ? 0 : -128;
-                int hi = ep.QuantUnsigned ? 255 : 127;
-                for (int j = 0; j < nc; j++)
+                else if (ep.OutFloat != null)
                 {
-                    int gj = j0 + j;
-                    int bias = ep.BiasPerCol ? ep.Bias[gj] : biasRow;
-                    int acc = unchecked(row[j] - (za * ColSums[gj]) - (ZeroB.Get(gj) * t) + bias);
-                    float mult = ep.MultVec != null && !ep.MultPerRow ? ep.MultVec[gj] : mRow;
-                    q[j] = (byte)Requant(acc, mult, ep.QuantZero, lo, hi);
+                    StoreFloat(row, ep.OutFloat + (gi * ep.Ldc) + j0, nc, j0, gi);
+                }
+                else
+                {
+                    StoreQuant(row, ep.OutQuant + (gi * ep.Ldc) + j0, nc, j0, gi);
                 }
             }
+        }
+
+        private void StoreFloat(int* row, float* dst, int nc, int j0, int gi)
+        {
+            ref readonly Int8Epilogue ep = ref Ep;
+            // The same two correctly rounded operations an unfused Cast, Mul (and Add) would do, so the bits are the same.
+            float mRow = ep.MultVec != null && ep.MultPerRow ? ep.MultVec[gi] : ep.Mult;
+            bool perCol = ep.MultVec != null && !ep.MultPerRow;
+            int j = 0;
+            if (Vector128.IsHardwareAccelerated)
+            {
+                Vector128<float> vm = Vector128.Create(mRow);
+                for (; j + 4 <= nc; j += 4)
+                {
+                    Vector128<float> m = perCol ? Vector128.Load(ep.MultVec + j0 + j) : vm;
+                    Vector128<float> v = Vector128.ConvertToSingle(Vector128.Load(row + j)) * m;
+                    if (ep.BiasFloat != null)
+                    {
+                        v += Vector128.Load(ep.BiasFloat + j0 + j);
+                    }
+
+                    v.Store(dst + j);
+                }
+            }
+
+            for (; j < nc; j++)
+            {
+                float v = (float)row[j] * (perCol ? ep.MultVec[j0 + j] : mRow);
+                dst[j] = ep.BiasFloat != null ? v + ep.BiasFloat[j0 + j] : v;
+            }
+        }
+
+        private void StoreQuant(int* row, byte* q, int nc, int j0, int gi)
+        {
+            ref readonly Int8Epilogue ep = ref Ep;
+            float mRow = ep.MultVec != null && ep.MultPerRow ? ep.MultVec[gi] : ep.Mult;
+            bool perCol = ep.MultVec != null && !ep.MultPerRow;
+            int lo = ep.QuantUnsigned ? 0 : -128;
+            int hi = ep.QuantUnsigned ? 255 : 127;
+            int j = 0;
+            if (Vector128.IsHardwareAccelerated)
+            {
+                Vector128<float> vm = Vector128.Create(mRow), vz = Vector128.Create((float)ep.QuantZero);
+                Vector128<float> vlo = Vector128.Create((float)lo), vhi = Vector128.Create((float)hi);
+                for (; j + 16 <= nc; j += 16)
+                {
+                    Vector128<int> q0 = Quant4(row + j, perCol ? Vector128.Load(ep.MultVec + j0 + j) : vm, vz, vlo, vhi);
+                    Vector128<int> q1 = Quant4(row + j + 4, perCol ? Vector128.Load(ep.MultVec + j0 + j + 4) : vm, vz, vlo, vhi);
+                    Vector128<int> q2 = Quant4(row + j + 8, perCol ? Vector128.Load(ep.MultVec + j0 + j + 8) : vm, vz, vlo, vhi);
+                    Vector128<int> q3 = Quant4(row + j + 12, perCol ? Vector128.Load(ep.MultVec + j0 + j + 12) : vm, vz, vlo, vhi);
+                    // Inside [lo, hi] already, so truncating narrowing keeps the low byte, right for both signednesses.
+                    Vector128<ushort> s0 = Vector128.Narrow(q0.AsUInt32(), q1.AsUInt32());
+                    Vector128<ushort> s1 = Vector128.Narrow(q2.AsUInt32(), q3.AsUInt32());
+                    Vector128.Narrow(s0, s1).Store(q + j);
+                }
+            }
+
+            for (; j < nc; j++)
+            {
+                q[j] = (byte)Requant(row[j], perCol ? ep.MultVec[j0 + j] : mRow, ep.QuantZero, lo, hi);
+            }
+        }
+
+        private static Vector128<int> Quant4(int* p, Vector128<float> mult, Vector128<float> zero, Vector128<float> lo, Vector128<float> hi)
+        {
+            Vector128<float> v = Vector128.Round(Vector128.ConvertToSingle(Vector128.Load(p)) * mult) + zero;
+            v = Vector128.ConditionalSelect(Vector128.Equals(v, v), v, lo);
+            return Vector128.ConvertToInt32(Vector128.Min(Vector128.Max(v, lo), hi));
         }
     }
 }

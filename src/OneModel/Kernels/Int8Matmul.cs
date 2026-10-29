@@ -98,6 +98,8 @@ internal ref struct Int8Call
 
     /// <summary>The output: int32 sums, or 8-bit quantized values when <see cref="OutInt32"/> is empty.</summary>
     public Span<int> OutInt32;
+    public Span<float> OutFloat;
+    public ReadOnlySpan<float> BiasFloat;
     public Span<byte> OutQuant;
     public bool QuantUnsigned;
     public int QuantZero;
@@ -161,7 +163,13 @@ internal static unsafe class Int8Matmul
         }
 
         bool toInt = !c.OutInt32.IsEmpty;
-        long outLen = toInt ? c.OutInt32.Length : c.OutQuant.Length;
+        bool toFloat = !toInt && !c.OutFloat.IsEmpty;
+        long outLen = toInt ? c.OutInt32.Length : toFloat ? c.OutFloat.Length : c.OutQuant.Length;
+        if (toFloat && !c.BiasFloat.IsEmpty && c.BiasFloat.Length < n)
+        {
+            throw new ArgumentException("The float bias is shorter than the number of columns.");
+        }
+
         if (c.Ldc < n || ((m - 1) * c.Ldc) + n > outLen)
         {
             throw new ArgumentException("The output is smaller than m x n with its row stride.");
@@ -179,7 +187,7 @@ internal static unsafe class Int8Matmul
 
         fixed (byte* pRaw = c.ARaw, pBp = c.BPacked, pq = c.OutQuant)
         fixed (int* pBs = c.BSums, pza = c.ZaVec, pzb = c.ZbVec, pi = c.OutInt32, pbias = c.Bias)
-        fixed (float* pmv = c.MultVec)
+        fixed (float* pmv = c.MultVec, pof = c.OutFloat, pbf = c.BiasFloat)
         fixed (byte* pAp = packedA ? c.APacked!.Data : default)
         fixed (int* pAs = packedA ? c.APacked!.Sums : default)
         {
@@ -198,7 +206,9 @@ internal static unsafe class Int8Matmul
 
             Int8Epilogue ep = default;
             ep.OutInt32 = toInt ? pi : null;
-            ep.OutQuant = toInt ? null : pq;
+            ep.OutQuant = toInt || toFloat ? null : pq;
+            ep.OutFloat = toFloat ? pof : null;
+            ep.BiasFloat = c.BiasFloat.IsEmpty ? null : pbf;
             ep.QuantUnsigned = c.QuantUnsigned;
             ep.QuantZero = c.QuantZero;
             ep.Ldc = c.Ldc;

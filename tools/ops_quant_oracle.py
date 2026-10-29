@@ -116,6 +116,31 @@ def gen(w, rng):
         x = [q(np.int8, *shp) for _ in range(2)]
         w.add_model(f"qdq_add_{i}", qdq_unit("Add", [shp, shp], [sa, sb], [za, zb], sy, zy), {"q0": x[0], "q1": x[1]})
 
+    # A dynamically quantized linear layer as quantize_dynamic writes it: DynamicQuantizeLinear, MatMulInteger, Cast, Mul by
+    # input scale * weight scale, Add of the bias.
+    for i, (shp, n, bias) in enumerate([((1, 384), 1536, True), ((128, 768), 768, True), ((2, 33, 70), 41, False), ((5, 3, 16), 8, True)]):
+        k = shp[-1]
+        wq = q(np.int8, k, n)
+        wscale = rng.uniform(0.001, 0.01, size=n).astype(np.float32)
+        nodes = [
+            h.make_node("DynamicQuantizeLinear", ["x"], ["xq", "xs", "xz"]),
+            h.make_node("MatMulInteger", ["xq", "wq", "xz", "wz"], ["acc"]),
+            h.make_node("Cast", ["acc"], ["accf"], to=T.FLOAT),
+            h.make_node("Mul", ["xs", "wscale"], ["scales"]),
+            h.make_node("Mul", ["accf", "scales"], ["y0"]),
+        ]
+        inits = [onnx.numpy_helper.from_array(wq, "wq"), onnx.numpy_helper.from_array(np.zeros((), np.int8), "wz"),
+                 onnx.numpy_helper.from_array(wscale, "wscale")]
+        out = "y0"
+        if bias:
+            nodes.append(h.make_node("Add", ["y0", "b"], ["y"]))
+            inits.append(onnx.numpy_helper.from_array(f32(n), "b"))
+            out = "y"
+        g = h.make_graph(nodes, "g", [h.make_tensor_value_info("x", T.FLOAT, list(shp))], [h.make_tensor_value_info(out, T.FLOAT, None)], initializer=inits)
+        m = h.make_model(g, opset_imports=[h.make_opsetid("", 17)])
+        m.ir_version = 9
+        w.add_model(f"dynlinear_{i}", m, {"x": f32(*shp, lo=-2, hi=3)})
+
     # --- DequantizeLinear ---
     for opset in (10, 13, 19):
         for dt in (np.uint8, np.int8):

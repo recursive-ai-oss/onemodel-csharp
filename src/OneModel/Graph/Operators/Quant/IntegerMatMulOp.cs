@@ -93,9 +93,22 @@ internal sealed class IntegerMatMulOp : OpKernel
     public static readonly OpDef MatMulInteger = new("MatMulInteger", 10, int.MaxValue, static _ => new IntegerMatMulOp(false));
     public static readonly OpDef QLinearMatMul = new("QLinearMatMul", 10, int.MaxValue, static _ => new IntegerMatMulOp(true));
 
-    private readonly bool _q;
+    /// <summary>
+    /// The product with its dequantization fused in, made only by the graph pass that fuses MatMulInteger, Cast to float32, Mul by the
+    /// scale and an optional bias Add. Inputs: A, B, a_zero_point, b_zero_point (either may be omitted), scale (a scalar or one value per
+    /// column), bias (optional, one value per column). Output float32: <c>(float)sum * scale + bias</c>, the two correctly rounded
+    /// operations the unfused chain performs, so the bits are the same.
+    /// </summary>
+    public static readonly OpDef MatMulIntegerToFloat = new("MatMulIntegerToFloat", 1, int.MaxValue, static _ => new IntegerMatMulOp(false, true));
 
-    private IntegerMatMulOp(bool quantized) => _q = quantized;
+    private readonly bool _q;
+    private readonly bool _float;
+
+    private IntegerMatMulOp(bool quantized, bool toFloat = false)
+    {
+        _q = quantized;
+        _float = toFloat;
+    }
 
     public override bool SupportsExact => true;
 
@@ -116,6 +129,11 @@ internal sealed class IntegerMatMulOp : OpKernel
             {
                 throw ctx.Fail($"input {i} is required");
             }
+        }
+
+        if (_float && !ctx.HasInput(4))
+        {
+            throw ctx.Fail("input 4 (the scale) is required");
         }
 
         _ = QuantCommon.IsU8(ctx, ctx.InputType(AIn), "A");
@@ -165,7 +183,16 @@ internal sealed class IntegerMatMulOp : OpKernel
             _ = QuantCommon.IsPerChannel(ctx, BZeroIn, n, "b_zero_point");
         }
 
-        DType outType = DType.I32;
+        DType outType = _float ? DType.F32 : DType.I32;
+        if (_float)
+        {
+            CheckColumnVector(ctx, 4, n, "the scale");
+            if (ctx.HasInput(5))
+            {
+                CheckColumnVector(ctx, 5, n, "the bias");
+            }
+        }
+
         if (_q)
         {
             _ = QuantCommon.IsPerChannel(ctx, 1, 1, "a_scale");
@@ -209,6 +236,29 @@ internal sealed class IntegerMatMulOp : OpKernel
         }
 
         ctx.SetOutput(0, outType, Shape.Create(d.Slice(0, r)));
+    }
+
+    // A float32 scale or bias: one value, or one per column (leading dimensions of size 1).
+    private static void CheckColumnVector(InferContext ctx, int input, int n, string what)
+    {
+        Shape s = ctx.InputShape(input);
+        if (ctx.InputType(input) != DType.F32)
+        {
+            throw ctx.Unsupported($"{what} must be float32");
+        }
+
+        for (int d = 0; d < s.Rank - 1; d++)
+        {
+            if (s[d] != 1)
+            {
+                throw ctx.Unsupported($"{what} {s} must be a scalar or have {n} values along the last axis only");
+            }
+        }
+
+        if (s.Length != 1 && !(s.Rank >= 1 && s[s.Rank - 1] == n))
+        {
+            throw ctx.Unsupported($"{what} {s} must be a scalar or have {n} values along the last axis only");
+        }
     }
 
     public override object? Prepare(PrepareContext ctx)
@@ -296,6 +346,36 @@ internal sealed class IntegerMatMulOp : OpKernel
         ReadOnlySpan<float> multVec = default;
         int quantZero = 0;
         bool quantUnsigned = false;
+        ReadOnlySpan<float> biasFloat = default;
+        if (_float)
+        {
+            Tensor sc = run.Inputs[4];
+            if (sc.Length == 1)
+            {
+                mult = sc.Data<float>()[0];
+            }
+            else
+            {
+                multVec = sc.Data<float>();
+            }
+
+            Tensor bf = QuantParams.Optional(in run, 5);
+            if (!bf.IsEmpty)
+            {
+                if (bf.Length == 1)
+                {
+                    // One bias for every column: expand it once into scratch (rare).
+                    Span<float> e = run.Scratch(DType.F32, Shape.Create(n)).MutableData<float>();
+                    e.Fill(bf.Data<float>()[0]);
+                    biasFloat = e;
+                }
+                else
+                {
+                    biasFloat = bf.Data<float>();
+                }
+            }
+        }
+
         if (_q)
         {
             float sA = run.Inputs[1].Data<float>()[0];
@@ -360,7 +440,12 @@ internal sealed class IntegerMatMulOp : OpKernel
                 QuantZero = quantZero,
                 Threads = run.Threads,
             };
-            if (_q)
+            call.BiasFloat = biasFloat;
+            if (_float)
+            {
+                call.OutFloat = y.MutableData<float>();
+            }
+            else if (_q)
             {
                 call.OutQuant = QuantParams.MutableBytes(in y);
             }
@@ -418,7 +503,12 @@ internal sealed class IntegerMatMulOp : OpKernel
                 QuantZero = quantZero,
                 Threads = run.Threads,
             };
-            if (_q)
+            call.BiasFloat = biasFloat;
+            if (_float)
+            {
+                call.OutFloat = y.MutableData<float>().Slice((int)(bi * mn), (int)mn);
+            }
+            else if (_q)
             {
                 call.OutQuant = QuantParams.MutableBytes(in y).Slice((int)(bi * mn), (int)mn);
             }

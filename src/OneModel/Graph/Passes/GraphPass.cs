@@ -175,6 +175,7 @@ internal static class GraphPasses
     [
         // The QDQ rewrite reads the DequantizeLinear nodes of the weights, so it runs before constant folding turns them into floats.
         new Operators.Quant.QdqPass(),
+        new Operators.Quant.MatMulIntegerFusionPass(),
         new ConstantFoldPass(),
     ];
 

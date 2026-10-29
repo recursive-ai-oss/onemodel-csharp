@@ -47,12 +47,12 @@ internal ref struct Int8ConvCall
 /// </summary>
 internal static unsafe class Int8Conv
 {
-    private const int Im2ColRowsPerChunk = 16;
+    private const int StripsPerChunk = 2;
     private const int PlanesPerChunk = 4;
     private const int MaxDirectTaps = 64;
 
     [ThreadStatic]
-    private static Im2ColJob? t_im2col;
+    private static Im2ColPackJob? t_im2col;
 
     [ThreadStatic]
     private static DepthwiseJob? t_depthwise;
@@ -112,7 +112,6 @@ internal static unsafe class Int8Conv
         bool pointwise = s.KH == 1 && s.KW == 1 && s.StrideH == 1 && s.StrideW == 1 &&
                          s.PadTop == 0 && s.PadLeft == 0 && s.PadBottom == 0 && s.PadRight == 0;
         Int8Format f = c.Format;
-        byte* cols = pointwise ? null : (byte*)Scratch.Get(Scratch.Im2Col, (((long)k * nCols) + 3) / 4);
         byte* packed = (byte*)Scratch.Get(Scratch.PackB, (f.PackedBBytes(k, nCols) + 3) / 4);
         int* sums = (int*)Scratch.Get(Scratch.Plane, nCols);
         int hw = s.H * s.W;
@@ -123,20 +122,27 @@ internal static unsafe class Int8Conv
                 for (int g = 0; g < s.Groups; g++)
                 {
                     byte* src = px + ((((long)img * s.Cin) + (g * cinG)) * hw);
-                    byte* b = src;
-                    if (!pointwise)
+                    if (pointwise)
                     {
-                        Im2ColJob job = t_im2col ??= new Im2ColJob();
+                        Int8Gemm.PackB(in f, src, nCols, c.XU8, k, nCols, packed, sums, c.Threads);
+                    }
+                    else
+                    {
+                        // Gather the patches straight into the packed layout: no intermediate im2col matrix.
+                        int strips = (nCols + f.Nr - 1) / f.Nr;
+                        Im2ColPackJob job = t_im2col ??= new Im2ColPackJob();
+                        job.F = f;
                         job.Src = src;
-                        job.Dst = cols;
                         job.S = s;
                         job.CinG = cinG;
                         job.Pad = (byte)c.XZeroRaw;
-                        ParallelFor.Run(job, (k + Im2ColRowsPerChunk - 1) / Im2ColRowsPerChunk, c.Threads);
-                        b = cols;
+                        job.U8 = c.XU8;
+                        job.K = k;
+                        job.Dst = packed;
+                        job.ColSums = sums;
+                        job.Strips = strips;
+                        ParallelFor.Run(job, (strips + StripsPerChunk - 1) / StripsPerChunk, c.Threads);
                     }
-
-                    Int8Gemm.PackB(in f, b, nCols, c.XU8, k, nCols, packed, sums, c.Threads);
 
                     var call = new Int8Call
                     {
@@ -226,55 +232,87 @@ internal static unsafe class Int8Conv
         }
     }
 
-    private sealed class Im2ColJob : ChunkJob
+    // Im2col (Chellapilla et al. 2006) fused with the packing of B: strips of Nr output positions, one packed row per kernel tap
+    // (input channel, kernel row, kernel column). Taps that fall outside the input read the padding value, the input's zero point.
+    private sealed class Im2ColPackJob : ChunkJob
     {
+        public Int8Format F;
         public byte* Src;
-        public byte* Dst;
         public ConvShape S;
         public int CinG;
         public byte Pad;
+        public bool U8;
+        public int K;
+        public byte* Dst;
+        public int* ColSums;
+        public int Strips;
 
         public override void RunChunk(int chunk)
         {
-            int outH = S.OutH, outW = S.OutW;
-            int rows = CinG * S.KH * S.KW;
-            int r0 = chunk * Im2ColRowsPerChunk;
-            int r1 = Math.Min(rows, r0 + Im2ColRowsPerChunk);
-            for (int r = r0; r < r1; r++)
+            int s0 = chunk * StripsPerChunk;
+            int s1 = Math.Min(Strips, s0 + StripsPerChunk);
+            int nr = F.Nr, g = F.G, kp = F.KPad(K);
+            int outW = S.OutW, nCols = S.OutH * outW;
+            int* yBase = stackalloc int[64];
+            int* xBase = stackalloc int[64];
+            int* sums = stackalloc int[64];
+            for (int s = s0; s < s1; s++)
             {
-                int kx = r % S.KW;
-                int ky = (r / S.KW) % S.KH;
-                int ci = r / (S.KW * S.KH);
-                byte* plane = Src + ((long)ci * S.H * S.W);
-                byte* dst = Dst + ((long)r * outH * outW);
-                int shiftX = (kx * S.DilW) - S.PadLeft;
-                int oxLo = shiftX >= 0 ? 0 : (-shiftX + S.StrideW - 1) / S.StrideW;
-                int oxHi = S.W - 1 - shiftX < 0 ? -1 : Math.Min(outW - 1, (S.W - 1 - shiftX) / S.StrideW);
-                for (int oy = 0; oy < outH; oy++)
+                byte* strip = Dst + ((long)s * nr * kp);
+                int j0 = s * nr;
+                int cols = Math.Min(nr, nCols - j0);
+                for (int c = 0; c < nr; c++)
                 {
-                    int iy = (oy * S.StrideH) - S.PadTop + (ky * S.DilH);
-                    byte* row = dst + ((long)oy * outW);
-                    if (iy < 0 || iy >= S.H || oxHi < oxLo)
+                    sums[c] = 0;
+                    int n = j0 + c;
+                    // Columns past the end read nothing: put them far outside the input.
+                    yBase[c] = c < cols ? ((n / outW) * S.StrideH) - S.PadTop : int.MinValue / 2;
+                    xBase[c] = c < cols ? ((n % outW) * S.StrideW) - S.PadLeft : 0;
+                }
+
+                int ci = 0, ky = 0, kx = 0;
+                for (int p = 0; p < kp; p++)
+                {
+                    sbyte* d = (sbyte*)strip + ((p / g) * nr * g) + (p % g);
+                    if (p >= K)
                     {
-                        new Span<byte>(row, outW).Fill(Pad);
+                        for (int c = 0; c < nr; c++)
+                        {
+                            d[c * g] = 0;
+                        }
+
                         continue;
                     }
 
-                    byte* srcRow = plane + ((long)iy * S.W);
-                    new Span<byte>(row, oxLo).Fill(Pad);
-                    if (S.StrideW == 1)
+                    byte* plane = Src + ((long)ci * S.H * S.W);
+                    int yo = ky * S.DilH, xo = kx * S.DilW;
+                    for (int c = 0; c < nr; c++)
                     {
-                        new ReadOnlySpan<byte>(srcRow + oxLo + shiftX, oxHi - oxLo + 1).CopyTo(new Span<byte>(row + oxLo, oxHi - oxLo + 1));
-                    }
-                    else
-                    {
-                        for (int ox = oxLo; ox <= oxHi; ox++)
+                        int iy = yBase[c] + yo, ix = xBase[c] + xo;
+                        int v = Int8Gemm.Shift((uint)iy < (uint)S.H && (uint)ix < (uint)S.W ? plane[(iy * S.W) + ix] : Pad, U8);
+                        if (c >= cols)
                         {
-                            row[ox] = srcRow[(ox * S.StrideW) + shiftX];
+                            v = 0;
                         }
+
+                        sums[c] += v;
+                        d[c * g] = (sbyte)v;
                     }
 
-                    new Span<byte>(row + oxHi + 1, outW - oxHi - 1).Fill(Pad);
+                    if (++kx == S.KW)
+                    {
+                        kx = 0;
+                        if (++ky == S.KH)
+                        {
+                            ky = 0;
+                            ci++;
+                        }
+                    }
+                }
+
+                for (int c = 0; c < cols; c++)
+                {
+                    ColSums[j0 + c] = sums[c];
                 }
             }
         }
