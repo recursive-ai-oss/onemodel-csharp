@@ -4,6 +4,16 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- Half-precision storage: models whose weights or values are float16 or bfloat16 run (each operator widens its inputs to float32 and rounds its results back; `docs/fp16.md`). `SessionOptions.WeightStorage` keeps large MatMul, Gemm and Conv weights of float32 models as float16 or bfloat16 to halve their memory.
+- `tools/export_models.py --fp16` makes float16 variants of MiniLM-L6 and ResNet-50; `Bar` takes `--weights original|fp16|bf16`.
+- A direct depthwise convolution (phase planes for strides, 16/8/4/1-lane paths, four rows at a time for narrow maps) replaces the first one: 3-8x faster on MobileNetV3's layers (`docs/kernels-depthwise.md`).
+
+### Changed
+
+- Matrix products, convolutions and the normalisation operators use no more threads than their work can use (about 60 microseconds of work per thread), so small shapes no longer run slower on many threads; the parallel-for allocates nothing per call.
+
 ## [0.1.0-preview.1] - 2026-10-29
 
 First preview: ONNX models load and run on the CPU through `Model.Load(...).Run(...)` or a `Session`, with no native dependencies. The reference set (ResNet-50, MobileNetV3, BERT-base, MiniLM-L6, Whisper-small encoder and decoder, and two text-recognition models) matches ONNX Runtime within 1e-4 scaled error, with outputs independent of thread count. No graph optimizations, int8 or fp16 compute yet; speed is not tuned.

@@ -120,4 +120,4 @@ correct engines that round in slightly different places differ by that much. Mea
 | ResNet-50 (1) | 3.6e-4 | 1.37e-3 | 1.02e-3 | 2.9e-7 |
 | ResNet-50 (8) | 4.8e-4 | 1.49e-3 | 1.75e-3 | 2.7e-7 |
 
-Output hashes are equal at 1 and 8 threads. ResNet-50's top-1 class agrees with float32 on all eight batch samples.
+Output hashes are equal at 1 and 8 threads.
