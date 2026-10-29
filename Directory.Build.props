@@ -1,0 +1,77 @@
+<Project>
+
+  <!-- Properties other files rely on:
+       LibName         the library name, used for assembly, namespace and project names. The provisional name changes here.
+       PackagePrefix   publisher prefix; the package ID is $(PackagePrefix).$(LibName).
+       Version         the one package version.
+       ONEMODEL_ARTIFACTS (environment) where all bin/obj/package output goes.
+       Configuration   Debug, Release, or Checked: optimized code with the CHECKED symbol defined, which turns on the bounds
+                       assertions at kernel entry points and the poisoning of freed arena buffers. Tests and fuzzing run in Checked. -->
+  <PropertyGroup Label="Name">
+    <LibName>OneModel</LibName>
+    <PackagePrefix>RecursiveAI</PackagePrefix>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Output">
+    <!-- Build output never goes inside the checkout. Set ONEMODEL_ARTIFACTS to choose where; otherwise it goes to a folder in the
+         user's temp directory named after the checkout. -->
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <_RepoName>$([System.IO.Path]::GetFileName($([System.IO.Path]::GetDirectoryName($(MSBuildThisFileDirectory)))))</_RepoName>
+    <ArtifactsPath Condition="'$(ONEMODEL_ARTIFACTS)' != ''">$(ONEMODEL_ARTIFACTS)</ArtifactsPath>
+    <ArtifactsPath Condition="'$(ONEMODEL_ARTIFACTS)' == ''">$([System.IO.Path]::Combine($([System.IO.Path]::GetTempPath()), 'onemodel-artifacts', '$(_RepoName)'))</ArtifactsPath>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Configurations">
+    <Configurations>Debug;Release;Checked</Configurations>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Checked configuration" Condition="'$(Configuration)' == 'Checked'">
+    <DefineConstants>$(DefineConstants);CHECKED</DefineConstants>
+    <Optimize>true</Optimize>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Language and analysis">
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Reproducible packages">
+    <!-- Path mapping is for the packages only (projects under src/). Test projects keep real paths: some tests locate test data from
+         [CallerFilePath], which a mapped path would break on CI. -->
+    <_ProjectDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)'))</_ProjectDir>
+    <_SrcDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', 'src'))</_SrcDir>
+    <IsShippedProject Condition="$(_ProjectDir.StartsWith('$(_SrcDir)'))">true</IsShippedProject>
+    <IsShippedProject Condition="'$(IsShippedProject)' == ''">false</IsShippedProject>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true' and '$(IsShippedProject)' == 'true'">true</ContinuousIntegrationBuild>
+    <IsPackable>$(IsShippedProject)</IsPackable>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package metadata">
+    <Authors>Recursive AI, LLC</Authors>
+    <Company>Recursive AI, LLC</Company>
+    <Copyright>Copyright (c) Recursive AI, LLC</Copyright>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <!-- The one place the package version lives. -->
+    <Version>0.1.0-preview.1</Version>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/recursive-ai-oss/onemodel-csharp</RepositoryUrl>
+    <PackageProjectUrl>https://recursiveai.org/onemodel/</PackageProjectUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!-- Breaking-change check on pack. There is no published version to compare with yet; set PackageValidationBaselineVersion
+         to the last published version after each release. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+</Project>
