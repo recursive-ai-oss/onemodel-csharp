@@ -47,7 +47,17 @@ lo, hi = -128, 127
 def Q(v): return np.clip(v + zy, lo, hi).astype(np.int8)
 a32 = acc.astype(f)
 swv = sw[None, :, None, None]
+swd = sw.astype(np.float64)[None, :, None, None]
+import itertools
 cands = {
+  'float(double sx*sw/sy)': Q(np.rint(a32 * (np.float64(sx) * swd / np.float64(sy)).astype(f))),
+  'float(double sx*(sw/sy))': Q(np.rint(a32 * (np.float64(sx) * (swd / np.float64(sy))).astype(f))),
+  'float(double (sx/sy)*sw)': Q(np.rint(a32 * ((np.float64(sx) / np.float64(sy)) * swd).astype(f))),
+  'float: sw*sx then /sy (f32)': Q(np.rint(a32 * (swv * f(sx)) / f(sy))),
+  'float: (sx/sy) f32 * sw': Q(np.rint(a32 * (f(sx) / f(sy)) * swv)),
+  'float: acc*sx*(sw/sy)': Q(np.rint((a32 * f(sx)) * (swv / f(sy)))),
+  'float: sx*(sw/sy) f32 mult': Q(np.rint(a32 * (f(sx) * (swv / f(sy))))),
+
   'ours: rint(acc*(sx*sw/sy))': Q(np.rint(a32 * (f(sx) * swv / f(sy)))),
   'rint(acc*(sx*sw)/sy)': Q(np.rint(a32 * (f(sx) * swv) / f(sy))),
   'rint((acc*sx*sw)/sy)': Q(np.rint(((a32 * f(sx)) * swv) / f(sy))),
