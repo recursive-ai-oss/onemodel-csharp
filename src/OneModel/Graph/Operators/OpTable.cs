@@ -16,5 +16,22 @@ internal static class OpTable
         ReshapeOp.Def,
         IdentityOp.Def,
         ConstantOp.Def,
+
+        // Normalisation, softmax, reductions and cumulative sums.
+        LayerNormalizationOp.Def,
+        RmsNormalizationOp.Def,
+        InstanceNormalizationOp.Def,
+        GroupNormalizationOp.DefPerGroup,
+        GroupNormalizationOp.DefPerChannel,
+        SoftmaxOp.DefCoerce,
+        SoftmaxOp.DefAxis,
+        LogSoftmaxOp.DefCoerce,
+        LogSoftmaxOp.DefAxis,
+        HardmaxOp.DefCoerce,
+        HardmaxOp.DefAxis,
+        .. ReduceKernel.Defs,
+        ArgExtremeKernel.ArgMaxDef,
+        ArgExtremeKernel.ArgMinDef,
+        CumSumOp.Def,
     ];
 }
