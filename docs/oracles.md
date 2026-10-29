@@ -106,8 +106,7 @@ int8 outputs are much noisier. Between ONNX Runtime's own levels the scaled diff
 
 `tools/export_models.py --fp16` writes `<model>_fp16.onnx` next to the float32 file (MiniLM-L6 and ResNet-50): float16 weights and
 float16 activations, float32 graph inputs and outputs with a `Cast` at each end, finite values beyond the float16 range clamped to
-±65504. `make_reference.py --variant fp16` stores ONNX Runtime's output on the same file and inputs. Both engines widen, compute in
-float32 and round per operator on the CPU.
+±65504. `make_reference.py --variant fp16` stores ONNX Runtime's output on the same file and inputs. Both engines run it on the CPU.
 
 Gate: scaled error of ours against ONNX Runtime on the same file ≤ 4e-3, and our error against the float32 model's output ≤ 1.5 times
 ONNX Runtime's. Reason: half precision has 11 significant bits (4.9e-4 per rounding), the models chain dozens of roundings, and two
