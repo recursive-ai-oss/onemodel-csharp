@@ -4,8 +4,18 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Changed
+
+- Faster convolution in fast mode: regular and grouped convolutions gather their input patches straight into the packed layout (no im2col matrix, no separate packing phase), their weights are packed once per session (`conv-pack` pass), tiles are balanced, and small layers use more threads (`docs/kernels-conv.md`). A single-row matrix product uses a matrix-vector kernel; large element-wise outputs and float `MaxPool` run in parallel chunks. Fast-mode results are independent of the thread count as before; exact mode is unchanged.
+- A convolution followed by an `Add` of a skip connection adds it on the finished tile (graph pass `conv-residual`, fast mode); ResNet-50 at 8 threads about 10% faster.
+
+## [0.3.0-preview.1] - 2026-10-30
+
+Our own model file, ONNX backend-test conformance with control flow, and exact-mode results checked bit for bit across platforms. Of the 1905 `onnx/backend/test` cases, 1580 pass in fast mode and 1382 in exact mode, none fail, and the rest are listed gaps (`docs/conformance.md`). Exact-mode output hashes are equal on Windows, Linux and macOS (x64 and arm64, JIT and NativeAOT) and on browser WebAssembly (`docs/golden-hashes.md`).
+
 ### Added
 
+- Exact-mode golden hashes: `tools/GoldenModels`, `tools/golden*.sh`, and a CI check on every platform against `testdata/graphs/golden-exact.txt`.
 - The OneModel model file (`ModelFormat`, `docs/format.md`; format version 1, unstable until 1.0): a 64-byte header, a JSON manifest of the graph and 64-byte-aligned raw weights that load as memory-mapped views. `ModelFormat.Convert` turns an ONNX file into one, `ModelFormat.Save` writes an imported model, and `Model.Load` / `Session.Load` open either kind by its first eight bytes. A converted model gives bit-identical outputs. Bad files fail with `ModelFormatException` naming the field.
 - `OnnxSweep conformance` and `tools/conformance.sh`: one runner over `onnx/backend/test` (node, simple, pytorch-converted, pytorch-operator) in fast and exact mode, writing per-case status and `docs/conformance.md`.
 - About 70 operators for backend-test coverage (activations and trigonometry, bitwise, scatter and set operators, loss functions, LRN, Einsum, DFT/STFT and windows, GridSample, RoiAlign, NonMaxSuppression, Attention opset 23 and others; `docs/ops-coverage.md`), ConvTranspose and Conv with three spatial axes, Resize `antialias`, MelWeightMatrix and IsNaN.
@@ -13,8 +23,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
-- Faster convolution in fast mode: regular and grouped convolutions gather their input patches straight into the packed layout (no im2col matrix, no separate packing phase), their weights are packed once per session (`conv-pack` pass), tiles are balanced, and small layers use more threads (`docs/kernels-conv.md`). A single-row matrix product uses a matrix-vector kernel; large element-wise outputs and float `MaxPool` run in parallel chunks. Fast-mode results are independent of the thread count as before; exact mode is unchanged.
-- A convolution followed by an `Add` of a skip connection adds it on the finished tile (graph pass `conv-residual`, fast mode); ResNet-50 at 8 threads about 10% faster.
+- int8 packing narrows through value-preserving types, so results agree on WebAssembly, where vector narrowing saturates in compiled code and truncates in the interpreter.
+- The int8 model-level metric adds a noise floor on the first quantized tensor of token-input encoders (`docs/int8.md`).
 - RoiAlign without `coordinate_transformation_mode` defaults to `half_pixel` from opset 16; Squeeze and Unsqueeze accept a scalar `axes`.
 
 ## [0.2.0-preview.1] - 2026-10-30
