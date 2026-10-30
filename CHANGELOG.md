@@ -15,6 +15,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Changed
 
 - `Ops.MatMul` (default kernels, `DenseKernels`) runs on the blocked GEMM instead of the double-accumulating reference loop; pass `ReferenceKernels.Instance` for the old behaviour.
+- Faster convolution in fast mode: regular and grouped convolutions gather their input patches straight into the packed layout (no im2col matrix, no separate packing phase), their weights are packed once per session (`conv-pack` pass), tiles are balanced, and small layers use more threads (`docs/kernels-conv.md`). A single-row matrix product uses a matrix-vector kernel; large element-wise outputs and float `MaxPool` run in parallel chunks. Fast-mode results are independent of the thread count as before; exact mode is unchanged.
+- A convolution followed by an `Add` of a skip connection adds it on the finished tile (graph pass `conv-residual`, fast mode); ResNet-50 at 8 threads about 10% faster.
 
 ## [0.3.0-preview.1] - 2026-10-30
 

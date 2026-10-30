@@ -84,6 +84,42 @@ public class ConvAndGeluFusionTests
         Assert.Contains("BatchNormalizationOp", exact);
     }
 
+    // x [1, c, 9, 11] -> Conv(3x3) -> Add(skip) -> Relu -> y, where the skip is x itself or a constant that broadcasts.
+    private static byte[] ResidualModel(int c, int group, string skip)
+    {
+        var b = new ModelBuilder().Input("x", 1, 1, c, 9, 11).Output("y", 1, 1, c, 9, 11);
+        b.Initializer("w", PassTestKit.RandomFloats(c * (c / group) * 9, 4, 0.5f), c, c / group, 3, 3);
+        b.Initializer("b", PassTestKit.RandomFloats(c, 5), c);
+        b.Node("Conv", ["x", "w", "b"], ["c"], ("kernel_shape", new long[] { 3, 3 }), ("pads", new long[] { 1, 1, 1, 1 }), ("group", (long)group));
+        if (skip != "x")
+        {
+            b.Initializer("r", PassTestKit.RandomFloats(c, 6), 1, c, 1, 1);
+        }
+
+        b.Node("Add", skip == "x" ? ["x", "c"] : ["c", "r"], ["a"]);
+        b.Node("Relu", ["a"], ["y"]);
+        return b.Build();
+    }
+
+    [Theory]
+    [InlineData(6, 1, "x")]
+    [InlineData(6, 1, "r")]
+    [InlineData(8, 2, "x")]
+    [InlineData(6, 6, "x")]
+    public void ConvResidualActivationMatchesUnfusedInFastMode(int c, int g, string skip)
+    {
+        byte[] model = ResidualModel(c, g, skip);
+        float[] x = PassTestKit.RandomFloats(c * 9 * 11, 13);
+        float[] none = PassTestKit.Run(model, x, [1, c, 9, 11], OptimizationLevel.None, ExecutionMode.Fast);
+        float[] one = PassTestKit.Run(model, x, [1, c, 9, 11], OptimizationLevel.All, ExecutionMode.Fast, 1);
+        float[] many = PassTestKit.Run(model, x, [1, c, 9, 11], OptimizationLevel.All, ExecutionMode.Fast, 4);
+        Assert.True(PassTestKit.BitEqual(one, many));
+        for (int i = 0; i < none.Length; i++)
+        {
+            Assert.True(Math.Abs(none[i] - one[i]) <= 2e-5f * (1f + Math.Abs(none[i])), $"element {i}: {none[i]} vs {one[i]}");
+        }
+    }
+
     private static byte[] GeluModel()
     {
         var b = new ModelBuilder().Input("x", 1, "N", 40).Output("y", 1, "N", 40);

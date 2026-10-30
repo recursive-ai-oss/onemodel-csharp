@@ -22,7 +22,7 @@ internal static unsafe class Gemm
 {
     // Cache blocking (Goto and van de Geijn 2008, section 4.2): a kc x nr strip of packed B (16 KB at kc 256, nr 16) stays in the
     // first-level cache while the microkernel sweeps the mc x kc block of A (about 100 KB) from the second-level cache.
-    private const int Kc = 256;
+    internal const int Kc = 256;
 
     // Strips of B packed per chunk of the packing phase.
     private const int PackStripsPerChunk = 8;
@@ -249,6 +249,25 @@ internal static unsafe class Gemm
     {
         int tilesM = (m + blk.Mc - 1) / blk.Mc;
         int tilesN = (n + blk.Nc - 1) / blk.Nc;
+        if (m == 1 && mode == KernelMode.Fast && path is KernelPath.Avx512 or KernelPath.Avx2)
+        {
+            // One row of A: a matrix-vector product, bound by streaming B once. Same chunks (the tile columns) and the same bits.
+            GemvJob gv = t_gemvJob ??= new GemvJob();
+            gv.Path = path;
+            gv.Blk = blk;
+            gv.N = n;
+            gv.K = k;
+            gv.A = a;
+            gv.PackedB = packedB;
+            gv.NStrips = nStrips;
+            gv.C = c;
+            gv.Epilogue = epilogue;
+            // Time to read B at about 10 bytes per nanosecond per thread; more threads read more of it at once.
+            ParallelFor.Run(gv, tilesN, threads, (long)k * n * 4 / 10);
+            gv.Epilogue = null;
+            return;
+        }
+
         TileJob job = t_tileJob ??= new TileJob();
         job.Mode = mode;
         job.Path = path;
@@ -283,7 +302,7 @@ internal static unsafe class Gemm
         _ => new(4, 4, 64, 64),
     };
 
-    private static delegate*<int, float*, float*, float*, nint, int, void> SelectMicro(KernelMode mode, KernelPath path)
+    internal static delegate*<int, float*, float*, float*, nint, int, void> SelectMicro(KernelMode mode, KernelPath path)
     {
         if (mode == KernelMode.Exact)
         {
@@ -312,6 +331,98 @@ internal static unsafe class Gemm
 
     [ThreadStatic]
     private static TileJob? t_tileJob;
+
+    [ThreadStatic]
+    private static GemvJob? t_gemvJob;
+
+    // The single-row product: a chunk is the columns of one tile, in groups of four strips.
+    private sealed class GemvJob : ChunkJob
+    {
+        public KernelPath Path;
+        public Blocking Blk;
+        public int N;
+        public int K;
+        public float* A;
+        public float* PackedB;
+        public int NStrips;
+        public float* C;
+        public IGemmEpilogue? Epilogue;
+
+        public override void RunChunk(int chunk)
+        {
+            int nr = Blk.Nr;
+            int j0 = chunk * Blk.Nc;
+            int nc = Math.Min(Blk.Nc, N - j0);
+            int s0 = j0 / nr;
+            int s1 = (j0 + nc + nr - 1) / nr;
+            float* tmp = stackalloc float[nr];
+            bool wide = Path == KernelPath.Avx512;
+            for (int pc = 0; pc < K; pc += Kc)
+            {
+                int kc = Math.Min(Kc, K - pc);
+                int accumulate = pc > 0 ? 1 : 0;
+                float* a = A + pc;
+                float* bBlock = PackedB + ((long)pc * NStrips * nr);
+                nint stripStride = (nint)kc * nr;
+                int s = s0;
+                while (s < s1)
+                {
+                    float* b = bBlock + (s * stripStride);
+                    float* cp = C + ((long)s * nr);
+                    if (s + 4 <= s1 && (s + 4) * nr <= N)
+                    {
+                        if (wide)
+                        {
+                            FastGemv.Kernel4Avx512(kc, a, b, stripStride, cp, accumulate);
+                        }
+                        else
+                        {
+                            FastGemv.Kernel4Avx2(kc, a, b, stripStride, cp, accumulate);
+                        }
+
+                        s += 4;
+                        continue;
+                    }
+
+                    if ((s + 1) * nr <= N)
+                    {
+                        if (wide)
+                        {
+                            FastGemv.Kernel1Avx512(kc, a, b, cp, accumulate);
+                        }
+                        else
+                        {
+                            FastGemv.Kernel1Avx2(kc, a, b, cp, accumulate);
+                        }
+                    }
+                    else
+                    {
+                        // The ragged last strip: compute all nr columns on a scratch row and move the valid ones.
+                        int cols = N - (s * nr);
+                        if (accumulate != 0)
+                        {
+                            new Span<float>(cp, cols).CopyTo(new Span<float>(tmp, nr));
+                        }
+
+                        if (wide)
+                        {
+                            FastGemv.Kernel1Avx512(kc, a, b, tmp, accumulate);
+                        }
+                        else
+                        {
+                            FastGemv.Kernel1Avx2(kc, a, b, tmp, accumulate);
+                        }
+
+                        new Span<float>(tmp, cols).CopyTo(new Span<float>(cp, cols));
+                    }
+
+                    s++;
+                }
+            }
+
+            Epilogue?.Apply(C + j0, N, 0, j0, 1, nc, KernelMode.Fast);
+        }
+    }
 
     private sealed class PackBJob : ChunkJob
     {

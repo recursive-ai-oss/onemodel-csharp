@@ -25,7 +25,10 @@ internal static unsafe class Scratch
     /// <summary>Working memory of the fused attention kernel (used by whichever thread runs a work item).</summary>
     public const int Attention = 4;
 
-    private const int Slots = 5;
+    /// <summary>The packed panel of B columns one convolution tile reads (used by whichever thread runs the tile).</summary>
+    public const int PackPanel = 5;
+
+    private const int Slots = 6;
 
     [ThreadStatic]
     private static float*[]? t_pointers;

@@ -104,4 +104,35 @@ public class GemmTests
             }
         }
     }
+    [Fact]
+    public void SingleRowProductGivesTheTileProductsBits()
+    {
+        // One row takes the matrix-vector kernels; two identical rows take the tile kernels. Ragged n, more than one k block, and
+        // packed and unpacked B must all agree, at any thread count.
+        var rng = new KernelTestData.Rng(321);
+        foreach (KernelPath path in Paths())
+        {
+            foreach ((int n, int k) in new[] { (1, 5), (7, 300), (33, 257), (128, 64), (129, 513), (1000, 600), (31, 1) })
+            {
+                var a = new float[2 * k];
+                var b = new float[k * n];
+                KernelTestData.Fill(ref rng, a.AsSpan(0, k), false);
+                a.AsSpan(0, k).CopyTo(a.AsSpan(k, k));
+                KernelTestData.Fill(ref rng, b, false);
+                var two = new float[2 * n];
+                Gemm.Run(KernelMode.Fast, path, 2, n, k, a, k, b, n, two, n, 1);
+                var packed = new float[Gemm.PackedBLength(path, n, k)];
+                Gemm.PackB(path, b, n, n, k, packed);
+                foreach (int threads in new[] { 1, 6 })
+                {
+                    var one = new float[n];
+                    Gemm.Run(KernelMode.Fast, path, 1, n, k, a, k, b, n, one, n, threads);
+                    Assert.True(KernelTestData.SameBits(two.AsSpan(0, n).ToArray(), one), $"{path} unpacked n={n} k={k} threads={threads}");
+                    var onePacked = new float[n];
+                    Gemm.RunPacked(KernelMode.Fast, path, 1, n, k, a, k, packed, onePacked, n, threads);
+                    Assert.True(KernelTestData.SameBits(two.AsSpan(0, n).ToArray(), onePacked), $"{path} packed n={n} k={k} threads={threads}");
+                }
+            }
+        }
+    }
 }

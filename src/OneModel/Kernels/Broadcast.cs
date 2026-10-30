@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using RecursiveAI.OneModel.Kernels.Exact;
 using RecursiveAI.OneModel.Tensors;
+using RecursiveAI.OneModel.Threading;
 
 namespace RecursiveAI.OneModel.Kernels;
 
@@ -23,18 +24,19 @@ internal static class Broadcast
     /// <param name="a">Contiguous, aShape.Length elements.</param>
     /// <param name="b">Contiguous, bShape.Length elements.</param>
     /// <param name="c">Contiguous, outShape.Length elements. May share memory with a or b when that operand has the output's shape.</param>
+    /// <param name="threads">Upper bound on threads for a large output; the result does not depend on it.</param>
     public static void Binary<T, TRow>(KernelPath path, bool canonicalNaN, Shape outShape, Shape aShape, Shape bShape,
-        ReadOnlySpan<T> a, ReadOnlySpan<T> b, Span<T> c)
+        ReadOnlySpan<T> a, ReadOnlySpan<T> b, Span<T> c, int threads = 1)
         where T : unmanaged, INumber<T>
         where TRow : IRowKernel<T> =>
-        Binary<T, T, T, SameTypeRow<T, TRow>>(path, canonicalNaN, outShape, aShape, bShape, a, b, c);
+        Binary<T, T, T, SameTypeRow<T, TRow>>(path, canonicalNaN, outShape, aShape, bShape, a, b, c, threads);
 
     /// <summary>
     /// The same traversal for operands and result of different element types (comparisons produce bool, Pow mixes base and exponent
     /// types). <typeparamref name="TRow"/> computes one row.
     /// </summary>
     public static void Binary<TA, TB, TC, TRow>(KernelPath path, bool canonicalNaN, Shape outShape, Shape aShape, Shape bShape,
-        ReadOnlySpan<TA> a, ReadOnlySpan<TB> b, Span<TC> c)
+        ReadOnlySpan<TA> a, ReadOnlySpan<TB> b, Span<TC> c, int threads = 1)
         where TA : unmanaged
         where TB : unmanaged
         where TC : unmanaged
@@ -100,6 +102,12 @@ internal static class Broadcast
         int inner = size[m - 1];
         int ia = sa[m - 1], ib = sb[m - 1];
         long outer = total / inner;
+        if (threads > 1 && total >= 2 * ChunkElements && m <= 2)
+        {
+            RunParallel<TA, TB, TC, TRow>(path, canonicalNaN, a, b, c, size[0], sa[0], sb[0], m, inner, ia, ib, threads);
+            return;
+        }
+
         Span<int> idx = stackalloc int[Shape.MaxRank];
         int pa = 0, pb = 0;
         for (long row = 0; row < outer; row++)
@@ -122,6 +130,102 @@ internal static class Broadcast
                 pb -= sb[d] * size[d];
                 idx[d] = 0;
             }
+        }
+    }
+
+    // Output elements per chunk of the parallel form: a constant of the kernel, so the split never depends on the thread count.
+    private const int ChunkElements = 32768;
+
+    // Large outputs of at most two merged dimensions (same shape, a scalar, a row or a column broadcast): chunks of whole rows when rows
+    // are short, of pieces of the one row when it is long. Each output element is computed from its own inputs, so the split changes
+    // nothing but who computes what.
+    private static unsafe void RunParallel<TA, TB, TC, TRow>(KernelPath path, bool canonicalNaN, ReadOnlySpan<TA> a, ReadOnlySpan<TB> b, Span<TC> c,
+        int outerSize, int outerA, int outerB, int m, int inner, int ia, int ib, int threads)
+        where TA : unmanaged
+        where TB : unmanaged
+        where TC : unmanaged
+        where TRow : IRowKernel<TA, TB, TC>
+    {
+        fixed (TA* pa = a)
+        fixed (TB* pb = b)
+        fixed (TC* pc = c)
+        {
+            BinaryJob<TA, TB, TC, TRow> job = BinaryJob<TA, TB, TC, TRow>.Instance ??= new BinaryJob<TA, TB, TC, TRow>();
+            job.Path = path;
+            job.Canonical = canonicalNaN;
+            job.A = pa;
+            job.B = pb;
+            job.C = pc;
+            job.ALength = a.Length;
+            job.BLength = b.Length;
+            job.Rows = m == 2 ? outerSize : 1;
+            job.OuterA = m == 2 ? outerA : 0;
+            job.OuterB = m == 2 ? outerB : 0;
+            job.Inner = inner;
+            job.IA = ia;
+            job.IB = ib;
+            // Short rows go several to a chunk; a long row is cut into pieces of ChunkElements.
+            job.PiecesPerRow = inner > ChunkElements ? (inner + ChunkElements - 1) / ChunkElements : 1;
+            job.RowsPerChunk = inner >= ChunkElements ? 1 : Math.Max(1, ChunkElements / inner);
+            int chunks = job.PiecesPerRow > 1 ? job.Rows * job.PiecesPerRow : (job.Rows + job.RowsPerChunk - 1) / job.RowsPerChunk;
+            ParallelFor.Run(job, chunks, threads, (long)job.Rows * inner);
+        }
+    }
+
+    private sealed unsafe class BinaryJob<TA, TB, TC, TRow> : ChunkJob
+        where TA : unmanaged
+        where TB : unmanaged
+        where TC : unmanaged
+        where TRow : IRowKernel<TA, TB, TC>
+    {
+        [ThreadStatic]
+        public static BinaryJob<TA, TB, TC, TRow>? Instance;
+
+        public KernelPath Path;
+        public bool Canonical;
+        public TA* A;
+        public TB* B;
+        public TC* C;
+        public int ALength;
+        public int BLength;
+        public int Rows;
+        public int OuterA;
+        public int OuterB;
+        public int Inner;
+        public int IA;
+        public int IB;
+        public int PiecesPerRow;
+        public int RowsPerChunk;
+
+        public override void RunChunk(int chunk)
+        {
+            if (PiecesPerRow > 1)
+            {
+                int row = chunk / PiecesPerRow;
+                int start = (chunk % PiecesPerRow) * ChunkElements;
+                int len = Math.Min(ChunkElements, Inner - start);
+                Row(row, start, len);
+                return;
+            }
+
+            int r0 = chunk * RowsPerChunk;
+            int r1 = Math.Min(Rows, r0 + RowsPerChunk);
+            for (int r = r0; r < r1; r++)
+            {
+                Row(r, 0, Inner);
+            }
+        }
+
+        // Elements start..start+len-1 of row r; an operand with step 0 along the row reads its one value.
+        private void Row(int r, int start, int len)
+        {
+            long pa = ((long)r * OuterA) + (IA == 0 ? 0 : start);
+            long pb = ((long)r * OuterB) + (IB == 0 ? 0 : start);
+            long po = ((long)r * Inner) + start;
+            TRow.Row(Path, Canonical,
+                new ReadOnlySpan<TA>(A + pa, (int)Math.Min(ALength - pa, len)), IA,
+                new ReadOnlySpan<TB>(B + pb, (int)Math.Min(BLength - pb, len)), IB,
+                new Span<TC>(C + po, len), len);
         }
     }
 }

@@ -65,9 +65,11 @@ internal static unsafe class Depthwise
             _ => Job<FastLanes1, FastLanes1, FastLanes1, FastLanes1>.Get(s, input, weights, output, false, perChunk),
         };
 
-        // Nanoseconds on one thread, roughly: the taps at several outputs per nanosecond, plus building the padded plane.
+        // Nanoseconds on one thread, roughly: the taps at several outputs per nanosecond, plus building the padded plane. Four times
+        // that is what the pool is told: the layers are small, and a spinning pool wins them back with fewer than 80 microseconds per
+        // thread (MobileNetV3-large's depthwise layers: 1.9 ms to 1.5 ms on 8 threads).
         long work = (long)planes * (((long)outPlane * s.KH * s.KW / 8) + (((long)(s.H + s.PadTop + s.PadBottom) * (s.W + s.PadLeft + s.PadRight)) / 2));
-        ParallelFor.Run(job, chunks, threads, work);
+        ParallelFor.Run(job, chunks, threads, work * 4);
     }
 
     /// <summary>
