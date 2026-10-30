@@ -1,0 +1,164 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261031,
+ "tensors": {
+  "in.x": {
+   "shape": [
+    3,
+    6,
+    4
+   ],
+   "offset": 0
+  },
+  "in.h0": {
+   "shape": [
+    2,
+    3,
+    5
+   ],
+   "offset": 72
+  },
+  "in.proj": {
+   "shape": [
+    3,
+    6,
+    10
+   ],
+   "offset": 102
+  },
+  "in.gru.weight_ih_l0": {
+   "shape": [
+    15,
+    4
+   ],
+   "offset": 282
+  },
+  "in.gru.weight_hh_l0": {
+   "shape": [
+    15,
+    5
+   ],
+   "offset": 342
+  },
+  "in.gru.bias_ih_l0": {
+   "shape": [
+    15
+   ],
+   "offset": 417
+  },
+  "in.gru.bias_hh_l0": {
+   "shape": [
+    15
+   ],
+   "offset": 432
+  },
+  "in.gru.weight_ih_l0_reverse": {
+   "shape": [
+    15,
+    4
+   ],
+   "offset": 447
+  },
+  "in.gru.weight_hh_l0_reverse": {
+   "shape": [
+    15,
+    5
+   ],
+   "offset": 507
+  },
+  "in.gru.bias_ih_l0_reverse": {
+   "shape": [
+    15
+   ],
+   "offset": 582
+  },
+  "in.gru.bias_hh_l0_reverse": {
+   "shape": [
+    15
+   ],
+   "offset": 597
+  },
+  "out.loss": {
+   "shape": [
+    1
+   ],
+   "offset": 612
+  },
+  "out.y": {
+   "shape": [
+    3,
+    6,
+    10
+   ],
+   "offset": 613
+  },
+  "grad.x": {
+   "shape": [
+    3,
+    6,
+    4
+   ],
+   "offset": 793
+  },
+  "grad.h0": {
+   "shape": [
+    2,
+    3,
+    5
+   ],
+   "offset": 865
+  },
+  "grad.gru.weight_ih_l0": {
+   "shape": [
+    15,
+    4
+   ],
+   "offset": 895
+  },
+  "grad.gru.weight_hh_l0": {
+   "shape": [
+    15,
+    5
+   ],
+   "offset": 955
+  },
+  "grad.gru.bias_ih_l0": {
+   "shape": [
+    15
+   ],
+   "offset": 1030
+  },
+  "grad.gru.bias_hh_l0": {
+   "shape": [
+    15
+   ],
+   "offset": 1045
+  },
+  "grad.gru.weight_ih_l0_reverse": {
+   "shape": [
+    15,
+    4
+   ],
+   "offset": 1060
+  },
+  "grad.gru.weight_hh_l0_reverse": {
+   "shape": [
+    15,
+    5
+   ],
+   "offset": 1120
+  },
+  "grad.gru.bias_ih_l0_reverse": {
+   "shape": [
+    15
+   ],
+   "offset": 1195
+  },
+  "grad.gru.bias_hh_l0_reverse": {
+   "shape": [
+    15
+   ],
+   "offset": 1210
+  }
+ }
+}

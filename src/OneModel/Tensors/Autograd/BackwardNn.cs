@@ -10,43 +10,14 @@ internal static partial class BackwardOps
         switch (r.Op)
         {
             case OpKind.Gelu:
-            {
-                Tensor x = r.Saved(0).Unpack();
-                bool tanhForm = r.Ints[0] == 1;
-                Tensor dx = Tensor.Create(DType.F32, x.Shape);
-                ReadOnlySpan<float> xv = x.Data<float>(), gv = g.Data<float>();
-                Span<float> d = dx.MutableData<float>();
-                for (int i = 0; i < d.Length; i++)
-                {
-                    float v = xv[i];
-                    float slope;
-                    if (tanhForm)
-                    {
-                        // gelu(x) = 0.5 x (1 + tanh(u)), u = k (x + 0.044715 x^3), k = sqrt(2/pi)
-                        float u = 0.79788456f * (v + (0.044715f * v * v * v));
-                        float t = Fn.Tanh(exact, u);
-                        slope = (0.5f * (1f + t)) + (0.5f * v * (1f - (t * t)) * 0.79788456f * (1f + (3f * 0.044715f * v * v)));
-                    }
-                    else
-                    {
-                        // gelu(x) = x Phi(x); gelu'(x) = Phi(x) + x phi(x)
-                        float cdf = 0.5f * (1f + Fn.Erf(v * 0.70710677f));
-                        float pdf = Fn.Exp(exact, -0.5f * v * v) * 0.3989423f;
-                        slope = cdf + (v * pdf);
-                    }
-
-                    d[i] = gv[i] * slope;
-                }
-
-                Engine.Emit(r, 0, dx, owned: true);
+                Engine.Emit(r, 0, VectorMaps.Map2(new GeluGradBin(r.Ints[0] == 1), g, r.Saved(0).Unpack()), owned: true);
                 break;
-            }
 
             case OpKind.Sigmoid:
-                Engine.Emit(r, 0, Map2(g, r.Saved(0).Unpack(), static (gv, y) => gv * y * (1f - y)), owned: true);
+                Engine.Emit(r, 0, VectorMaps.Map2(new SigmoidGradBin(), g, r.Saved(0).Unpack()), owned: true);
                 break;
             case OpKind.Tanh:
-                Engine.Emit(r, 0, Map2(g, r.Saved(0).Unpack(), static (gv, y) => gv * (1f - (y * y))), owned: true);
+                Engine.Emit(r, 0, VectorMaps.Map2(new TanhGradBin(), g, r.Saved(0).Unpack()), owned: true);
                 break;
             case OpKind.Sum:
             case OpKind.Mean:
@@ -116,6 +87,21 @@ internal static partial class BackwardOps
                 break;
             case OpKind.Conv2d:
                 ConvBackward(e, r, g);
+                break;
+            case OpKind.Lstm:
+                LstmBackward(r, g);
+                break;
+            case OpKind.Gru:
+                GruBackward(r, g);
+                break;
+            case OpKind.CtcLoss:
+                CtcBackward(r, g);
+                break;
+            case OpKind.ConvTranspose2d:
+                ConvTransposeBackward(e, r, g);
+                break;
+            case OpKind.Resize2d:
+                ResizeBackward(r, g);
                 break;
             case OpKind.AvgPool2d:
                 AvgPoolBackward(e, r, g);

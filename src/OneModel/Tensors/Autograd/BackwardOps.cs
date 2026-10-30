@@ -1,4 +1,5 @@
 using System;
+using RecursiveAI.OneModel.Kernels;
 namespace RecursiveAI.OneModel.Tensors;
 
 /// <summary>
@@ -63,7 +64,7 @@ internal static partial class BackwardOps
                 Engine.Emit(r, 0, Ops.Neg(g), owned: true);
                 break;
             case OpKind.Relu:
-                Engine.Emit(r, 0, Map2(g, r.Saved(0).Unpack(), static (gv, y) => y > 0f ? gv : 0f), owned: true);
+                Engine.Emit(r, 0, VectorMaps.Map2(new ReluGradBin(), g, r.Saved(0).Unpack()), owned: true);
                 break;
             case OpKind.MatMul:
                 if (r.NeedsInputGrad(0))

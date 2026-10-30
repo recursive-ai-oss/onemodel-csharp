@@ -84,10 +84,10 @@ public sealed class DenseKernels : ITensorKernels
     public string Name => "dense";
 
     /// <inheritdoc/>
-    public void Binary(BinaryOp op, in Tensor a, in Tensor b, in Tensor dst) => ReferenceKernels.Instance.Binary(op, a, b, dst);
+    public void Binary(BinaryOp op, in Tensor a, in Tensor b, in Tensor dst) => VectorRows.Binary(op, a, b, dst);
 
     /// <inheritdoc/>
-    public void Unary(UnaryOp op, in Tensor x, in Tensor dst) => ReferenceKernels.Instance.Unary(op, x, dst);
+    public void Unary(UnaryOp op, in Tensor x, in Tensor dst) => VectorRows.Unary(op, x, dst);
 
     /// <inheritdoc/>
     public void MaxPool2d(in Tensor x, in Pool2dParams p, in Tensor dst, in Tensor indices) =>

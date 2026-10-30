@@ -1,5 +1,6 @@
 using System;
 using RecursiveAI.OneModel.Kernels;
+using RecursiveAI.OneModel.Kernels.Exact;
 namespace RecursiveAI.OneModel.Tensors;
 
 /// <summary>Geometry of a 2-D convolution: stride, symmetric zero padding, dilation (each per axis) and channel groups.</summary>
@@ -66,19 +67,14 @@ public static partial class Ops
         Tensor r = NewOut(x.Shape, pool);
         ReadOnlySpan<float> s = xc.Data<float>();
         Span<float> d = r.MutableData<float>();
+        // The polynomial forms, in both modes: the lane loop and its scalar tail give the bits of Fn.GeluErf / Fn.GeluTanh.
         if (approximateTanh)
         {
-            for (int i = 0; i < d.Length; i++)
-            {
-                d[i] = Fn.GeluTanh(s[i]);
-            }
+            VectorMaps.Map1(new GeluUnary(true), s, d, exact: true);
         }
         else
         {
-            for (int i = 0; i < d.Length; i++)
-            {
-                d[i] = Fn.GeluErf(s[i]);
-            }
+            VectorMaps.Map1(new GeluUnary(false), s, d, exact: true);
         }
 
         if (!Recording(x))
@@ -106,9 +102,13 @@ public static partial class Ops
         Tensor r = NewOut(x.Shape, pool);
         ReadOnlySpan<float> s = xc.Data<float>();
         Span<float> d = r.MutableData<float>();
-        for (int i = 0; i < d.Length; i++)
+        if (op == OpKind.Sigmoid)
         {
-            d[i] = op == OpKind.Sigmoid ? Fn.Sigmoid(exact, s[i]) : Fn.Tanh(exact, s[i]);
+            VectorMaps.Map1(new SigmoidUnary(), s, d);
+        }
+        else
+        {
+            VectorMaps.Map1(new TanhUnary(), s, d);
         }
 
         Free(xc, copied);

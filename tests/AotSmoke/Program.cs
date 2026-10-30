@@ -173,6 +173,51 @@ foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
     }
 }
 
+// Recurrent, CTC, transposed-convolution and resize gradients: a bidirectional LSTM and a GRU into a CTC loss, and a small decoder.
+foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+{
+    TensorCompute.Mode = gm;
+    var rng = new Random(11);
+    Tensor Rand(params int[] dims)
+    {
+        Tensor t = Tensor.Create(DType.F32, Shape.Create(dims));
+        Span<float> d = t.MutableData<float>();
+        for (int i = 0; i < d.Length; i++)
+        {
+            d[i] = (float)((rng.NextDouble() * 1.2) - 0.6);
+        }
+
+        return t.WithRequiresGrad();
+    }
+
+    // x [T=5, B=2, 3]; one bidirectional LSTM layer (H=2), a GRU layer (H=2), a linear head to 4 classes, CTC with blank 0.
+    Tensor[] rin = [Rand(5, 2, 3), Rand(8, 3), Rand(8, 2), Rand(8), Rand(8, 3), Rand(8, 2), Rand(8), Rand(6, 4), Rand(6, 2), Rand(4, 2)];
+    GradientCheckResult[] rr = GradientCheck.Run(t =>
+    {
+        RnnLayer[] layers = [new RnnLayer(t[1], t[2], t[3], default), new RnnLayer(t[4], t[5], t[6], default)];
+        Tensor y = Ops.Lstm(t[0], layers, bidirectional: true);                         // [5,2,4]
+        Tensor g = Ops.GruLayer(y, t[7], t[8]);                                         // [5,2,2]
+        Tensor lp = Ops.LogSoftmax(Ops.Add(Ops.MatMul(g.Reshape(10, 2), t[9].T()), Ops.Sum(t[9], 1)).Reshape(5, 2, 4));
+        return Ops.CtcLoss(lp, [1, 2, 1], [5, 4], [2, 1]);
+    }, rin, step: 2e-2);
+    double rworst = rr.Max(r => r.ScaledError);
+    Console.WriteLine($"autograd {gm}: LSTM/GRU/CTC finite-difference check, worst scaled error {rworst:E2}");
+    if (!(rworst < 2e-2))
+    {
+        return 9;
+    }
+
+    Tensor[] din = [Rand(1, 2, 3, 3), Rand(2, 2, 2, 2), Rand(2)];
+    GradientCheckResult[] dr = GradientCheck.Run(t =>
+        Ops.Resize2d(Ops.ConvTranspose2d(t[0], t[1], t[2], new ConvTranspose2dParams(StrideH: 2, StrideW: 2)), 7, 5, InterpolationMode.Bilinear), din);
+    double dworst = dr.Max(r => r.ScaledError);
+    Console.WriteLine($"autograd {gm}: ConvTranspose2d/Resize2d finite-difference check, worst scaled error {dworst:E2}");
+    if (!(dworst < 2e-2))
+    {
+        return 10;
+    }
+}
+
 TensorCompute.Mode = ExecutionMode.Fast;
 return 0;
 
