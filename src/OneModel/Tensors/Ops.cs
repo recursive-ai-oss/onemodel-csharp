@@ -9,7 +9,7 @@ namespace RecursiveAI.OneModel.Tensors;
 /// input requires them, the result carries a <see cref="BackwardRecord"/> whose contents are listed per operation below and in
 /// <c>docs/tensors.md</c>; otherwise nothing is recorded and nothing extra is allocated.
 /// </summary>
-public static class Ops
+public static partial class Ops
 {
     /// <summary><c>a + b</c> with broadcasting. Record: no saved tensors; backward sums the output gradient down to each input's shape.</summary>
     public static Tensor Add(in Tensor a, in Tensor b, BufferPool? pool = null, ITensorKernels? kernels = null)
@@ -108,7 +108,7 @@ public static class Ops
             throw new TensorShapeException($"Cannot multiply {a.Shape} by {b.Shape}.");
         }
 
-        Tensor r = Tensor.Create(DType.F32, Shape.Create(a.Shape[0], b.Shape[1]), pool);
+        Tensor r = NewOut(Shape.Create(a.Shape[0], b.Shape[1]), pool);
         (kernels ?? KernelSet.Default).MatMul(a, b, r);
         if (!GradMode.ShouldRecord(a, b))
         {
@@ -146,7 +146,7 @@ public static class Ops
             x.Shape[0], x.Shape[1],
             Pool2dParams.OutputSize(x.Shape[2], p.KernelH, p.StrideH, p.PadH),
             Pool2dParams.OutputSize(x.Shape[3], p.KernelW, p.StrideW, p.PadW));
-        Tensor r = Tensor.Create(DType.F32, os, pool);
+        Tensor r = NewOut(os, pool);
         bool track = GradMode.ShouldRecord(x);
         Tensor idx = track ? Tensor.Create(DType.I32, os, pool) : default;
         (kernels ?? KernelSet.Default).MaxPool2d(x, p, r, idx);
@@ -165,7 +165,7 @@ public static class Ops
     {
         RequireFloat32(a, b);
         Shape s = Shape.Broadcast(a.Shape, b.Shape);
-        Tensor r = Tensor.Create(DType.F32, s, pool);
+        Tensor r = NewOut(s, pool);
         using (GradMode.NoGrad())
         {
             (kernels ?? KernelSet.Default).Binary(op, a.Expand(s), b.Expand(s), r);
@@ -177,9 +177,17 @@ public static class Ops
     private static Tensor Unary(UnaryOp op, in Tensor x, BufferPool? pool, ITensorKernels? kernels)
     {
         RequireFloat32(x);
-        Tensor r = Tensor.Create(DType.F32, x.Shape, pool);
+        Tensor r = NewOut(x.Shape, pool);
         (kernels ?? KernelSet.Default).Unary(op, x, r);
         return r;
+    }
+
+    // Allocates a result tensor; inside an ActivationScope it is remembered so the scope can free it.
+    internal static Tensor NewOut(Shape shape, BufferPool? pool, bool zero = false)
+    {
+        Tensor t = Tensor.Create(DType.F32, shape, pool, zero);
+        ActivationScope.Track(t);
+        return t;
     }
 
     private static void RequireFloat32(in Tensor a)

@@ -84,9 +84,9 @@ public interface ITensorKernels
 /// <summary>Holds the kernel set the eager operations use when the caller names none.</summary>
 public static class KernelSet
 {
-    private static ITensorKernels s_default = ReferenceKernels.Instance;
+    private static ITensorKernels s_default = DenseKernels.Instance;
 
-    /// <summary>The default kernels: <see cref="ReferenceKernels"/> until <see cref="SetDefault"/> is called.</summary>
+    /// <summary>The default kernels: <see cref="DenseKernels"/> (reference semantics, with the matrix product on the blocked GEMM) until <see cref="SetDefault"/> is called.</summary>
     public static ITensorKernels Default => Volatile.Read(ref s_default);
 
     /// <summary>Replaces the default. Call once at startup, before running anything; sessions capture the set they were created with.</summary>

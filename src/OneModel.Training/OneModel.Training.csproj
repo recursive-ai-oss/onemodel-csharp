@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>$(PackagePrefix).$(LibName).Training</AssemblyName>
+    <RootNamespace>$(PackagePrefix).$(LibName).Training</RootNamespace>
+    <PackageId>$(PackagePrefix).$(LibName).Training</PackageId>
+    <Description>Training for the OneModel runtime: reverse-mode automatic differentiation lives in the tensor layer of the core package; this package adds the tools built on it (gradient checking now; modules, optimizers, losses, data loading and checkpoints to follow).</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageReadmeFile>PACKAGE.md</PackageReadmeFile>
+    <PackageTags>onnx;neural-network;training;autograd;machine-learning;nativeaot;trimmable</PackageTags>
+    <PackageReleaseNotes>See CHANGELOG.md in the repository.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../PACKAGE.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE-MIT" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE-APACHE" Pack="true" PackagePath="/" />
+    <None Include="../../THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../OneModel/OneModel.csproj" />
+  </ItemGroup>
+
+</Project>

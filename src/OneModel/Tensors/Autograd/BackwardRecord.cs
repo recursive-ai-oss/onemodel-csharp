@@ -23,6 +23,14 @@ public sealed class BackwardRecord
     private long[] _ints = [];
     private double[] _floats = [];
 
+    // Engine state for one backward pass: the gradient that has arrived at this record's output, and the pass that last visited it.
+    internal Tensor PendingGrad;
+    internal int VisitMark;
+    internal int Pending;
+
+    /// <summary>True after <see cref="Release"/>: the saved tensors are gone, so backward through this record is no longer possible.</summary>
+    public bool IsReleased { get; private set; }
+
     private BackwardRecord(OpKind op, AutogradMeta?[] inputs, Shape[] shapes, DType[] types, int savedSlots)
     {
         Op = op;
@@ -100,9 +108,13 @@ public sealed class BackwardRecord
     public Tensor Attach(in Tensor output, int outputIndex = 0) =>
         output.WithAutograd(new AutogradMeta(true, this, outputIndex));
 
+    /// <summary>The record's saved tensors, or null if none, as a span for the engine and for composite operations.</summary>
+    internal ReadOnlySpan<SavedTensor> SavedSlots => _saved;
+
     /// <summary>Frees the tensors the record owns. Call after backward has run (or when the graph is dropped).</summary>
     public void Release()
     {
+        IsReleased = true;
         for (int i = 0; i < _saved.Length; i++)
         {
             if (_saved[i].Owned)

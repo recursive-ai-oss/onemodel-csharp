@@ -6,6 +6,7 @@
   </Configurations>
   <Folder Name="/src/">
     <Project Path="src/OneModel/OneModel.csproj" />
+    <Project Path="src/OneModel.Training/OneModel.Training.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OneModel.Tests/OneModel.Tests.csproj" />

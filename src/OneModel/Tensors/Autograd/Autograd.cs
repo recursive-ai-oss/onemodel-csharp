@@ -38,6 +38,36 @@ public enum OpKind
     Flip,
     /// <summary>View: one index along one axis, removing it. Ints = [axis, index].</summary>
     Select,
+    /// <summary>GELU. Ints = [0 erf form, 1 tanh form]. Saves the input.</summary>
+    Gelu,
+    /// <summary>Logistic sigmoid. Saves the output.</summary>
+    Sigmoid,
+    /// <summary>Hyperbolic tangent. Saves the output.</summary>
+    Tanh,
+    /// <summary>Sum over all elements (Ints[0] = -1) or one axis (Ints = [axis, keepDim]).</summary>
+    Sum,
+    /// <summary>Mean over all elements (Ints[0] = -1) or one axis (Ints = [axis, keepDim]).</summary>
+    Mean,
+    /// <summary>Softmax over the last axis. Saves the output.</summary>
+    Softmax,
+    /// <summary>Log-softmax over the last axis. Saves the output.</summary>
+    LogSoftmax,
+    /// <summary>Layer normalization over the last axis. Inputs x, gamma, beta. Saves x, gamma, mean, 1/std. Floats = [epsilon].</summary>
+    LayerNorm,
+    /// <summary>Batch normalization of an NCHW tensor. Inputs x, gamma, beta. Saves x, gamma, mean, 1/std. Ints = [training].</summary>
+    BatchNorm,
+    /// <summary>2-D convolution. Inputs x, weight, bias. Saves x and weight.</summary>
+    Conv2d,
+    /// <summary>2-D average pooling. Ints = [kernelH, kernelW, strideH, strideW, padH, padW, countIncludePad].</summary>
+    AvgPool2d,
+    /// <summary>Concatenation along Ints[0].</summary>
+    Concat,
+    /// <summary>Row gather from a table. Saves the index tensor. Ints = [paddingIndex or -1].</summary>
+    Embedding,
+    /// <summary>Negative log-likelihood of class indices under log-probabilities. Ints = [mean, ignoreIndex].</summary>
+    NllLoss,
+    /// <summary>Scaled dot-product attention over [batch, heads, length, headDim]. Saves q, k, v and the mask (slots 0-3; the mask slot is empty without one). Floats = [scale].</summary>
+    Attention,
 }
 
 /// <summary>

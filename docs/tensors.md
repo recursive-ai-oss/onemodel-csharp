@@ -144,7 +144,8 @@ gradient.
 | Flip | none | axis | flip g |
 | Select | none | axis, index | zeros of the input shape with g written at the index |
 
-Conventions for operations added later, fixed now so kernels and the engine agree: *normalization* saves the normalized rows and
+The operators added with the engine (GELU, sigmoid, tanh, sum, mean, softmax, log-softmax, layer and batch norm, Conv2d, AvgPool2d,
+Concat, Embedding, NllLoss, Attention) and their records are in `autograd.md` section 5. Conventions as first fixed: *normalization* saves the normalized rows and
 the inverse standard deviation as owned slots plus the scale input; *GELU* saves the input and the tanh of its inner term;
 *softmax* saves its output and keeps the scale in `Floats`; *convolution* saves the input and the weights (or the unfolded input
 as an owned slot) and keeps kernel, stride, padding and padded K in `Ints`; *embedding lookup* saves the index tensor and keeps the
@@ -153,7 +154,9 @@ element, no gradient".
 
 ## 9. The kernel seam
 
-`ITensorKernels` is the one place eager operations call kernels: `Binary`, `Unary`, `MatMul`, `MaxPool2d`. Inputs are float32
+`ITensorKernels` is the one place the original eager operations call kernels: `Binary`, `Unary`, `MatMul`, `MaxPool2d`. The default set,
+`DenseKernels`, is `ReferenceKernels` except that `MatMul` runs on the blocked GEMM (fast or exact per `TensorCompute.Mode`); the
+operators added with the autograd engine call the kernel layer directly (`autograd.md` section 4). Inputs are float32
 tensors with arbitrary strides (the caller expands broadcasts to stride 0 first, so all operands of `Binary` have one shape); the
 output is allocated by the caller. An implementation is selected once, at startup or session creation (`KernelSet.SetDefault`, or
 the `kernels` argument), from the machine's instruction sets and the fast-or-exact choice. `ReferenceKernels` defines the meaning:

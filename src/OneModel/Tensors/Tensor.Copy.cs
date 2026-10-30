@@ -24,6 +24,7 @@ public readonly partial struct Tensor
         }
 
         Tensor dst = Create(_dtype, _shape, pool);
+        ActivationScope.Track(dst);
         CopyStrided(this, dst);
         return GradMode.ShouldRecord(this) ? Rerecord(dst) : dst;
     }

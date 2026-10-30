@@ -11,6 +11,7 @@ using RecursiveAI.OneModel.Format;
 using RecursiveAI.OneModel.Graph;
 using RecursiveAI.OneModel.Onnx;
 using RecursiveAI.OneModel.Tensors;
+using RecursiveAI.OneModel.Training;
 
 // Calls the library from a NativeAOT binary: the tensor/kernel self-check, then a small model end to end (import, session, plan,
 // fast and exact runs) against the ONNX Runtime reference output stored with the model. CI fails on any trim or AOT warning when
@@ -138,6 +139,41 @@ foreach (string name in new[] { "mlp", "int8_qdq" })
     }
 }
 
+// Reverse-mode autodiff: a small conv / norm / attention net, analytic gradients against central finite differences, in fast and
+// exact arithmetic (float32 finite differences on a small net: noise of a few 1e-3, while a wrong gradient is off by order one).
+foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+{
+    TensorCompute.Mode = gm;
+    var rng = new Random(7);
+    Tensor Rand(params int[] dims)
+    {
+        Tensor t = Tensor.Create(DType.F32, Shape.Create(dims));
+        Span<float> d = t.MutableData<float>();
+        for (int i = 0; i < d.Length; i++)
+        {
+            d[i] = (float)((rng.NextDouble() * 2) - 1);
+        }
+
+        return t.WithRequiresGrad();
+    }
+
+    Tensor[] gin = [Rand(1, 2, 4, 4), Rand(3, 2, 3, 3), Rand(1, 2, 3, 4), Rand(3)];
+    GradientCheckResult[] gr = GradientCheck.Run(t =>
+    {
+        Tensor h = Ops.Gelu(Ops.Conv2d(t[0], t[1], default, new Conv2dParams(PadH: 1, PadW: 1)));   // [1,3,4,4]
+        Tensor a = Ops.AvgPool2d(h, new Pool2dParams(2, 2, 2, 2, 0, 0)).Reshape(1, 1, 3, 4);       // [1,1,3,4]
+        Tensor att = Ops.Attention(a, t[2].Slice(1, 0, 1), a);                    // [1,1,3,4]
+        return Ops.LogSoftmax(Ops.Add(att.Reshape(3, 4), t[3].Reshape(3, 1)));
+    }, gin);
+    double worst = gr.Max(r => r.ScaledError);
+    Console.WriteLine($"autograd {gm}: finite-difference check, worst scaled error {worst:E2}");
+    if (!(worst < 2e-2))
+    {
+        return 8;
+    }
+}
+
+TensorCompute.Mode = ExecutionMode.Fast;
 return 0;
 
 Stream Open(string name) =>
