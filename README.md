@@ -1,16 +1,27 @@
 # OneModel
 
-A neural-network runtime for .NET in pure managed C#, with no native binaries and no dependency beyond the shared framework. It will load ONNX models and our own format and run them on SIMD CPU kernels, with training to follow on the same kernels.
+A neural-network runtime for .NET in pure managed C#, with no native binaries and no dependency beyond the shared framework. It loads ONNX models and its own format, optimizes the graph and runs it on SIMD CPU kernels, and it trains models on the same kernels.
 
-**Status:** work in progress; models cannot be run yet. In place: the tensor layer (strided views over a pooled allocator, fp16/bf16, the record each operation keeps for gradients), fast and bit-exact fp32 kernels for matrix products, convolution, attention and softmax on AVX2, AVX-512, NEON and portable SIMD, our own exp/log/tanh/erf, and a fixed-chunk thread pool. Next: ONNX import, sessions and `Model.Load(...).Run(...)`.
+**Status:** preview. What works:
+
+- **Inference:** ONNX import (our own protobuf reader, any opset from 7, external data), graph passes (constant folding, weight prepacking, conv/GEMM/attention fusions), memory planning, thread-safe sessions and the one-line `Model.Load(...).Run(...)`. Coverage of the ONNX backend test suite is published in [docs/conformance.md](docs/conformance.md), gaps included; control flow (`If`, `Loop`, `Scan`), sequences and optionals run.
+- **Data types:** fp32, fp16/bf16 models and weight storage, int8 (dynamic and static quantization, per-channel weights, QDQ graphs).
+- **Kernels:** AVX2, AVX-512, NEON and portable SIMD for matrix products, convolution, depthwise convolution, attention, recurrent layers, norms and reductions; a fixed-chunk thread pool, so results do not depend on the thread count.
+- **Exact mode:** opt-in, bit-identical outputs across operating systems, CPUs, instruction sets, thread counts and WebAssembly ([docs/exact-mode.md](docs/exact-mode.md), [docs/golden-hashes.md](docs/golden-hashes.md)).
+- **Own format:** save and load an imported model in a simple memory-mappable format ([docs/format.md](docs/format.md)).
+- **Training** (package `RecursiveAI.OneModel.Training`): reverse-mode autodiff on the tensor layer, modules, losses, SGD/Adam/AdamW, learning-rate schedules, deterministic data loading, bit-exact checkpoints, and tracing a module into a graph that runs and saves like an imported one ([docs/training.md](docs/training.md), [docs/tracing.md](docs/tracing.md)).
+
+The API may still change between previews; see [CHANGELOG.md](CHANGELOG.md).
 
 ## Layout
 
 | Path | Holds |
 |---|---|
 | `src/OneModel` | the library, package `RecursiveAI.OneModel` |
+| `src/OneModel.Training` | training, package `RecursiveAI.OneModel.Training` |
 | `tests/OneModel.Tests` | unit tests (xUnit v3) |
 | `tests/AotSmoke`, `tests/WasmSmoke` | NativeAOT and browser-wasm smoke apps |
+| `tests/OnnxSweep` | runs the ONNX backend test cases and writes the conformance table |
 | `bench/Micro` | BenchmarkDotNet micro-benchmarks and kernel timing |
 | `bench/Bar` | side-by-side timing against ONNX Runtime (the only place it is referenced) |
 | `tools/` | scripts that fetch and export reference models, produce reference outputs and compare output hashes across machines |
@@ -22,7 +33,7 @@ A neural-network runtime for .NET in pure managed C#, with no native binaries an
     using var m = Model.Load("model.onnx");
     float[] v = m.Run(tokens);          // float[], long[] or int[] in; names and shapes come from the model
 
-For several inputs or outputs, tensors, exact mode (`new SessionOptions { Mode = ExecutionMode.Exact }`) or a thread limit, use `m.Session` or `Session.Load` directly. Only a handful of operators exist so far (Add, Mul, Relu, MatMul, Gemm, Reshape, Identity, Constant); a model with others fails to load with an exception that lists every missing one. How graphs are planned and run: [docs/graph-runtime.md](docs/graph-runtime.md).
+For several inputs or outputs, tensors, exact mode (`new SessionOptions { Mode = ExecutionMode.Exact }`), a thread limit, an optimization level or compact fp16/bf16 weight storage, use `m.Session` or `Session.Load` directly. A model with operators that are not supported fails to load with an exception that lists every missing one; supported operators and opsets are in [docs/conformance.md](docs/conformance.md). How graphs are planned and run: [docs/graph-runtime.md](docs/graph-runtime.md). `ModelFormat.Convert` saves an ONNX model in our own format, and `Model.Load` reads either.
 
 ### NativeAOT users: set `IlcInstructionSet`
 
