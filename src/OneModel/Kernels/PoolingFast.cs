@@ -64,66 +64,66 @@ internal static unsafe class MaxPoolFast
         {
             long end = Math.Min(Planes, (long)(chunk + 1) * PerChunk);
             long inVol = G.In.Volume, outVol = G.Out.Volume;
+            int span = ((G.Out.W - 1) * G.Stride.W) + 1;
+            long need = (long)Math.Max(G.Pad.W + G.In.W, span + G.Kernel.W - 1) + ((long)(G.In.H + 1) * span);
+            float* scratch = Scratch.Get(Scratch.Plane, need);
             for (long p = (long)chunk * PerChunk; p < end; p++)
             {
-                Plane(in G, X + (p * inVol), Y + (p * outVol));
+                Plane(in G, X + (p * inVol), Y + (p * outVol), scratch);
             }
         }
     }
 
-    private static void Plane(in PoolGeom g, float* src, float* dst)
+    // One plane, separably: the maximum over the kernel columns is taken once along every input row at unit stride (vectorised),
+    // the rows of each window are then combined, and every StrideW-th column is kept. Taps are visited in the generic order (kernel
+    // row, then kernel column), replacing only on a strictly greater value, so the first of equal taps wins.
+    private static void Plane(in PoolGeom g, float* src, float* dst, float* scratch)
     {
         int inH = g.In.H, inW = g.In.W, outH = g.Out.H, outW = g.Out.W;
         int kh = g.Kernel.H, kw = g.Kernel.W, sh = g.Stride.H, sw = g.Stride.W, padH = g.Pad.H, padW = g.Pad.W;
+        int span = ((outW - 1) * sw) + 1;
+        int tmpLen = Math.Max(padW + inW, span + kw - 1);
+        float* tmp = scratch;
+        float* rows = tmp + tmpLen;
+        float* acc = rows + ((long)inH * span);
+        float negInf = float.NegativeInfinity;
+
+        // rows[r][c] = max over kx of input column c + kx - padW of row r, for the columns an output can start at.
+        for (int r = 0; r < inH; r++)
+        {
+            new Span<float>(tmp, padW).Fill(negInf);
+            new Span<float>(src + ((long)r * inW), inW).CopyTo(new Span<float>(tmp + padW, inW));
+            new Span<float>(tmp + padW + inW, tmpLen - padW - inW).Fill(negInf);
+            float* h = rows + ((long)r * span);
+            new Span<float>(h, span).Fill(negInf);
+            for (int kx = 0; kx < kw; kx++)
+            {
+                MaxInto(h, tmp + kx, span);
+            }
+        }
+
         for (int oh = 0; oh < outH; oh++)
         {
             float* o = dst + ((long)oh * outW);
-            new Span<float>(o, outW).Fill(float.NegativeInfinity);
+            new Span<float>(acc, span).Fill(negInf);
             for (int ky = 0; ky < kh; ky++)
             {
-                int h = (oh * sh) - padH + ky;
-                if ((uint)h >= (uint)inH)
+                int r = (oh * sh) - padH + ky;
+                if ((uint)r < (uint)inH)
                 {
-                    continue;
+                    MaxInto(acc, rows + ((long)r * span), span);
                 }
+            }
 
-                float* row = src + ((long)h * inW);
-                for (int kx = 0; kx < kw; kx++)
+            if (sw == 1)
+            {
+                new Span<float>(acc, outW).CopyTo(new Span<float>(o, outW));
+            }
+            else
+            {
+                for (int ow = 0; ow < outW; ow++)
                 {
-                    // Output columns whose tap column ow*stride - pad + kx lies inside [0, inW).
-                    int shift = kx - padW;
-                    int lo = shift >= 0 ? 0 : (-shift + sw - 1) / sw;
-                    int hi = inW - 1 - shift < 0 ? -1 : Math.Min(outW - 1, (inW - 1 - shift) / sw);
-                    int ow = lo;
-                    if (sw == 1)
-                    {
-                        if (Vector256.IsHardwareAccelerated)
-                        {
-                            for (; ow + 8 <= hi + 1; ow += 8)
-                            {
-                                Vector256<float> v = Vector256.Load(row + ow + shift);
-                                Vector256<float> a = Vector256.Load(o + ow);
-                                Vector256.Store(Vector256.ConditionalSelect(Vector256.GreaterThan(v, a), v, a), o + ow);
-                            }
-                        }
-
-                        for (; ow + 4 <= hi + 1; ow += 4)
-                        {
-                            Vector128<float> v = Vector128.Load(row + ow + shift);
-                            Vector128<float> a = Vector128.Load(o + ow);
-                            Vector128.Store(Vector128.ConditionalSelect(Vector128.GreaterThan(v, a), v, a), o + ow);
-                        }
-                    }
-
-                    // A NaN tap compares false and is skipped, as in the generic loop.
-                    for (; ow <= hi; ow++)
-                    {
-                        float v = row[(ow * sw) + shift];
-                        if (v > o[ow])
-                        {
-                            o[ow] = v;
-                        }
-                    }
+                    o[ow] = acc[ow * sw];
                 }
             }
 
@@ -135,6 +135,34 @@ internal static unsafe class MaxPoolFast
                     o[ow] = Slow(in g, src, oh, ow);
                 }
             }
+        }
+    }
+
+    // dst[i] = src[i] where it is strictly greater (a NaN is not, so it is skipped), for i in 0..n-1.
+    private static void MaxInto(float* dst, float* src, int n)
+    {
+        int i = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; i + 8 <= n; i += 8)
+            {
+                Vector256<float> v = Vector256.Load(src + i);
+                Vector256<float> a = Vector256.Load(dst + i);
+                Vector256.Store(Vector256.ConditionalSelect(Vector256.GreaterThan(v, a), v, a), dst + i);
+            }
+        }
+
+        for (; i + 4 <= n; i += 4)
+        {
+            Vector128<float> v = Vector128.Load(src + i);
+            Vector128<float> a = Vector128.Load(dst + i);
+            Vector128.Store(Vector128.ConditionalSelect(Vector128.GreaterThan(v, a), v, a), dst + i);
+        }
+
+        for (; i < n; i++)
+        {
+            float v = src[i];
+            dst[i] = v > dst[i] ? v : dst[i];
         }
     }
 
