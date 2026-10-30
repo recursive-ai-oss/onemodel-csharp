@@ -6,6 +6,7 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 |---|---|
 | Tensors, memory, layouts, fp16/bf16 rounding, gradient records | [tensors.md](tensors.md) |
 | Reverse-mode autodiff: the engine, per-operator backward rules, what is exact | [autograd.md](autograd.md) |
+| Tracing a tensor-layer model into the graph layer: what is recorded, the operator mapping, loud failures, symbolic axes | [tracing.md](tracing.md) |
 | Training: modules, losses, optimizers, schedules, clipping, checkpoints; what matches PyTorch and what is exact | [training.md](training.md) |
 | Data loading for training: deterministic batch streams, samplers, collation, prefetch | [data-loading.md](data-loading.md) |
 | Exact mode: definition and accumulation order | [exact-mode.md](exact-mode.md) |

@@ -23,16 +23,16 @@ internal static partial class BackwardOps
         Tensor hPrev = Tensor.Create(DType.F32, Shape.Create(rows, h));
         try
         {
-            ReadOnlySpan<float> gv = gates.Data<float>(), cv = cseq.Data<float>(), tv = tanhC.Data<float>(), yv = y.Data<float>(), gyv = gy.Data<float>();
-            ReadOnlySpan<float> zv = zeros.Data<float>();
+            ReadOnlySpan<float> gv = gates.InternalData<float>(), cv = cseq.InternalData<float>(), tv = tanhC.InternalData<float>(), yv = y.InternalData<float>(), gyv = gy.InternalData<float>();
+            ReadOnlySpan<float> zv = zeros.InternalData<float>();
             Span<float> dgv = dG.MutableData<float>(), dh = dhn.MutableData<float>(), dc = dcn.MutableData<float>(), hp = hPrev.MutableData<float>();
             for (int s = 0; s < steps; s++)
             {
                 int t = reverse ? s : steps - 1 - s;
                 int pt = reverse ? t + 1 : t - 1;
                 bool first = reverse ? t == steps - 1 : t == 0;
-                ReadOnlySpan<float> cp = first ? (c0.IsEmpty ? zv : c0.Data<float>()) : cv.Slice(pt * bh, bh);
-                ReadOnlySpan<float> hpv = first ? (h0.IsEmpty ? zv : h0.Data<float>()) : yv.Slice(pt * bh, bh);
+                ReadOnlySpan<float> cp = first ? (c0.IsEmpty ? zv : c0.InternalData<float>()) : cv.Slice(pt * bh, bh);
+                ReadOnlySpan<float> hpv = first ? (h0.IsEmpty ? zv : h0.InternalData<float>()) : yv.Slice(pt * bh, bh);
                 hpv.CopyTo(hp.Slice(t * bh, bh));
                 for (int b = 0; b < batch; b++)
                 {
@@ -59,28 +59,28 @@ internal static partial class BackwardOps
                 // dh' = dG_t · W_hh  ([B,4H] x [4H,H])
                 if (s < steps - 1 || r.NeedsInputGrad(5))
                 {
-                    Dense.Gemm(false, false, batch, h, h4, dgv.Slice(t * batch * h4, batch * h4), h4, wHh.Data<float>(), h, dh, h);
+                    Dense.Gemm(false, false, batch, h, h4, dgv.Slice(t * batch * h4, batch * h4), h4, wHh.InternalData<float>(), h, dh, h);
                 }
             }
 
             if (r.NeedsInputGrad(0))
             {
                 Tensor dx = Tensor.Create(DType.F32, x.Shape);
-                Dense.Gemm(false, false, rows, inSize, h4, dgv, h4, wIh.Data<float>(), inSize, dx.MutableData<float>(), inSize);
+                Dense.Gemm(false, false, rows, inSize, h4, dgv, h4, wIh.InternalData<float>(), inSize, dx.MutableData<float>(), inSize);
                 Engine.Emit(r, 0, dx, owned: true);
             }
 
             if (r.NeedsInputGrad(1))
             {
                 Tensor dw = Tensor.Create(DType.F32, wIh.Shape);
-                Dense.Gemm(true, false, h4, inSize, rows, dgv, h4, x.Data<float>(), inSize, dw.MutableData<float>(), inSize);
+                Dense.Gemm(true, false, h4, inSize, rows, dgv, h4, x.InternalData<float>(), inSize, dw.MutableData<float>(), inSize);
                 Engine.Emit(r, 1, dw, owned: true);
             }
 
             if (r.NeedsInputGrad(2))
             {
                 Tensor dw = Tensor.Create(DType.F32, wHh.Shape);
-                Dense.Gemm(true, false, h4, h, rows, dgv, h4, hPrev.Data<float>(), h, dw.MutableData<float>(), h);
+                Dense.Gemm(true, false, h4, h, rows, dgv, h4, hPrev.InternalData<float>(), h, dw.MutableData<float>(), h);
                 Engine.Emit(r, 2, dw, owned: true);
             }
 
@@ -129,7 +129,7 @@ internal static partial class BackwardOps
         Tensor hPrev = Tensor.Create(DType.F32, Shape.Create(rows, h));
         try
         {
-            ReadOnlySpan<float> gv = gates.Data<float>(), nv = hn.Data<float>(), yv = y.Data<float>(), gyv = gy.Data<float>(), zv = zeros.Data<float>();
+            ReadOnlySpan<float> gv = gates.InternalData<float>(), nv = hn.InternalData<float>(), yv = y.InternalData<float>(), gyv = gy.InternalData<float>(), zv = zeros.InternalData<float>();
             Span<float> dxv = dX.MutableData<float>(), dhv = dH.MutableData<float>(), dn = dhn.MutableData<float>(), dr = direct.MutableData<float>();
             Span<float> hp = hPrev.MutableData<float>();
             for (int s = 0; s < steps; s++)
@@ -137,7 +137,7 @@ internal static partial class BackwardOps
                 int t = reverse ? s : steps - 1 - s;
                 int pt = reverse ? t + 1 : t - 1;
                 bool first = reverse ? t == steps - 1 : t == 0;
-                ReadOnlySpan<float> hpv = first ? (h0.IsEmpty ? zv : h0.Data<float>()) : yv.Slice(pt * bh, bh);
+                ReadOnlySpan<float> hpv = first ? (h0.IsEmpty ? zv : h0.InternalData<float>()) : yv.Slice(pt * bh, bh);
                 hpv.CopyTo(hp.Slice(t * bh, bh));
                 for (int b = 0; b < batch; b++)
                 {
@@ -166,7 +166,7 @@ internal static partial class BackwardOps
                 }
 
                 // dh' = dh * z + dH_t · W_hh  ([B,3H] x [3H,H])
-                Dense.Gemm(false, false, batch, h, h3, dhv.Slice(t * batch * h3, batch * h3), h3, wHh.Data<float>(), h, dn, h);
+                Dense.Gemm(false, false, batch, h, h3, dhv.Slice(t * batch * h3, batch * h3), h3, wHh.InternalData<float>(), h, dn, h);
                 for (int i = 0; i < bh; i++)
                 {
                     dn[i] += dr[i];
@@ -176,21 +176,21 @@ internal static partial class BackwardOps
             if (r.NeedsInputGrad(0))
             {
                 Tensor dxo = Tensor.Create(DType.F32, x.Shape);
-                Dense.Gemm(false, false, rows, inSize, h3, dxv, h3, wIh.Data<float>(), inSize, dxo.MutableData<float>(), inSize);
+                Dense.Gemm(false, false, rows, inSize, h3, dxv, h3, wIh.InternalData<float>(), inSize, dxo.MutableData<float>(), inSize);
                 Engine.Emit(r, 0, dxo, owned: true);
             }
 
             if (r.NeedsInputGrad(1))
             {
                 Tensor dw = Tensor.Create(DType.F32, wIh.Shape);
-                Dense.Gemm(true, false, h3, inSize, rows, dxv, h3, x.Data<float>(), inSize, dw.MutableData<float>(), inSize);
+                Dense.Gemm(true, false, h3, inSize, rows, dxv, h3, x.InternalData<float>(), inSize, dw.MutableData<float>(), inSize);
                 Engine.Emit(r, 1, dw, owned: true);
             }
 
             if (r.NeedsInputGrad(2))
             {
                 Tensor dw = Tensor.Create(DType.F32, wHh.Shape);
-                Dense.Gemm(true, false, h3, h, rows, dhv, h3, hPrev.Data<float>(), h, dw.MutableData<float>(), h);
+                Dense.Gemm(true, false, h3, h, rows, dhv, h3, hPrev.InternalData<float>(), h, dw.MutableData<float>(), h);
                 Engine.Emit(r, 2, dw, owned: true);
             }
 
@@ -276,8 +276,8 @@ internal static partial class BackwardOps
         var lse = new double[classes];
         Tensor dx = Tensor.Zeros(DType.F32, lp.Shape);
         Span<float> d = dx.MutableData<float>();
-        ReadOnlySpan<float> gv = g.Data<float>();
-        ReadOnlySpan<float> lpv = lp.Data<float>();
+        ReadOnlySpan<float> gv = g.InternalData<float>();
+        ReadOnlySpan<float> lpv = lp.InternalData<float>();
         for (int b = 0; b < batch; b++)
         {
             int len = (int)ints[4 + b], tl = (int)ints[4 + batch + b];
@@ -323,17 +323,17 @@ internal static partial class BackwardOps
             Tensor dw = Tensor.Zeros(DType.F32, w.Shape);
             Tensor cols = Tensor.Create(DType.F32, Shape.Create(plane, kk));
             Tensor tmp = Tensor.Create(DType.F32, Shape.Create(og, kk));
-            ReadOnlySpan<float> gv = g.Data<float>(), xv = x.Data<float>();
+            ReadOnlySpan<float> gv = g.InternalData<float>(), xv = x.InternalData<float>();
             Span<float> dwv = dw.MutableData<float>();
             for (int img = 0; img < n; img++)
             {
                 for (int grp = 0; grp < groups; grp++)
                 {
                     Im2ColPatchMajor(s, gv.Slice(((img * cout) + (grp * cg)) * gh * gw, cg * gh * gw), cols.MutableData<float>());
-                    Dense.Gemm(false, false, og, kk, plane, xv.Slice(((img * cin) + (grp * og)) * plane), plane, cols.Data<float>(), kk,
+                    Dense.Gemm(false, false, og, kk, plane, xv.Slice(((img * cin) + (grp * og)) * plane), plane, cols.InternalData<float>(), kk,
                         tmp.MutableData<float>(), kk);
                     Span<float> dst = dwv.Slice(grp * og * kk, og * kk);
-                    ReadOnlySpan<float> t = tmp.Data<float>();
+                    ReadOnlySpan<float> t = tmp.InternalData<float>();
                     for (int i = 0; i < dst.Length; i++)
                     {
                         dst[i] += t[i];
@@ -349,7 +349,7 @@ internal static partial class BackwardOps
         if (r.NeedsInputGrad(2))
         {
             int plane = gh * gw;
-            ReadOnlySpan<float> gv = g.Data<float>();
+            ReadOnlySpan<float> gv = g.InternalData<float>();
             Tensor acc = Tensor.Zeros(DType.F64, Shape.Create(cout));
             Span<double> a = acc.MutableData<double>();
             for (int img = 0; img < n; img++)
@@ -381,7 +381,7 @@ internal static partial class BackwardOps
         int planes = xs[0] * xs[1], h = xs[2], w = xs[3];
         Tensor dx = Tensor.Zeros(DType.F32, xs);
         Span<float> d = dx.MutableData<float>();
-        ReadOnlySpan<float> gv = g.Data<float>();
+        ReadOnlySpan<float> gv = g.InternalData<float>();
         for (int pl = 0; pl < planes; pl++)
         {
             Span<float> dp = d.Slice(pl * h * w, h * w);

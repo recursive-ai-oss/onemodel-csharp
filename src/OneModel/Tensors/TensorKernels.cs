@@ -114,7 +114,7 @@ public sealed class ReferenceKernels : ITensorKernels
     /// <inheritdoc/>
     public void Binary(BinaryOp op, in Tensor a, in Tensor b, in Tensor dst)
     {
-        ReadOnlySpan<float> sa = a.Storage<float>(), sb = b.Storage<float>();
+        ReadOnlySpan<float> sa = a.InternalStorage<float>(), sb = b.InternalStorage<float>();
         Span<float> d = dst.MutableStorage<float>();
         Shape shape = dst.Shape;
         if (shape.Length == 0)
@@ -171,7 +171,7 @@ public sealed class ReferenceKernels : ITensorKernels
     /// <inheritdoc/>
     public void Unary(UnaryOp op, in Tensor x, in Tensor dst)
     {
-        ReadOnlySpan<float> sx = x.Storage<float>();
+        ReadOnlySpan<float> sx = x.InternalStorage<float>();
         Span<float> d = dst.MutableStorage<float>();
         Shape shape = dst.Shape;
         if (shape.Length == 0)
@@ -219,7 +219,7 @@ public sealed class ReferenceKernels : ITensorKernels
     /// <inheritdoc/>
     public void MatMul(in Tensor a, in Tensor b, in Tensor dst)
     {
-        ReadOnlySpan<float> sa = a.Storage<float>(), sb = b.Storage<float>();
+        ReadOnlySpan<float> sa = a.InternalStorage<float>(), sb = b.InternalStorage<float>();
         Span<float> d = dst.MutableStorage<float>();
         int m = a.Shape[0], k = a.Shape[1], n = b.Shape[1];
         int a0 = a.Strides[0], a1 = a.Strides[1], b0 = b.Strides[0], b1 = b.Strides[1], d0 = dst.Strides[0], d1 = dst.Strides[1];
@@ -241,7 +241,7 @@ public sealed class ReferenceKernels : ITensorKernels
     /// <inheritdoc/>
     public void MaxPool2d(in Tensor x, in Pool2dParams p, in Tensor dst, in Tensor indices)
     {
-        ReadOnlySpan<float> sx = x.Storage<float>();
+        ReadOnlySpan<float> sx = x.InternalStorage<float>();
         Span<float> d = dst.MutableStorage<float>();
         Span<int> ind = indices.IsEmpty ? default : indices.MutableStorage<int>();
         int n = x.Shape[0], c = x.Shape[1], h = x.Shape[2], w = x.Shape[3];

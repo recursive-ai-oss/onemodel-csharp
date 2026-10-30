@@ -107,6 +107,9 @@ public sealed class AutogradMeta
 
     /// <summary>The accumulated gradient of a leaf; empty until a backward pass writes it. The engine owns the accumulation.</summary>
     public Tensor Grad { get; set; }
+
+    /// <summary>The tracer's value for this tensor while a trace is recording, else null.</summary>
+    internal object? Trace { get; set; }
 }
 
 /// <summary>
@@ -123,7 +126,19 @@ public static class GradMode
     public static bool IsEnabled => !s_disabled;
 
     /// <summary>Disables recording on this thread until the returned scope is disposed.</summary>
+    /// <exception cref="TraceException">A trace is recording on this thread: skipping recording there would silently freeze the values computed inside the scope into the traced graph.</exception>
     public static NoGradScope NoGrad()
+    {
+        if (TraceContext.Current is not null)
+        {
+            throw new TraceException(TraceErrorKind.NoGradInTrace, "GradMode.NoGrad() was entered while tracing: operations inside it would not be recorded, so their results would be frozen into the graph as constants. Leave it out; traced graphs have no gradients.");
+        }
+
+        return NoGradInternal();
+    }
+
+    // The library's own scratch work (broadcast views, copies inside an operation) must not be recorded, trace or not.
+    internal static NoGradScope NoGradInternal()
     {
         bool prev = s_disabled;
         s_disabled = true;

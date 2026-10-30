@@ -59,19 +59,19 @@ public static partial class Ops
         {
             Span<float> gv = gates.MutableData<float>(), cv = cseq.MutableData<float>(), tv = tanhC.MutableData<float>(), yv = y.MutableData<float>();
             Span<float> rv = rec.MutableData<float>(), bv = bias.MutableData<float>();
-            Dense.Transpose(wh.Data<float>(), h, h4, h, whT.MutableData<float>());
-            Dense.Gemm(false, true, steps * batch, h4, inSize, xc.Data<float>(), inSize, wi.Data<float>(), inSize, gv, h4);
+            Dense.Transpose(wh.InternalData<float>(), h, h4, h, whT.MutableData<float>());
+            Dense.Gemm(false, true, steps * batch, h4, inSize, xc.InternalData<float>(), inSize, wi.InternalData<float>(), inSize, gv, h4);
             SumBias(bIh, bHh, bv);
             bool hasBias = !bIh.IsEmpty || !bHh.IsEmpty;
-            ReadOnlySpan<float> zv = zeros.Data<float>();
+            ReadOnlySpan<float> zv = zeros.InternalData<float>();
             for (int f = 0; f < steps; f++)
             {
                 int t = reverse ? steps - 1 - f : f;
                 int pt = reverse ? t + 1 : t - 1;
                 bool first = f == 0;
-                ReadOnlySpan<float> hp = first ? (h0c.IsEmpty ? zv : h0c.Data<float>()) : yv.Slice(pt * bh, bh);
-                ReadOnlySpan<float> cp = first ? (c0c.IsEmpty ? zv : c0c.Data<float>()) : cv.Slice(pt * bh, bh);
-                Dense.Gemm(false, false, batch, h4, h, hp, h, whT.Data<float>(), h4, rv, h4);
+                ReadOnlySpan<float> hp = first ? (h0c.IsEmpty ? zv : h0c.InternalData<float>()) : yv.Slice(pt * bh, bh);
+                ReadOnlySpan<float> cp = first ? (c0c.IsEmpty ? zv : c0c.InternalData<float>()) : cv.Slice(pt * bh, bh);
+                Dense.Gemm(false, false, batch, h4, h, hp, h, whT.InternalData<float>(), h4, rv, h4);
                 for (int b = 0; b < batch; b++)
                 {
                     Span<float> g = gv.Slice(((t * batch) + b) * h4, h4);
@@ -181,19 +181,19 @@ public static partial class Ops
         try
         {
             Span<float> gv = gates.MutableData<float>(), nv = hn.MutableData<float>(), yv = y.MutableData<float>(), rv = rec.MutableData<float>();
-            Dense.Transpose(wh.Data<float>(), h, h3, h, whT.MutableData<float>());
-            Dense.Gemm(false, true, steps * batch, h3, inSize, xc.Data<float>(), inSize, wi.Data<float>(), inSize, gv, h3);
-            ReadOnlySpan<float> zv = zeros.Data<float>();
+            Dense.Transpose(wh.InternalData<float>(), h, h3, h, whT.MutableData<float>());
+            Dense.Gemm(false, true, steps * batch, h3, inSize, xc.InternalData<float>(), inSize, wi.InternalData<float>(), inSize, gv, h3);
+            ReadOnlySpan<float> zv = zeros.InternalData<float>();
             Tensor biT = bIh.IsEmpty ? default : Contig(bIh, out biCopied);
             Tensor bhT = bHh.IsEmpty ? default : Contig(bHh, out bhCopied);
-            ReadOnlySpan<float> bi = biT.IsEmpty ? default : biT.Data<float>();
-            ReadOnlySpan<float> bhv = bhT.IsEmpty ? default : bhT.Data<float>();
+            ReadOnlySpan<float> bi = biT.IsEmpty ? default : biT.InternalData<float>();
+            ReadOnlySpan<float> bhv = bhT.IsEmpty ? default : bhT.InternalData<float>();
             for (int f = 0; f < steps; f++)
             {
                 int t = reverse ? steps - 1 - f : f;
                 int pt = reverse ? t + 1 : t - 1;
-                ReadOnlySpan<float> hp = f == 0 ? (h0c.IsEmpty ? zv : h0c.Data<float>()) : yv.Slice(pt * bh, bh);
-                Dense.Gemm(false, false, batch, h3, h, hp, h, whT.Data<float>(), h3, rv, h3);
+                ReadOnlySpan<float> hp = f == 0 ? (h0c.IsEmpty ? zv : h0c.InternalData<float>()) : yv.Slice(pt * bh, bh);
+                Dense.Gemm(false, false, batch, h3, h, hp, h, whT.InternalData<float>(), h3, rv, h3);
                 for (int b = 0; b < batch; b++)
                 {
                     Span<float> g = gv.Slice(((t * batch) + b) * h3, h3);
@@ -332,14 +332,14 @@ public static partial class Ops
         if (!a.IsEmpty)
         {
             Tensor c = Contig(a, out bool copied);
-            c.Data<float>().CopyTo(dst);
+            c.InternalData<float>().CopyTo(dst);
             Free(c, copied);
         }
 
         if (!b.IsEmpty)
         {
             Tensor c = Contig(b, out bool copied);
-            ReadOnlySpan<float> s = c.Data<float>();
+            ReadOnlySpan<float> s = c.InternalData<float>();
             for (int i = 0; i < dst.Length; i++)
             {
                 dst[i] += s[i];

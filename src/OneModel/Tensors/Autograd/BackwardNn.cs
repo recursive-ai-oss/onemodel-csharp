@@ -29,7 +29,7 @@ internal static partial class BackwardOps
                 Tensor dx = Tensor.Create(DType.F32, y.Shape);
                 int cols = y.Shape[y.Rank - 1];
                 int rows = cols == 0 ? 0 : y.Length / cols;
-                ReadOnlySpan<float> yv = y.Data<float>(), gv = g.Data<float>();
+                ReadOnlySpan<float> yv = y.InternalData<float>(), gv = g.InternalData<float>();
                 Span<float> d = dx.MutableData<float>();
                 for (int row = 0; row < rows; row++)
                 {
@@ -57,7 +57,7 @@ internal static partial class BackwardOps
                 Tensor dx = Tensor.Create(DType.F32, y.Shape);
                 int cols = y.Shape[y.Rank - 1];
                 int rows = cols == 0 ? 0 : y.Length / cols;
-                ReadOnlySpan<float> yv = y.Data<float>(), gv = g.Data<float>();
+                ReadOnlySpan<float> yv = y.InternalData<float>(), gv = g.InternalData<float>();
                 Span<float> d = dx.MutableData<float>();
                 for (int row = 0; row < rows; row++)
                 {
@@ -172,7 +172,7 @@ internal static partial class BackwardOps
         Tensor dx = needX ? Tensor.Create(DType.F32, x.Shape) : default;
         Tensor accG = needGamma ? Tensor.Create(DType.F64, Shape.Create(cols), zero: true) : default;
         Tensor accB = needBeta ? Tensor.Create(DType.F64, Shape.Create(cols), zero: true) : default;
-        ReadOnlySpan<float> xv = x.Data<float>(), gv = g.Data<float>(), gam = gamma.Data<float>(), mu = mean.Data<float>(), iv = inv.Data<float>();
+        ReadOnlySpan<float> xv = x.InternalData<float>(), gv = g.InternalData<float>(), gam = gamma.InternalData<float>(), mu = mean.InternalData<float>(), iv = inv.InternalData<float>();
         Span<float> d = needX ? dx.MutableData<float>() : default;
         Span<double> sg = needGamma ? accG.MutableData<double>() : default;
         Span<double> sb = needBeta ? accB.MutableData<double>() : default;
@@ -226,7 +226,7 @@ internal static partial class BackwardOps
         }
 
         Tensor f = Tensor.Create(DType.F32, acc.Shape);
-        ReadOnlySpan<double> s = acc.Data<double>();
+        ReadOnlySpan<double> s = acc.InternalData<double>();
         Span<float> d = f.MutableData<float>();
         for (int i = 0; i < d.Length; i++)
         {
@@ -244,7 +244,7 @@ internal static partial class BackwardOps
         int n = x.Shape[0], c = x.Shape[1], plane = x.Length / Math.Max(1, n * c);
         double m = (double)n * plane;
         Tensor dg = Tensor.Create(DType.F64, Shape.Create(c), zero: true), db = Tensor.Create(DType.F64, Shape.Create(c), zero: true);
-        ReadOnlySpan<float> xv = x.Data<float>(), gv = g.Data<float>(), gam = gamma.Data<float>(), mu = mean.Data<float>(), iv = inv.Data<float>();
+        ReadOnlySpan<float> xv = x.InternalData<float>(), gv = g.InternalData<float>(), gam = gamma.InternalData<float>(), mu = mean.InternalData<float>(), iv = inv.InternalData<float>();
         Span<double> sg = dg.MutableData<double>(), sb = db.MutableData<double>();
         for (int i = 0; i < n; i++)
         {
@@ -311,7 +311,7 @@ internal static partial class BackwardOps
         Tensor x = r.Saved(0).Unpack(), w = r.Saved(1).Unpack();
         ConvShape s = ConvShapeOf(x, w, r.Ints);
         int cg = s.Cin / s.Groups, og = s.Cout / s.Groups, kk = cg * s.KH * s.KW, plane = s.OutH * s.OutW;
-        ReadOnlySpan<float> xv = x.Data<float>(), wv = w.Data<float>(), gv = g.Data<float>();
+        ReadOnlySpan<float> xv = x.InternalData<float>(), wv = w.InternalData<float>(), gv = g.InternalData<float>();
 
         if (r.NeedsInputGrad(2))
         {
@@ -347,10 +347,10 @@ internal static partial class BackwardOps
                 for (int grp = 0; grp < s.Groups; grp++)
                 {
                     Im2ColPatchMajor(s, xv.Slice(((n * s.Cin) + (grp * cg)) * s.H * s.W, cg * s.H * s.W), cols.MutableData<float>());
-                    Dense.Gemm(false, false, og, kk, plane, gv.Slice(((n * s.Cout) + (grp * og)) * plane), plane, cols.Data<float>(), kk,
+                    Dense.Gemm(false, false, og, kk, plane, gv.Slice(((n * s.Cout) + (grp * og)) * plane), plane, cols.InternalData<float>(), kk,
                         tmp.MutableData<float>(), kk);
                     Span<float> dst = dwv.Slice(grp * og * kk, og * kk);
-                    ReadOnlySpan<float> t = tmp.Data<float>();
+                    ReadOnlySpan<float> t = tmp.InternalData<float>();
                     for (int i = 0; i < dst.Length; i++)
                     {
                         dst[i] += t[i];
@@ -380,9 +380,9 @@ internal static partial class BackwardOps
             {
                 for (int grp = 0; grp < s.Groups; grp++)
                 {
-                    Dense.Gemm(false, false, kk, plane, og, wt.Data<float>().Slice(grp * kk * og, kk * og), og,
+                    Dense.Gemm(false, false, kk, plane, og, wt.InternalData<float>().Slice(grp * kk * og, kk * og), og,
                         gv.Slice(((n * s.Cout) + (grp * og)) * plane), plane, dcols.MutableData<float>(), plane);
-                    Col2Im(s, dcols.Data<float>(), dxv.Slice(((n * s.Cin) + (grp * cg)) * s.H * s.W, cg * s.H * s.W));
+                    Col2Im(s, dcols.InternalData<float>(), dxv.Slice(((n * s.Cin) + (grp * cg)) * s.H * s.W, cg * s.H * s.W));
                 }
             }
 
@@ -458,7 +458,7 @@ internal static partial class BackwardOps
         Shape ish = r.InputShape(0);
         Tensor dx = Tensor.Zeros(DType.F32, ish);
         Span<float> d = dx.MutableData<float>();
-        ReadOnlySpan<float> gv = g.Data<float>();
+        ReadOnlySpan<float> gv = g.InternalData<float>();
         int n = ish[0] * ish[1], h = ish[2], w = ish[3], oh = g.Shape[2], ow = g.Shape[3];
         for (int pl = 0; pl < n; pl++)
         {
@@ -504,10 +504,10 @@ internal static partial class BackwardOps
         long pad = r.Ints[0];
         Tensor dt = Tensor.Zeros(DType.F32, ts);
         Span<float> d = dt.MutableData<float>();
-        ReadOnlySpan<float> gv = g.Data<float>();
+        ReadOnlySpan<float> gv = g.InternalData<float>();
         for (int i = 0; i < ids.Length; i++)
         {
-            long id = ids.DType == DType.I32 ? ids.Data<int>()[i] : ids.Data<long>()[i];
+            long id = ids.DType == DType.I32 ? ids.InternalData<int>()[i] : ids.InternalData<long>()[i];
             if (id == pad)
             {
                 continue;
@@ -540,7 +540,7 @@ internal static partial class BackwardOps
             }
         }
 
-        float gv = g.Data<float>()[0];
+        float gv = g.InternalData<float>()[0];
         float scale = mean ? gv / Math.Max(1, count) : gv;
         Tensor dx = Tensor.Zeros(DType.F32, ls);
         Span<float> d = dx.MutableData<float>();
@@ -556,7 +556,7 @@ internal static partial class BackwardOps
         Engine.Emit(r, 0, dx, owned: true);
     }
 
-    internal static long TargetAt(in Tensor target, int i) => target.DType == DType.I32 ? target.Data<int>()[i] : target.Data<long>()[i];
+    internal static long TargetAt(in Tensor target, int i) => target.DType == DType.I32 ? target.InternalData<int>()[i] : target.InternalData<long>()[i];
 
     private static void AttentionBackward(Engine e, BackwardRecord r, in Tensor g)
     {
@@ -568,8 +568,8 @@ internal static partial class BackwardOps
         Tensor dq = Tensor.Create(DType.F32, q.Shape), dk = Tensor.Create(DType.F32, k.Shape), dv = Tensor.Create(DType.F32, v.Shape);
         Tensor sBuf = Tensor.Create(DType.F32, Shape.Create(lq, lk)), pBuf = Tensor.Create(DType.F32, Shape.Create(lq, lk));
         Tensor dpBuf = Tensor.Create(DType.F32, Shape.Create(lq, lk));
-        ReadOnlySpan<float> qv = q.Data<float>(), kv = k.Data<float>(), vv = v.Data<float>(), gv = g.Data<float>();
-        ReadOnlySpan<float> mv = mask.IsEmpty ? default : mask.Data<float>();
+        ReadOnlySpan<float> qv = q.InternalData<float>(), kv = k.InternalData<float>(), vv = v.InternalData<float>(), gv = g.InternalData<float>();
+        ReadOnlySpan<float> mv = mask.IsEmpty ? default : mask.InternalData<float>();
         Span<float> dqv = dq.MutableData<float>(), dkv = dk.MutableData<float>(), dvv = dv.MutableData<float>();
         Span<float> sv = sBuf.MutableData<float>(), pv = pBuf.MutableData<float>(), dpv = dpBuf.MutableData<float>();
         for (int b = 0; b < batch; b++)
