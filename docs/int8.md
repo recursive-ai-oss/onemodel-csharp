@@ -36,7 +36,13 @@ The kernel is checked against a 64-bit naive reference on every supported path, 
 
 ## Convolution (`Int8Conv`)
 
-im2col is fused into the packing of A (no column buffer); weights are prepacked per group; depthwise convolutions have a direct kernel. The result and the epilogue are the product kernel's.
+im2col is fused into the packing of A (no column buffer); weights are prepacked per group. The result and the epilogue are the product kernel's.
+
+Depthwise convolutions (one input channel per group, up to 64 taps) run a direct kernel (`Int8Depthwise`) for horizontal strides 1 and 2 when 128-bit vectors are hardware accelerated; other geometries, and machines without vectors, use a scalar loop with the same sums. Per plane, the input is widened to 16 bits with its zero point subtracted and copied, zero padded, into one array per column residue modulo the horizontal stride (so a stride-2 tap is a contiguous read of the even or odd copy). The weights have their zero point subtracted, taps with a zero weight are dropped, and each row of outputs is computed 16 columns at a time (8 with 128-bit vectors) as `bias + sum(tap weight * input)` in 32-bit integers, then requantized by the same formula as the product kernel's epilogue. Integer sums do not depend on order, so every path gives the same bits. Measured on MobileNetV3-large QDQ int8 at batch 1, one thread, Zen 4 (indicative, loaded host): the 15 depthwise layers took 25 ms of a 34.7 ms run with the scalar loop and about 6 ms with this kernel (model 13.9 ms).
+
+## VNNI
+
+The x86 kernels use `vpmaddwd` on 16-bit operands. A kernel on `vpdpbusd` would need `u8 x s8` products accumulated without saturation (`vpdpbusd` does not saturate; `vpmaddubsw` does). .NET 10 exposes only `AvxVnni` (the VEX-encoded 128/256-bit form), whose `IsSupported` is false on AMD Zen 4 (which has AVX-512 VNNI but not AVX-VNNI) and on the build host; there is no 512-bit VNNI type. So no VNNI kernel exists yet, and the int8 GEMM on Zen 4 sits at about 100 giga multiply-adds per second per thread, about 60% of the `vpmaddwd` + `vpaddd` ceiling.
 
 ## Graph rewrites
 
