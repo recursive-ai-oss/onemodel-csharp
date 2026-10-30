@@ -1,0 +1,50 @@
+# int8 inference
+
+Operators, kernels and graph rewrites for 8-bit quantized models. Integer arithmetic is exact, so every int8 kernel gives the same bits on every instruction set and every thread count. The float parts around it (scales, dequantization) follow the order written here.
+
+## Operators
+
+| Operator | Notes |
+|---|---|
+| `QuantizeLinear` | uint8, int8, uint16, int16 outputs; per-tensor and per-axis scale. `y = clamp(round_half_even(x / scale) + zp)`; the division is a float32 division. NaN quantizes to the smallest value of the type. |
+| `DequantizeLinear` | uint8, int8, uint16, int16 and int32 inputs; `y = float(x - zp) * scale` in float32. A node with constant inputs is folded at plan time. |
+| `DynamicQuantizeLinear` | uint8 output. `lo = min(0, min x)`, `hi = max(0, max x)`, `scale = (hi - lo) / 255` (float32), `zp = clamp(round_half_even(0 - lo / scale), 0, 255)`. An all-zero input gives scale 1, zero point 0, output 0 (as ONNX Runtime does). |
+| `MatMulInteger`, `ConvInteger` | int32 results, uint8 or int8 operands in any mix. The zero point of the second operand of `ConvInteger` must be per-tensor. |
+| `QLinearMatMul`, `QLinearConv` | Requantize with `y = clamp(round_half_even(float(acc) * mult) + zp_y)`, `mult = (sx * sw) / sy` computed in float32 (per output channel when `sw` is a vector). `QLinearConv` adds an int32 bias to `acc` first. `QLinearMatMul` also accepts a ninth input, an int32 per-column bias (an extension used by the QDQ pass; not in ONNX). |
+| `MatMulIntegerToFloat` (internal) | `MatMulInteger -> Cast(float) -> Mul(scale)[-> Add(bias)]` evaluated in one kernel: `float(acc) * scale (+ bias)`, the same float32 operations in the same order. |
+
+Not supported: blocked quantization (`block_size`), int4/uint4, 3-D convolution. All other dtypes combinations the ONNX specification allows for these operators are supported.
+
+## Product kernel (`Int8Gemm`)
+
+`C[m,n] = sum_k (A[m,k] - zA) * (B[k,n] - zB)` is computed on the raw integers and corrected afterwards (Jacob et al. 2018, section 2.3):
+
+```
+S[m,n]  = sum_k A'[m,k] * B'[k,n]                          (A' = A as int16 shifted so that uint8 becomes int8 range: A' = A - 128 for uint8)
+Y[m,n]  = S - zA' * colSum[n] - zB' * (rowSum[m] - K * zA')
+```
+
+where primes denote the shifted domain (`zA' = zA - 128` for uint8 A, `zA` for int8; B is stored as int8 and a uint8 B is shifted by 128 the same way). Sums are int32; they cannot overflow while `K * 255 * 128 < 2^31`, i.e. K up to about 65,000 (not checked; the largest K among the reference models is 4608).
+
+* Goto and van de Geijn blocking: `Kc = 512`; work chunks of `Mc = 48` rows by `Nc = 64` columns, constants of the kernel, so results never depend on the thread count. A is packed once per product (in parallel over row blocks), B once per weight when the weight is constant (prepacked at session creation) and per product otherwise.
+* x86 (AVX2 and AVX-512): A is widened to int16, B kept int8 and widened in registers; pairs of k are multiplied with `vpmaddwd` (`G = 2`). This never saturates, unlike `vpmaddubsw`, which ONNX Runtime's AVX2 kernels use; it is half the multiply-adds per instruction of a VNNI kernel but exact. Tiles: AVX2 6x16, AVX-512 12x32. Packed A: panels of `mr` rows, k in pairs, int16; packed B: panels of `nr` columns, k in pairs, int8.
+* Arm with dot product (`SDOT`): groups of four k (`G = 4`), tile 4x16, int8 both sides.
+* Scalar, 128-bit portable and WASM: scalar loops over the same packed layout of the x86 path (`G = 2`).
+* The epilogue (zero-point correction, optional bias, requantization or float conversion) is vectorized and uses the formulas above, so it is identical on every path.
+
+The kernel is checked against a 64-bit naive reference on every supported path, random shapes, zero points and epilogues (`Int8GemmTests`), and against ONNX Runtime 1.31.1 bit for bit on 400 operator cases (`OracleQuantTests`, cases from `tools/ops_quant_oracle.py`). One exception: ONNX Runtime's own `Add` of two quantized tensors differs by 1 LSB between its x64 and arm64 builds, so the `qdq_add` cases carry a tolerance of 1.
+
+## Convolution (`Int8Conv`)
+
+im2col is fused into the packing of A (no column buffer); weights are prepacked per group; depthwise convolutions have a direct kernel. The result and the epilogue are the product kernel's.
+
+## Graph rewrites
+
+| Pass | Bits | Does |
+|---|---|---|
+| `qdq` | not preserved | `DequantizeLinear (input), DequantizeLinear (weights) [, DequantizeLinear (bias)] -> Conv or Gemm -> QuantizeLinear` becomes `QLinearConv` / `QLinearMatMul`. Conditions: constant 8-bit weights, constant scales and zero points, scalar activation scale and zero point, an optional int32 bias carrying the scale `sx * sw`, and the product feeding only the `QuantizeLinear`; anything else is left as written. The rewrite replaces float arithmetic by integer arithmetic, so results change by rounding; the pass is skipped in exact mode, where the QDQ graph runs as written (float simulation on the exact kernels). |
+| `matmul-integer-fusion` | preserved | The three or four nodes of the `MatMulIntegerToFloat` row above become one node, placed at the position of the last absorbed node. |
+
+## Metric against ONNX Runtime
+
+Defined in `oracles.md`. Operator-level results must equal ONNX Runtime's bit for bit on the oracle cases; model-level results are compared by cosine similarity and decision agreement, because the integer rounding chaos amplifies float noise (see there).

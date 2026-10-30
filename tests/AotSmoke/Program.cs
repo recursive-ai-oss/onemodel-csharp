@@ -86,6 +86,30 @@ foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact }
     }
 }
 
+// int8: a dynamically quantized MLP and a static QDQ convolution net (made with ONNX Runtime's quantization tool) against ONNX Runtime's
+// output. Integer products are exact, so the only differences are float roundings and the odd 8-bit step; the bound is loose on purpose.
+foreach ((string name, double bound) in new[] { ("int8_dyn", 2e-2), ("int8_qdq", 1e-1) })
+{
+    using JsonDocument qd = JsonDocument.Parse(Open(name + ".json"));
+    float[] qIn = [.. qd.RootElement.GetProperty("input").EnumerateArray().Select(e => (float)e.GetDouble())];
+    float[] qWant = [.. qd.RootElement.GetProperty("output").EnumerateArray().Select(e => (float)e.GetDouble())];
+    int[] qShape = [.. qd.RootElement.GetProperty("shape").EnumerateArray().Select(e => e.GetInt32())];
+    using Model m = Model.Load(Open(name + ".onnx"));
+    float[] y = m.Run(qIn, qShape);
+    double max = 1e-30, diff = 0;
+    for (int i = 0; i < y.Length; i++)
+    {
+        max = Math.Max(max, Math.Abs(qWant[i]));
+        diff = Math.Max(diff, Math.Abs(y[i] - qWant[i]));
+    }
+
+    Console.WriteLine($"{name}: kernel path {m.Session.KernelPath}, scaled error {diff / max:E2}");
+    if (!(diff / max <= bound))
+    {
+        return 6;
+    }
+}
+
 return 0;
 
 Stream Open(string name) =>

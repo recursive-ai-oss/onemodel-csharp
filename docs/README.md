@@ -21,3 +21,4 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 | Recurrent operators (RNN, GRU, LSTM): order of operations, open choices | [ops-recurrent.md](ops-recurrent.md) |
 | CTC decoding: greedy and prefix beam search, confidences | [ctc.md](ctc.md) |
 | Element-wise operators, activations, comparisons, Where, Cast | [ops-elementwise.md](ops-elementwise.md) |
+| int8: operators, product kernel, requantization, QDQ rewrite | [int8.md](int8.md) |

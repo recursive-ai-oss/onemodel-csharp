@@ -20,6 +20,10 @@
     <EmbeddedResource Include="../../testdata/graphs/reference.json" LogicalName="reference.json" />
     <EmbeddedResource Include="../../testdata/graphs/shape_ops.onnx" LogicalName="shape_ops.onnx" />
     <EmbeddedResource Include="../../testdata/graphs/shape_ops.json" LogicalName="shape_ops.json" />
+    <EmbeddedResource Include="../../testdata/graphs/int8_dyn.onnx" LogicalName="int8_dyn.onnx" />
+    <EmbeddedResource Include="../../testdata/graphs/int8_dyn.json" LogicalName="int8_dyn.json" />
+    <EmbeddedResource Include="../../testdata/graphs/int8_qdq.onnx" LogicalName="int8_qdq.onnx" />
+    <EmbeddedResource Include="../../testdata/graphs/int8_qdq.json" LogicalName="int8_qdq.json" />
   </ItemGroup>
 
 </Project>
