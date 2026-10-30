@@ -4,7 +4,7 @@
 
 <results-dir> holds conformance-fast.tsv and conformance-exact.tsv, written by
 `OnnxSweep conformance` (tools/conformance.sh runs both steps). Columns of the TSV files, tab separated, one case per line:
-group, case, opset, ops, mode, status, reason. Status is one of pass, fail, unsupported-op, unsupported-type, not-exact.
+group, case, opset, ops, mode, status, reason. Status is one of pass, fail, unsupported-op, unsupported-type, not-exact, known-diff.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-STATUSES = ["pass", "fail", "unsupported-op", "unsupported-type", "not-exact"]
+STATUSES = ["pass", "fail", "unsupported-op", "unsupported-type", "not-exact", "known-diff"]
 
 
 def read(path: Path) -> list[dict]:
@@ -96,14 +96,14 @@ def main() -> None:
     w("")
     w("## Summary")
     w("")
-    w("| Mode | Cases | pass | fail | unsupported-op | unsupported-type | not-exact |")
-    w("|---|---:|---:|---:|---:|---:|---:|")
+    w("| Mode | Cases | pass | fail | unsupported-op | unsupported-type | not-exact | known-diff |")
+    w("|---|---:|---:|---:|---:|---:|---:|---:|")
     w(f"| fast | {n} | " + " | ".join(str(total[s]) for s in STATUSES) + " |")
     if exact:
         w(f"| exact | {len(exact)} | " + " | ".join(str(etotal[s]) for s in STATUSES) + " |")
     w("")
     w("A **gap** is an `unsupported-op` or `unsupported-type` case: the library says so, loudly, when the session is created or first run. "
-      "A **fail** is a case that ran (or threw) and is wrong; each remaining fail is explained in its operator's row. "
+      "A **fail** is a case that ran (or threw) and is wrong: a defect. A **known-diff** is a failing case whose difference is understood and listed in the runner with its reason (Resize align_corners follows ONNX Runtime; the DFT inverse cases' expected data is noisier than their tolerance). "
       "A **not-exact** case, in exact mode only, uses an operator that has no exact kernel yet; its result is not computed.")
     w("")
     w("| Group | Cases | pass | fail | gap | not-exact (exact mode) |")

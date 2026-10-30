@@ -23,6 +23,9 @@ public enum CaseStatus
 
     /// <summary>Exact mode only: the case uses an operator without an exact kernel.</summary>
     NotExact,
+
+    /// <summary>A failing case whose difference is understood and documented (see <see cref="ConformanceRunner.KnownDifferences"/>). Not a defect.</summary>
+    KnownDiff,
 }
 
 /// <summary>One case's result in one mode.</summary>
@@ -75,6 +78,28 @@ public static class ConformanceRunner
 
     /// <summary>Runs one case in one mode. Never throws for a case's own faults.</summary>
     public static CaseResult RunCase(string group, string dir, ExecutionMode mode, int threads = 1)
+    {
+        CaseResult r = RunCaseCore(group, dir, mode, threads);
+        if (r.Status == CaseStatus.Fail && KnownDifferences.TryGetValue(r.Name, out string? why))
+        {
+            return r with { Status = CaseStatus.KnownDiff, Reason = why };
+        }
+
+        return r;
+    }
+
+    /// <summary>
+    /// Cases that fail on purpose, each with the reason. Everything else that fails is a defect.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> KnownDifferences = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["test_resize_downsample_scales_linear_align_corners"] = "Resize align_corners follows ONNX Runtime where the two backend cases disagree (docs/ops-conv.md)",
+        ["test_resize_downsample_scales_cubic_align_corners"] = "Resize align_corners follows ONNX Runtime where the two backend cases disagree (docs/ops-conv.md)",
+        ["test_dft_inverse"] = "expected data carries 1.9e-7 float32 FFT noise, above the case's 1e-7 absolute tolerance",
+        ["test_dft_inverse_opset19"] = "expected data carries 1.9e-7 float32 FFT noise, above the case's 1e-7 absolute tolerance",
+    };
+
+    private static CaseResult RunCaseCore(string group, string dir, ExecutionMode mode, int threads)
     {
         string name = Path.GetFileName(dir);
         long opset = 0;
@@ -154,6 +179,7 @@ public static class ConformanceRunner
         CaseStatus.Fail => "fail",
         CaseStatus.UnsupportedOp => "unsupported-op",
         CaseStatus.UnsupportedType => "unsupported-type",
+        CaseStatus.KnownDiff => "known-diff",
         _ => "not-exact",
     };
 

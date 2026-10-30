@@ -167,18 +167,30 @@ internal sealed class UniqueOp : OpKernel
                 }
             }
 
-            Span<long> idx = run.AllocateOutput(1, DType.I64, Shape.Create(u)).MutableData<long>();
-            Span<long> inv = run.AllocateOutput(2, DType.I64, Shape.Create(items)).MutableData<long>();
-            Span<long> cnt = run.AllocateOutput(3, DType.I64, Shape.Create(u)).MutableData<long>();
+            // The three index outputs are optional; a node that omits them has fewer outputs.
+            int outputs = run.Outputs.Length;
+            Span<long> idx = outputs > 1 ? run.AllocateOutput(1, DType.I64, Shape.Create(u)).MutableData<long>() : default;
+            Span<long> inv = outputs > 2 ? run.AllocateOutput(2, DType.I64, Shape.Create(items)).MutableData<long>() : default;
+            Span<long> cnt = outputs > 3 ? run.AllocateOutput(3, DType.I64, Shape.Create(u)).MutableData<long>() : default;
             for (int i = 0; i < u; i++)
             {
-                idx[i] = firstOf[rank[i]];
-                cnt[i] = count[rank[i]];
+                if (outputs > 1)
+                {
+                    idx[i] = firstOf[rank[i]];
+                }
+
+                if (outputs > 3)
+                {
+                    cnt[i] = count[rank[i]];
+                }
             }
 
-            for (int i = 0; i < items; i++)
+            if (outputs > 2)
             {
-                inv[i] = position[group[i]];
+                for (int i = 0; i < items; i++)
+                {
+                    inv[i] = position[group[i]];
+                }
             }
         }
     }

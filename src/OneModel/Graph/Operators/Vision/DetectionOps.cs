@@ -160,7 +160,7 @@ internal sealed class RoiAlignOp : OpKernel
             throw n.Error($"attribute 'mode' is '{mode}', expected avg or max");
         }
 
-        string ct = n.GetString("coordinate_transformation_mode", "output_half_pixel");
+        string ct = n.GetString("coordinate_transformation_mode", n.Opset >= 16 ? "half_pixel" : "output_half_pixel");
         _halfPixel = ct == "half_pixel";
         if (ct is not ("half_pixel" or "output_half_pixel"))
         {

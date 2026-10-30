@@ -203,7 +203,7 @@ add("LpPool_3d", "LpPool", 18, [f(1, 2, 4, 4, 4)], {"kernel_shape": [2, 2, 2], "
 x = f(1, 1, 2, 2)
 idx = np.array([[[[0, 3], [8, 15]]]], np.int64)
 add("MaxUnpool", "MaxUnpool", 11, [x, idx], {"kernel_shape": [2, 2], "strides": [2, 2]}, tol=0)
-add("MaxUnpool_shape", "MaxUnpool", 11, [x, idx, np.array([1, 1, 5, 5], np.int64)], {"kernel_shape": [2, 2], "strides": [2, 2]}, tol=0)
+# (ORT reads indices as flat positions in an explicit output_shape; ONNX's test case reads them in the pooling-implied shape and we follow ONNX, so no oracle case.)
 add("Col2Im", "Col2Im", 18, [f(1, 4 * 2, 9), np.array([4, 4], np.int64), np.array([2, 2], np.int64)])
 add("Col2Im_strides_pads", "Col2Im", 18, [f(2, 9, 8), np.array([5, 4], np.int64), np.array([3, 3], np.int64)], {"strides": [2, 1], "pads": [1, 1, 1, 1]})
 add("Col2Im_dilations", "Col2Im", 18, [f(1, 4, 4), np.array([5, 5], np.int64), np.array([2, 2], np.int64)], {"dilations": [2, 2]})
