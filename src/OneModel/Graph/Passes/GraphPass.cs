@@ -197,6 +197,7 @@ internal static class GraphPasses
         new AttentionFusionPass(),
         new LinearFusionPass(),
         new ConvActivationFusionPass(),
+        new ConvPackPass(),
     ];
 
     /// <summary>The names of the passes that run for a level and mode, in order.</summary>

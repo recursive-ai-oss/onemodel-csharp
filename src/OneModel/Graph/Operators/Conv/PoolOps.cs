@@ -133,7 +133,15 @@ internal sealed class MaxPoolOp : WindowPoolKernel
         switch (y.DType)
         {
             case DType.F32:
-                Pooling.Max(g, planes, x.Data<float>(), y.MutableData<float>(), idx, _columnMajor);
+                if (idx.IsEmpty && MaxPoolFast.Supports(in g))
+                {
+                    MaxPoolFast.Run(in g, planes, x.Data<float>(), y.MutableData<float>(), run.Threads);
+                }
+                else
+                {
+                    Pooling.Max(g, planes, x.Data<float>(), y.MutableData<float>(), idx, _columnMajor);
+                }
+
                 if (run.Exact)
                 {
                     Pooling.CanonicalizeNaN(y.MutableData<float>());

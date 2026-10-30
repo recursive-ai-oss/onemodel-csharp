@@ -53,7 +53,7 @@ internal abstract class BinaryArithmeticKernel<TOp> : OpKernel where TOp : IBina
         switch (c.DType)
         {
             case DType.F32:
-                Broadcast.Binary<float, FloatRows<TOp>>(path, exact, so, sa, sb, a.Data<float>(), b.Data<float>(), c.MutableData<float>());
+                Broadcast.Binary<float, FloatRows<TOp>>(path, exact, so, sa, sb, a.Data<float>(), b.Data<float>(), c.MutableData<float>(), run.Threads);
                 break;
             case DType.F64:
                 Broadcast.Binary<double, NumberRows<double, TOp>>(path, exact, so, sa, sb, a.Data<double>(), b.Data<double>(), c.MutableData<double>());

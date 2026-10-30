@@ -154,3 +154,71 @@ internal sealed class ConvActivationFusionPass : IGraphPass
         }
     }
 }
+
+/// <summary>
+/// Packs the constant weights of every non-depthwise Conv once, into the panel layout the fast convolution reads (A of the blocked
+/// matrix product, <see cref="ConvPacked.PackWeights"/>), so a run never repacks them. It runs last, after the batch-norm fold and
+/// the activation fusion have settled the weights. Copies only: the packed convolution gives the same bits as the unpacked one, so
+/// the pass preserves bits; it does nothing in exact mode, where convolutions run through the exact matrix product on the original
+/// weights. The original weights are released once nothing else reads them, so the model holds one copy.
+/// </summary>
+internal sealed class ConvPackPass : IGraphPass
+{
+    public string Name => "conv-pack";
+
+    public OptimizationLevel MinLevel => OptimizationLevel.All;
+
+    public bool PreservesBits => true;
+
+    public void Run(PassGraph g, CancellationToken ct)
+    {
+        if (g.Mode == ExecutionMode.Exact)
+        {
+            return;
+        }
+
+        int[] uses = g.UseCounts();
+        for (int i = 0; i < g.Nodes.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            CompiledNode conv = g.Nodes[i];
+            if (conv.Kernel is not ConvOp convOp || conv.Inputs.Length < 2 || conv.Inputs[0] < 0 || conv.Inputs[1] < 0 || g.IsConstant(conv.Inputs[0]))
+            {
+                continue;
+            }
+
+            int wId = conv.Inputs[1];
+            Tensor w = g.Constant(wId);
+            if (w.IsEmpty || w.DType != DType.F32 || (w.Rank != 3 && w.Rank != 4) || !w.IsContiguous || w.Length == 0)
+            {
+                continue;
+            }
+
+            int group = convOp.Group;
+            int kw = w.Shape[w.Rank - 1];
+            int kh = w.Rank == 4 ? w.Shape[2] : 1;
+            var s = new ConvShape(1, w.Shape[1] * group, 1, 1, w.Shape[0], kh, kw, 1, 1, 0, 0, 0, 0, 1, 1, group);
+            if (s.IsDepthwise)
+            {
+                continue;
+            }
+
+            long len = ConvPacked.PackedWeightsLength(g.Path, s);
+            if (len > int.MaxValue / 4)
+            {
+                continue;
+            }
+
+            Tensor packed = Tensor.Create(DType.F32, Shape.Create((int)len));
+            ConvPacked.PackWeights(g.Path, s, w.Data<float>(), packed.MutableData<float>());
+            ConvOp packedOp = g.Own(convOp.WithPackedWeights(packed, w.Shape, g.Path));
+            var inputs = (int[])conv.Inputs.Clone();
+            inputs[1] = -1;
+            g.Nodes[i] = new CompiledNode(conv.Info, packedOp, inputs, conv.Outputs);
+            if (--uses[wId] == 0)
+            {
+                g.ReleaseConstant(wId);
+            }
+        }
+    }
+}

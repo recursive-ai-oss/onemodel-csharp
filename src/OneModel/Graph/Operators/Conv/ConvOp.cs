@@ -18,12 +18,37 @@ internal sealed class ConvOp : OpKernel
     private readonly int _group;
     private readonly FusedActivation? _activation;
 
+    // Set by ConvPackPass: the weights packed for one instruction set (the kernels' panel layout) and their original shape. The
+    // node then has no weights input; the tensor belongs to the graph that made it.
+    private readonly Tensor _packed;
+    private readonly Shape _packedShape;
+    private readonly KernelPath _packedPath;
+
     private ConvOp(ConvOp source, FusedActivation activation)
     {
         _attrs = source._attrs;
         _group = source._group;
         _activation = activation;
+        _packed = source._packed;
+        _packedShape = source._packedShape;
+        _packedPath = source._packedPath;
     }
+
+    private ConvOp(ConvOp source, Tensor packed, Shape weightsShape, KernelPath path)
+    {
+        _attrs = source._attrs;
+        _group = source._group;
+        _activation = source._activation;
+        _packed = packed;
+        _packedShape = weightsShape;
+        _packedPath = path;
+    }
+
+    /// <summary>The same convolution reading its weights from <paramref name="packed"/> (see ConvPackPass); input 1 is then absent.</summary>
+    internal ConvOp WithPackedWeights(Tensor packed, Shape weightsShape, KernelPath path) => new(this, packed, weightsShape, path);
+
+    /// <summary>The group count.</summary>
+    internal int Group => _group;
 
     /// <summary>The same convolution with <paramref name="activation"/> applied to every output after the bias (see ConvActivationFusionPass).</summary>
     internal ConvOp WithActivation(FusedActivation activation) => new(this, activation);
@@ -45,19 +70,31 @@ internal sealed class ConvOp : OpKernel
 
     public override bool SupportsExact => true;
 
+    // A packed convolution owns its packed weights (the copy made by WithActivation, which shares them, is dropped by its pass).
+    public override void Dispose()
+    {
+        if (!_packed.IsEmpty)
+        {
+            _packed.Dispose();
+        }
+
+        base.Dispose();
+    }
+
     public override void Infer(InferContext ctx)
     {
-        if (!ctx.HasInput(0) || !ctx.HasInput(1))
+        bool packed = !_packed.IsEmpty;
+        if (!ctx.HasInput(0) || (!packed && !ctx.HasInput(1)))
         {
             throw ctx.Fail("expects inputs X and W");
         }
 
-        if (ctx.InputType(0) != DType.F32 || ctx.InputType(1) != DType.F32 || (ctx.HasInput(2) && ctx.InputType(2) != DType.F32))
+        if (ctx.InputType(0) != DType.F32 || (!packed && ctx.InputType(1) != DType.F32) || (ctx.HasInput(2) && ctx.InputType(2) != DType.F32))
         {
             throw ctx.Unsupported($"element types {ctx.InputType(0)}/{ctx.InputType(1)} are not supported yet (float32 only)");
         }
 
-        Shape x = ctx.InputShape(0), w = ctx.InputShape(1);
+        Shape x = ctx.InputShape(0), w = packed ? _packedShape : ctx.InputShape(1);
         if (x.Rank < 3 || x.Rank != w.Rank)
         {
             throw ctx.Fail($"X {x} and W {w} must have the same rank, at least 3");
@@ -109,14 +146,27 @@ internal sealed class ConvOp : OpKernel
 
     public override void Run(in OpRun run)
     {
-        Tensor x = run.Inputs[0], w = run.Inputs[1], y = run.Outputs[0];
+        Tensor x = run.Inputs[0], y = run.Outputs[0];
         if (y.Length == 0)
         {
             return;
         }
 
-        Geometry(x.Shape, w.Shape, null, out ConvShape s);
         ReadOnlySpan<float> bias = run.Inputs.Length > 2 && !run.Inputs[2].IsEmpty ? run.Inputs[2].Data<float>() : default;
+        if (!_packed.IsEmpty)
+        {
+            if (run.Path != _packedPath || run.KernelMode != KernelMode.Fast)
+            {
+                throw new InvalidOperationException("Weights were packed for a different instruction set or mode than this run uses.");
+            }
+
+            Geometry(x.Shape, _packedShape, null, out ConvShape ps);
+            Conv.RunPacked(run.Path, in ps, x.Data<float>(), _packed.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
+            return;
+        }
+
+        Tensor w = run.Inputs[1];
+        Geometry(x.Shape, w.Shape, null, out ConvShape s);
         Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
     }
 }

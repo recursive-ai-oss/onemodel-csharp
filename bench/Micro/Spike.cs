@@ -29,7 +29,7 @@ internal static class Spike
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("usage: spike hashes | spike table [--ghz 4.5] [--fma256 2] [--fma512 1] [--neon-pipes 4] [--cores N] [--threads N] [--filter text] [--csv file]");
+            Console.Error.WriteLine("usage: spike hashes | spike table [--ghz 4.5] [--fma256 2] [--fma512 1] [--neon-pipes 4] [--cores N] [--threads N] [--filter text] [--csv file] [--fast-only 1] [--path Avx512]");
             return 2;
         }
 
@@ -364,6 +364,14 @@ internal static class Spike
         var o = new float[s.N * s.Cout * s.OutH * s.OutW];
         KernelTestData.Fill(ref rng, input, false);
         KernelTestData.Fill(ref rng, w, false);
+        if (mode == KernelMode.Fast && !s.IsDepthwise)
+        {
+            // What a session runs: the weights packed once when the model is loaded.
+            var packed = new float[ConvPacked.PackedWeightsLength(path, s)];
+            ConvPacked.PackWeights(path, s, w, packed);
+            return () => Conv.RunPacked(path, s, input, packed, o, threads);
+        }
+
         return () => Conv.Run(mode, path, s, input, w, o, threads);
     }
 
@@ -402,7 +410,14 @@ internal static class Spike
         int allThreads = int.Parse(opt.GetValueOrDefault("--threads", Environment.ProcessorCount.ToString(CultureInfo.InvariantCulture)), CultureInfo.InvariantCulture);
         string filter = opt.GetValueOrDefault("--filter", string.Empty);
         string csvPath = opt.GetValueOrDefault("--csv", string.Empty);
+        bool fastOnly = opt.GetValueOrDefault("--fast-only", "0") == "1";
+        string onlyPath = opt.GetValueOrDefault("--path", string.Empty);
         var paths = KernelPaths.All.Where(p => KernelPaths.IsSupported(p) && p is KernelPath.Avx2 or KernelPath.Avx512 or KernelPath.Neon).ToArray();
+        if (onlyPath.Length > 0)
+        {
+            paths = [.. paths.Where(p => p.ToString() == onlyPath)];
+        }
+
         if (paths.Length == 0)
         {
             paths = [KernelPaths.Best()];
@@ -458,7 +473,7 @@ internal static class Spike
                 foreach (int threads in new[] { 1, allThreads })
                 {
                     double tf = Time(Prepare(it, KernelMode.Fast, path, threads));
-                    double te = Time(Prepare(it, KernelMode.Exact, path, threads));
+                    double te = fastOnly ? tf : Time(Prepare(it, KernelMode.Exact, path, threads));
                     results[(it.Name, path, threads, KernelMode.Fast)] = tf;
                     results[(it.Name, path, threads, KernelMode.Exact)] = te;
                     double peak = ghz > 0 ? PeakPerCore(path) * Math.Min(threads, cores) : 0;

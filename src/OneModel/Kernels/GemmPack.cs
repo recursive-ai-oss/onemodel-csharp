@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 
 namespace RecursiveAI.OneModel.Kernels;
 
@@ -60,17 +61,54 @@ internal static unsafe class GemmPack
             {
                 float* src = b + (p * ldb) + j0;
                 int j = 0;
-                for (; j < cols; j++)
+                if (cols == nr)
                 {
-                    dst[j] = src[j];
+                    // A full strip row: nr is a multiple of four on every path, so it moves as whole 128-bit vectors.
+                    for (; j < nr; j += 4)
+                    {
+                        Vector128.Store(Vector128.Load(src + j), dst + j);
+                    }
                 }
-
-                for (; j < nr; j++)
+                else
                 {
-                    dst[j] = 0f;
+                    for (; j < cols; j++)
+                    {
+                        dst[j] = src[j];
+                    }
+
+                    for (; j < nr; j++)
+                    {
+                        dst[j] = 0f;
+                    }
                 }
 
                 dst += nr;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Packs a whole m x k matrix A (row-major, row stride <paramref name="lda"/>) once into the layout the tiled kernels read without
+    /// repacking: for each block of <paramref name="kcMax"/> columns, strips of mr rows, each strip holding its kc x mr panel
+    /// contiguously (element (p, r) at p*mr + r); a ragged last strip is padded with +0. Block b starts at pc * ceil(m/mr)*mr. Copies only.
+    /// </summary>
+    /// <param name="a">A; reads rows 0..m-1, columns 0..k-1.</param>
+    /// <param name="lda">Row stride of A.</param>
+    /// <param name="m">Rows of A.</param>
+    /// <param name="k">Columns of A.</param>
+    /// <param name="mr">Rows per strip.</param>
+    /// <param name="kcMax">Columns per block.</param>
+    /// <param name="dst">Receives ceil(m/mr)*mr*k floats.</param>
+    public static void PackAPanels(float* a, nint lda, int m, int k, int mr, int kcMax, float* dst)
+    {
+        int strips = (m + mr - 1) / mr;
+        for (int pc = 0; pc < k; pc += kcMax)
+        {
+            int kc = Math.Min(kcMax, k - pc);
+            float* block = dst + ((long)pc * strips * mr);
+            for (int s = 0; s < strips; s++)
+            {
+                PackA(a + (s * mr * lda) + pc, lda, Math.Min(mr, m - (s * mr)), kc, mr, block + ((long)s * kc * mr));
             }
         }
     }

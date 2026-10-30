@@ -155,4 +155,47 @@ public class ConvTests
             }
         }
     }
+    [Fact]
+    public void FastPackedWeightsGiveTheSameBitsAsUnpackedAndStayWithinTolerance()
+    {
+        // More than Kc taps, more than one column tile, more than one row tile, groups, strides, padding and a ragged last strip.
+        ConvShape[] shapes =
+        [
+            new(1, 40, 30, 31, 70, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+            new(2, 33, 17, 19, 50, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1),
+            new(1, 300, 9, 9, 130, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1),
+            new(1, 64, 28, 28, 64, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1),
+            new(1, 24, 21, 23, 36, 5, 5, 1, 1, 2, 2, 2, 2, 1, 1, 3),
+            new(1, 20, 25, 25, 20, 3, 3, 1, 1, 2, 2, 2, 2, 2, 2, 1),
+            new(1, 8, 1, 300, 12, 1, 7, 1, 2, 0, 3, 0, 3, 1, 1, 1),
+            new(1, 512, 7, 7, 96, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+        ];
+        foreach (ConvShape s in shapes)
+        {
+            (float[] input, float[] weights) = Data(s, false);
+            int len = s.N * s.Cout * s.OutH * s.OutW;
+            var dbl = new double[len];
+            var scale = new double[len];
+            Reference(s, input, weights, new float[len], true, dbl, scale);
+            int k = (s.Cin / s.Groups) * s.KH * s.KW;
+            foreach (KernelPath path in Paths())
+            {
+                float[] plain = Run(s, input, weights, KernelMode.Fast, path, 1);
+                var packed = new float[ConvPacked.PackedWeightsLength(path, s)];
+                ConvPacked.PackWeights(path, s, weights, packed);
+                foreach (int threads in new[] { 1, 6 })
+                {
+                    var o = new float[len];
+                    Conv.RunPacked(path, s, input, packed, o, threads);
+                    Assert.True(KernelTestData.SameBits(plain, o), $"{path} x{threads} packed differs on {s}");
+                }
+
+                for (int i = 0; i < len; i++)
+                {
+                    double tol = (k * Math.Pow(2, -24) * scale[i]) + 1e-30;
+                    Assert.True(Math.Abs(plain[i] - dbl[i]) <= tol, $"{path} {s} at {i}: {plain[i]} vs {dbl[i]}");
+                }
+            }
+        }
+    }
 }
