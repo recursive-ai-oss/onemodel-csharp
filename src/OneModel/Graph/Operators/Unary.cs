@@ -1,5 +1,6 @@
 using System;
 using RecursiveAI.OneModel.Graph.Runtime;
+using RecursiveAI.OneModel.Kernels;
 using RecursiveAI.OneModel.Kernels.Exact;
 using RecursiveAI.OneModel.Tensors;
 
@@ -39,7 +40,7 @@ internal sealed class ReluOp : OpKernel
         switch (y.DType)
         {
             case DType.F32:
-                ExactElementwise.Relu(run.Path, run.Exact, x.Data<float>(), y.MutableData<float>());
+                ReluParallel.Run(run.Path, run.Exact, x.Data<float>(), y.MutableData<float>(), run.Threads);
                 break;
             case DType.F64:
                 ExactElementwise.Relu(x.Data<double>(), y.MutableData<double>());
