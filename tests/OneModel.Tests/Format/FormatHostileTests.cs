@@ -105,6 +105,8 @@ public class FormatHostileTests
         Add("json-cut", Bad, File(Base[..(Base.Length / 2)]));
         Add("json-depth-5000", Bad, File(new string('[', 5000) + new string(']', 5000)));
         Add("json-bad-utf8", Bad, Patch(f => f[64 + Base.IndexOf("\"g\"", StringComparison.Ordinal) + 1] = 0xFF));
+        Add("string-lone-surrogate", Bad, Edit("\"name\":\"g\"", "\"name\":\"\\ud800\""));
+        Add("integer-field-lone-surrogate", Bad, Edit("\"dims\":[2,2]", "\"dims\":[2,\"\\ud800\"]"));
         Add("manifest-is-array", Bad, File("[]"));
         Add("manifest-empty-object", Bad, File("{}"));
 

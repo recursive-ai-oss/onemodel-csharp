@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
+using System.Text.Unicode;
 using System.Threading;
 using RecursiveAI.OneModel.Graph;
 using RecursiveAI.OneModel.Onnx;
@@ -177,7 +178,13 @@ internal sealed class FormatReader
                 $"the data region must run to the end of the file ({length - _dataOffset} bytes); the header says {_dataLength}", _source, 40, "data_length");
         }
 
-        return _bytes.GetSpan(manifestOffset, (int)manifestLength).ToArray();
+        ReadOnlySpan<byte> manifest = _bytes.GetSpan(manifestOffset, (int)manifestLength);
+        if (!Utf8.IsValid(manifest))
+        {
+            throw new ModelFormatException(ModelFormatErrorKind.Malformed, "the manifest is not valid UTF-8", _source, manifestOffset, "manifest");
+        }
+
+        return manifest.ToArray();
     }
 
     private long Field(ReadOnlySpan<byte> h, int at, string name)
@@ -497,6 +504,9 @@ internal sealed class FormatReader
 
     private static string Clip(string s) => s.Length <= 40 ? s : s[..40] + "...";
 
+    // Names the kind of a value and, for a number, its text. Text of other kinds is left out: it may not be valid Unicode.
+    private static string Show(JsonElement e) => e.ValueKind == JsonValueKind.Number ? Clip(e.GetRawText()) : Kind(e);
+
     private static string Kind(JsonElement e) => e.ValueKind.ToString().ToLowerInvariant();
 
     private void Object(JsonElement e)
@@ -511,7 +521,7 @@ internal sealed class FormatReader
     {
         if (e.ValueKind != JsonValueKind.Number || !e.TryGetInt64(out long v))
         {
-            throw Fail(ModelFormatErrorKind.Malformed, $"expected a 64-bit integer, found {Kind(e)} {Clip(e.ToString())}");
+            throw Fail(ModelFormatErrorKind.Malformed, $"expected a 64-bit integer, found {Show(e)}");
         }
 
         return v;
@@ -521,7 +531,7 @@ internal sealed class FormatReader
     {
         if (e.ValueKind != JsonValueKind.Number || !e.TryGetUInt32(out uint v))
         {
-            throw Fail(ModelFormatErrorKind.Malformed, $"expected an unsigned 32-bit integer (float bits), found {Kind(e)} {Clip(e.ToString())}");
+            throw Fail(ModelFormatErrorKind.Malformed, $"expected an unsigned 32-bit integer (float bits), found {Show(e)}");
         }
 
         return v;
