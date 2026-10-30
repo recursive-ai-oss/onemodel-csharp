@@ -357,6 +357,13 @@ internal static unsafe class Int8Conv
                 long outBase = (long)p * outH * outW;
                 int bias = Bias != null ? Bias[ch] : 0;
                 float mult = MultVec != null ? MultVec[ch] : Mult;
+                if (Int8Depthwise.Supports(in S))
+                {
+                    Int8Depthwise.Plane(in S, plane, XU8, XZero, wv, bias, mult, OutInt32 != null ? OutInt32 + outBase : null,
+                        OutQuant != null ? OutQuant + outBase : null, QuantUnsigned, QuantZero);
+                    continue;
+                }
+
                 for (int oy = 0; oy < outH; oy++)
                 {
                     for (int ox = 0; ox < outW; ox++)

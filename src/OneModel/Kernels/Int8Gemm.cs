@@ -207,6 +207,42 @@ internal static unsafe class Int8Gemm
         return v < lo ? lo : v > hi ? hi : !float.IsNaN(v) ? (int)v : lo;
     }
 
+    /// <summary>
+    /// Requantizes <paramref name="n"/> sums with one multiplier: <see cref="Requant"/> on every element, four lanes at a time where
+    /// the vectors are hardware accelerated. Reads n ints at <paramref name="row"/> and writes n bytes at <paramref name="q"/>.
+    /// </summary>
+    internal static void RequantRow(int* row, byte* q, int n, float mult, int zeroPoint, bool unsigned)
+    {
+        int lo = unsigned ? 0 : -128;
+        int hi = unsigned ? 255 : 127;
+        int j = 0;
+        if (Vector128.IsHardwareAccelerated)
+        {
+            Vector128<float> vm = Vector128.Create(mult), vz = Vector128.Create((float)zeroPoint);
+            Vector128<float> vlo = Vector128.Create((float)lo), vhi = Vector128.Create((float)hi);
+            for (; j + 16 <= n; j += 16)
+            {
+                Vector128<int> q0 = Quant4(row + j, vm, vz, vlo, vhi);
+                Vector128<int> q1 = Quant4(row + j + 4, vm, vz, vlo, vhi);
+                Vector128<int> q2 = Quant4(row + j + 8, vm, vz, vlo, vhi);
+                Vector128<int> q3 = Quant4(row + j + 12, vm, vz, vlo, vhi);
+                Int8Quantize.Pack16(q0, q1, q2, q3, unsigned).Store(q + j);
+            }
+        }
+
+        for (; j < n; j++)
+        {
+            q[j] = (byte)Requant(row[j], mult, zeroPoint, lo, hi);
+        }
+    }
+
+    private static Vector128<int> Quant4(int* p, Vector128<float> mult, Vector128<float> zero, Vector128<float> lo, Vector128<float> hi)
+    {
+        Vector128<float> v = Vector128.Round(Vector128.ConvertToSingle(Vector128.Load(p)) * mult) + zero;
+        v = Vector128.ConditionalSelect(Vector128.Equals(v, v), v, lo);
+        return Vector128.ConvertToInt32(Vector128.Min(Vector128.Max(v, lo), hi));
+    }
+
     /// <summary>The value of a stored 8-bit element in the shifted signed domain: uint8 minus 128, int8 as is.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int Shift(byte v, bool u8) => u8 ? v - 128 : (sbyte)v;
@@ -689,13 +725,6 @@ internal static unsafe class Int8Gemm
             {
                 q[j] = (byte)Requant(row[j], perCol ? ep.MultVec[j0 + j] : mRow, ep.QuantZero, lo, hi);
             }
-        }
-
-        private static Vector128<int> Quant4(int* p, Vector128<float> mult, Vector128<float> zero, Vector128<float> lo, Vector128<float> hi)
-        {
-            Vector128<float> v = Vector128.Round(Vector128.ConvertToSingle(Vector128.Load(p)) * mult) + zero;
-            v = Vector128.ConditionalSelect(Vector128.Equals(v, v), v, lo);
-            return Vector128.ConvertToInt32(Vector128.Min(Vector128.Max(v, lo), hi));
         }
     }
 }
