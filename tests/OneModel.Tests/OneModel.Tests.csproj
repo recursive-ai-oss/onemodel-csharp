@@ -25,6 +25,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The conformance runner is shared with the OnnxSweep command-line tool. -->
+    <Compile Include="../OnnxSweep/Conformance/ConformanceRunner.cs" Link="Conformance/ConformanceRunner.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
   </ItemGroup>
 

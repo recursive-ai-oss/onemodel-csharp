@@ -127,5 +127,8 @@ internal static class OpTable
         IntegerMatMulOp.QLinearMatMul,
         IntegerConvOp.ConvInteger,
         IntegerConvOp.QLinearConv,
+
+        // Operators added for backend-test coverage.
+        .. CoverageTable.All,
     ];
 }
