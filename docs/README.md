@@ -6,6 +6,7 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 |---|---|
 | Tensors, memory, layouts, fp16/bf16 rounding, gradient records | [tensors.md](tensors.md) |
 | Reverse-mode autodiff: the engine, per-operator backward rules, what is exact | [autograd.md](autograd.md) |
+| Training: modules, losses, optimizers, schedules, clipping, checkpoints; what matches PyTorch and what is exact | [training.md](training.md) |
 | Exact mode: definition and accumulation order | [exact-mode.md](exact-mode.md) |
 | Exact mode golden hashes: rows, results, cost of exactness | [golden-hashes.md](golden-hashes.md) |
 | Matrix product and convolution kernels | [kernels-gemm.md](kernels-gemm.md) |

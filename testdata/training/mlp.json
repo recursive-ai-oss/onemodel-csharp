@@ -1,0 +1,84 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261031,
+ "tensors": {
+  "in.x": {
+   "shape": [
+    256,
+    20
+   ],
+   "offset": 0
+  },
+  "in.y": {
+   "shape": [
+    256
+   ],
+   "offset": 5120
+  },
+  "in.order": {
+   "shape": [
+    100,
+    32
+   ],
+   "offset": 5376
+  },
+  "in.w1": {
+   "shape": [
+    32,
+    20
+   ],
+   "offset": 8576
+  },
+  "in.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 9216
+  },
+  "in.w2": {
+   "shape": [
+    4,
+    32
+   ],
+   "offset": 9248
+  },
+  "in.b2": {
+   "shape": [
+    4
+   ],
+   "offset": 9376
+  },
+  "out.loss": {
+   "shape": [
+    100
+   ],
+   "offset": 9380
+  },
+  "out.w1": {
+   "shape": [
+    32,
+    20
+   ],
+   "offset": 9480
+  },
+  "out.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 10120
+  },
+  "out.w2": {
+   "shape": [
+    4,
+    32
+   ],
+   "offset": 10152
+  },
+  "out.b2": {
+   "shape": [
+    4
+   ],
+   "offset": 10280
+  }
+ }
+}

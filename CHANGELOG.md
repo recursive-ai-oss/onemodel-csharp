@@ -11,6 +11,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `TensorCompute` selects fast or exact arithmetic and the thread count for the differentiable operators. Exact-mode gradients are bit-identical across ISA paths and thread counts.
 - The `RecursiveAI.OneModel.Training` package, starting with `GradientCheck` (analytic gradients against finite differences).
 - `tools/autograd_oracle.py` and `testdata/autograd/`: PyTorch reference gradients for a conv net and a two-layer transformer encoder.
+- Training API in `RecursiveAI.OneModel.Training` (`docs/training.md`): `NnModule` with parameters, buffers, train/eval mode and a state dict; `Linear`, `Conv2d`, `BatchNorm2d`, `LayerNorm`, `Embedding`, a seeded `Dropout`, `Sequential`, `MultiHeadAttention`, `TransformerEncoderLayer` and activation/pooling adapters; losses (`Losses.CrossEntropy` with label smoothing and ignore index, `Mse`, `L1`, `BceWithLogits`); `Sgd` (momentum, Nesterov, weight decay), `Adam`, `AdamW`; `GradClip.ClipNorm` / `ClipValue`; learning-rate schedules (`StepLr`, `CosineLr`, `WarmupLr`, `OneCycleLr`).
+- `Checkpoint.Save` / `Load`: model and optimizer state in a documented 64-byte-aligned file (`ONEMCKPT`). Saving then loading restores every bit, and a run resumed from a checkpoint equals the uninterrupted run bit for bit. Bad files fail with `CheckpointException`.
+- `tools/training_oracle.py` and `testdata/training/`: PyTorch reference training runs (MLP with SGD+momentum, conv net with AdamW + cosine + clipping, two-layer transformer classifier with Adam + warm-up), optimizer step, clipping and schedule references. Losses agree with PyTorch's to 4e-6 relative over 50 to 100 steps.
+- `ActivationScope.Track` is public, so modules can hand masks and constants to a step's scope.
+- The Training package is built and packed by CI and the release workflow beside the runtime; fuzz target `checkpoint`.
 
 ### Changed
 

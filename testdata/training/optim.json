@@ -1,0 +1,438 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261031,
+ "tensors": {
+  "in.p": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 0
+  },
+  "in.q": {
+   "shape": [
+    7
+   ],
+   "offset": 50
+  },
+  "in.grad.p.0": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 57
+  },
+  "in.grad.q.0": {
+   "shape": [
+    7
+   ],
+   "offset": 107
+  },
+  "in.grad.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 114
+  },
+  "in.grad.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 164
+  },
+  "in.grad.p.2": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 171
+  },
+  "in.grad.q.2": {
+   "shape": [
+    7
+   ],
+   "offset": 221
+  },
+  "in.grad.p.3": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 228
+  },
+  "in.grad.q.3": {
+   "shape": [
+    7
+   ],
+   "offset": 278
+  },
+  "in.grad.p.4": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 285
+  },
+  "in.grad.q.4": {
+   "shape": [
+    7
+   ],
+   "offset": 335
+  },
+  "out.sgd_plain.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 342
+  },
+  "out.sgd_plain.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 392
+  },
+  "out.sgd_plain.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 399
+  },
+  "out.sgd_plain.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 449
+  },
+  "out.sgd_momentum.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 456
+  },
+  "out.sgd_momentum.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 506
+  },
+  "out.sgd_momentum.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 513
+  },
+  "out.sgd_momentum.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 563
+  },
+  "out.sgd_nesterov_wd.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 570
+  },
+  "out.sgd_nesterov_wd.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 620
+  },
+  "out.sgd_nesterov_wd.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 627
+  },
+  "out.sgd_nesterov_wd.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 677
+  },
+  "out.sgd_dampening_wd.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 684
+  },
+  "out.sgd_dampening_wd.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 734
+  },
+  "out.sgd_dampening_wd.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 741
+  },
+  "out.sgd_dampening_wd.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 791
+  },
+  "out.adam.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 798
+  },
+  "out.adam.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 848
+  },
+  "out.adam.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 855
+  },
+  "out.adam.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 905
+  },
+  "out.adam_l2.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 912
+  },
+  "out.adam_l2.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 962
+  },
+  "out.adam_l2.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 969
+  },
+  "out.adam_l2.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 1019
+  },
+  "out.adam_amsgrad.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1026
+  },
+  "out.adam_amsgrad.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 1076
+  },
+  "out.adam_amsgrad.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1083
+  },
+  "out.adam_amsgrad.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 1133
+  },
+  "out.adam_betas.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1140
+  },
+  "out.adam_betas.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 1190
+  },
+  "out.adam_betas.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1197
+  },
+  "out.adam_betas.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 1247
+  },
+  "out.adamw.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1254
+  },
+  "out.adamw.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 1304
+  },
+  "out.adamw.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1311
+  },
+  "out.adamw.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 1361
+  },
+  "out.adamw_amsgrad.p.1": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1368
+  },
+  "out.adamw_amsgrad.q.1": {
+   "shape": [
+    7
+   ],
+   "offset": 1418
+  },
+  "out.adamw_amsgrad.p.5": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1425
+  },
+  "out.adamw_amsgrad.q.5": {
+   "shape": [
+    7
+   ],
+   "offset": 1475
+  },
+  "out.clip.norm_small.total": {
+   "shape": [
+    1
+   ],
+   "offset": 1482
+  },
+  "out.clip.norm_small.p": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1483
+  },
+  "out.clip.norm_small.q": {
+   "shape": [
+    7
+   ],
+   "offset": 1533
+  },
+  "out.clip.norm_large.total": {
+   "shape": [
+    1
+   ],
+   "offset": 1540
+  },
+  "out.clip.norm_large.p": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1541
+  },
+  "out.clip.norm_large.q": {
+   "shape": [
+    7
+   ],
+   "offset": 1591
+  },
+  "out.clip.norm_inf.total": {
+   "shape": [
+    1
+   ],
+   "offset": 1598
+  },
+  "out.clip.norm_inf.p": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1599
+  },
+  "out.clip.norm_inf.q": {
+   "shape": [
+    7
+   ],
+   "offset": 1649
+  },
+  "out.clip.value.p": {
+   "shape": [
+    5,
+    10
+   ],
+   "offset": 1656
+  },
+  "out.clip.value.q": {
+   "shape": [
+    7
+   ],
+   "offset": 1706
+  },
+  "out.lr.step": {
+   "shape": [
+    100
+   ],
+   "offset": 1713
+  },
+  "out.lr.cosine": {
+   "shape": [
+    100
+   ],
+   "offset": 1813
+  },
+  "out.lr.warmup_cosine": {
+   "shape": [
+    100
+   ],
+   "offset": 1913
+  },
+  "out.lr.onecycle": {
+   "shape": [
+    100
+   ],
+   "offset": 2013
+  }
+ }
+}

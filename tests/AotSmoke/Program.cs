@@ -173,6 +173,70 @@ foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
     }
 }
 
+// Training: a small conv net and a transformer layer learn a toy task with AdamW, a cosine schedule, clipping and dropout, and a
+// checkpoint saved mid-run reloads to the same bits, in fast and exact arithmetic.
+foreach (ExecutionMode tm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+{
+    TensorCompute.Mode = tm;
+    var gen = new Generator(5);
+    var net = new Sequential(new Conv2d(1, 4, 3, gen, padding: 1), new BatchNorm2d(4), Lambda.Relu(), Lambda.MaxPool2d(2),
+        Lambda.Flatten(), new Dropout(0.1f, 3), new Linear(4 * 4 * 4, 3, gen));
+    var enc = new TransformerEncoderLayer(8, 2, 16, gen, dropout: 0.1f, dropoutSeed: 9);
+    using var holder = new Sequential(net, enc);   // owns both; its state is what the checkpoint saves
+    var parameters = holder.Parameters();
+    using var opt = new AdamW(parameters, 1e-2f);
+    var sched = new CosineLr(1e-2f, 30);
+    var data = new Generator(11);
+    var xs = new float[12 * 64];
+    var ys = new long[12];
+    for (int i = 0; i < ys.Length; i++)
+    {
+        ys[i] = i % 3;
+        for (int j = 0; j < 64; j++)
+        {
+            xs[(i * 64) + j] = data.Uniform(-1, 1) + ((j % 3) == ys[i] ? 1f : 0f);
+        }
+    }
+
+    float first = 0, last = 0;
+    for (int step = 0; step < 30; step++)
+    {
+        using var scope = new ActivationScope();
+        Tensor x = Tensor.FromSpan<float>(xs, Shape.Create(12, 1, 8, 8));
+        Tensor y = Tensor.FromSpan<long>(ys, Shape.Create(12));
+        ActivationScope.Track(x);
+        ActivationScope.Track(y);
+        Tensor loss = Losses.CrossEntropy(net.Forward(x), y, labelSmoothing: 0.05f);
+        Tensor seq = enc.Forward(Ops.Add(x.Reshape(12, 8, 8), Tensor.Zeros(DType.F32, Shape.Create(12, 8, 8))));
+        loss = Ops.Add(loss, Ops.Mul(Ops.Mean(Ops.Mul(seq, seq)), Tensor.Scalar(0.01f)));
+        float lv = loss.Data<float>()[0];
+        first = step == 0 ? lv : first;
+        last = lv;
+        opt.ZeroGrad();
+        loss.Backward();
+        GradClip.ClipNorm(parameters, 1f);
+        sched.Apply(opt);
+        opt.Step();
+    }
+
+    using var ms = new MemoryStream();
+    Checkpoint.Save(ms, holder, opt);
+    ms.Position = 0;
+    var gen2 = new Generator(77);
+    using var holder2 = new Sequential(
+        new Sequential(new Conv2d(1, 4, 3, gen2, padding: 1), new BatchNorm2d(4), Lambda.Relu(), Lambda.MaxPool2d(2),
+            Lambda.Flatten(), new Dropout(0.1f, 3), new Linear(4 * 4 * 4, 3, gen2)),
+        new TransformerEncoderLayer(8, 2, 16, gen2, dropout: 0.1f, dropoutSeed: 9));
+    using var opt2 = new AdamW(holder2.Parameters(), 1e-2f);
+    Checkpoint.Load(ms, holder2, opt2);
+    bool same = holder.StateDict().Zip(holder2.StateDict()).All(p => p.First.Tensor.DType != DType.F32 || p.First.Tensor.Data<float>().SequenceEqual(p.Second.Tensor.Data<float>()));
+    Console.WriteLine($"training {tm}: loss {first:F4} -> {last:F4}, checkpoint round trip {(same ? "equal" : "DIFFERS")}, step {opt2.StepCount}");
+    if (!(last < first) || !same || opt2.StepCount != 30)
+    {
+        return 9;
+    }
+}
+
 TensorCompute.Mode = ExecutionMode.Fast;
 return 0;
 

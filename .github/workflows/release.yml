@@ -105,9 +105,11 @@ jobs:
         run: dotnet test --solution OneModel.slnx -c Release --no-build
 
       - name: Pack
-        # The one shipped package, from the binaries the tests ran on. Symbols come out as a .snupkg file.
+        # The two shipped packages (the runtime and the training package that builds on it), from the binaries the tests ran on.
+        # Symbols come out as .snupkg files.
         run: |
           dotnet pack src/OneModel -c Release --no-build -o "$RUNNER_TEMP/packages"
+          dotnet pack src/OneModel.Training -c Release --no-build -o "$RUNNER_TEMP/packages"
           ls -l "$RUNNER_TEMP/packages"
 
       - name: Attest build provenance
