@@ -2,7 +2,9 @@ using RecursiveAI.OneModel.Graph.Operators.Activation;
 using RecursiveAI.OneModel.Graph.Operators.Bitwise;
 using RecursiveAI.OneModel.Graph.Operators.Loss;
 using RecursiveAI.OneModel.Graph.Operators.Scatter;
+using RecursiveAI.OneModel.Graph.Operators.Signal;
 using RecursiveAI.OneModel.Graph.Operators.Transformer;
+using RecursiveAI.OneModel.Graph.Operators.Vision;
 
 namespace RecursiveAI.OneModel.Graph.Operators;
 
@@ -71,6 +73,21 @@ internal static class CoverageTable
 
         // Attention.
         OnnxAttentionOp.Def,
+        RotaryEmbeddingOp.Def,
+
+        // Spectral operators and windows.
+        DftOp.Def,
+        StftOp.Def,
+        WindowOp.Hann,
+        WindowOp.Hamming,
+        WindowOp.Blackman,
+
+        // Sampling, detection and sets.
+        AffineGridOp.Def,
+        GridSampleOp.Def,
+        NonMaxSuppressionOp.Def,
+        RoiAlignOp.Def,
+        UniqueOp.Def,
 
         // Losses.
         NllLossOp.Nll,
