@@ -63,9 +63,9 @@ internal sealed class ConvOp : OpKernel
             throw ctx.Fail($"X {x} and W {w} must have the same rank, at least 3");
         }
 
-        if (x.Rank > 4)
+        if (x.Rank > 5)
         {
-            throw ctx.Unsupported($"{x.Rank - 2} spatial axes are not supported yet (1 or 2)");
+            throw ctx.Unsupported($"{x.Rank - 2} spatial axes are not supported yet (1 to 3)");
         }
 
         if (w[1] * _group != x[1] || w[0] % _group != 0)
@@ -76,6 +76,13 @@ internal sealed class ConvOp : OpKernel
         if (ctx.HasInput(2) && (ctx.InputShape(2).Rank != 1 || ctx.InputShape(2)[0] != w[0]))
         {
             throw ctx.Fail($"the bias {ctx.InputShape(2)} must be 1-D with {w[0]} values");
+        }
+
+        if (x.Rank == 5)
+        {
+            Dim3 o = Conv3d.Resolve(_attrs, x, w, _group, ctx).Window.Out;
+            ctx.SetOutput(0, DType.F32, Shape.Create(x[0], w[0], o.D, o.H, o.W));
+            return;
         }
 
         Geometry(x, w, ctx, out ConvShape s);
@@ -115,8 +122,14 @@ internal sealed class ConvOp : OpKernel
             return;
         }
 
-        Geometry(x.Shape, w.Shape, null, out ConvShape s);
         ReadOnlySpan<float> bias = run.Inputs.Length > 2 && !run.Inputs[2].IsEmpty ? run.Inputs[2].Data<float>() : default;
+        if (x.Rank == 5)
+        {
+            Conv3d.Run(Conv3d.Resolve(_attrs, x.Shape, w.Shape, _group, null), x.Data<float>(), w.Data<float>(), bias, y.MutableData<float>(), _activation, run.Path, run.Exact);
+            return;
+        }
+
+        Geometry(x.Shape, w.Shape, null, out ConvShape s);
         Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
     }
 }

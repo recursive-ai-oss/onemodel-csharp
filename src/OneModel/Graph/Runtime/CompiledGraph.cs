@@ -78,7 +78,7 @@ internal sealed class CompiledGraph : IDisposable
         var g = new CompiledGraph();
         try
         {
-            g.Build(graph, registry, mode, storage, level, path, threads, ct);
+            g.Build(graph, registry, mode, storage, level, path, threads, [], ct);
             return g;
         }
         catch
@@ -88,20 +88,83 @@ internal sealed class CompiledGraph : IDisposable
         }
     }
 
+    /// <summary>A body of a control-flow node: its own inputs, then <paramref name="captures"/> (outer values it reads) as inputs. No graph passes.</summary>
+    public static CompiledGraph CreateNested(IrGraph body, IReadOnlyList<IrValue> captures, OpRegistry registry, ExecutionMode mode, KernelPath path,
+        int threads, CancellationToken ct)
+    {
+        var g = new CompiledGraph();
+        try
+        {
+            g.Build(body, registry, mode, WeightStorage.Original, OptimizationLevel.None, path, threads, captures, ct);
+            return g;
+        }
+        catch
+        {
+            g.Dispose();
+            throw;
+        }
+    }
+
+    // The outer values a node's bodies read, in first-use order; they follow the node's declared inputs in the compiled node.
+    internal static List<IrValue> ImplicitInputs(IrNode n)
+    {
+        var list = new List<IrValue>();
+        foreach (IrAttr a in n.Attributes)
+        {
+            if (a.RefAttrName.Length > 0)
+            {
+                continue;
+            }
+
+            if (a.Type == IrAttributeType.Graph)
+            {
+                AddAll(list, a.Graph);
+            }
+            else if (a.Type == IrAttributeType.Graphs)
+            {
+                foreach (IrGraph g in a.Graphs)
+                {
+                    AddAll(list, g);
+                }
+            }
+        }
+
+        return list;
+
+        static void AddAll(List<IrValue> list, IrGraph g)
+        {
+            foreach (IrValue c in g.Captures)
+            {
+                if (!list.Contains(c))
+                {
+                    list.Add(c);
+                }
+            }
+        }
+    }
+
     private readonly List<OpKernel> _kernels = [];
 
     private void Build(IrGraph graph, OpRegistry registry, ExecutionMode mode, WeightStorage storage, OptimizationLevel level, KernelPath path,
-        int threads, CancellationToken ct)
+        int threads, IReadOnlyList<IrValue> captures, CancellationToken ct)
     {
-        var ids = new Dictionary<IrValue, int>(ReferenceEqualityComparer.Instance);
-        ValueNames = new string[graph.Values.Length];
-        for (int i = 0; i < graph.Values.Length; i++)
+        // A body also knows the outer values it reads: they come after its own values.
+        var all = new IrValue[graph.Values.Length + captures.Count];
+        graph.Values.CopyTo(all);
+        for (int i = 0; i < captures.Count; i++)
         {
-            ids[graph.Values[i]] = i;
-            ValueNames[i] = graph.Values[i].Name;
+            all[graph.Values.Length + i] = captures[i];
         }
 
-        ValueCount = graph.Values.Length;
+        var ids = new Dictionary<IrValue, int>(ReferenceEqualityComparer.Instance);
+        ValueNames = new string[all.Length];
+        for (int i = 0; i < all.Length; i++)
+        {
+            ids[all[i]] = i;
+            ValueNames[i] = all[i].Name;
+        }
+
+        ValueCount = all.Length;
         Constants = new Tensor[ValueCount];
 
         // Which nodes matter: those from which a graph output can be reached.
@@ -134,6 +197,11 @@ internal sealed class CompiledGraph : IDisposable
                 {
                     stack.Push(inp);
                 }
+            }
+
+            foreach (IrValue inp in ImplicitInputs(p))
+            {
+                stack.Push(inp);
             }
         }
 
@@ -179,7 +247,22 @@ internal sealed class CompiledGraph : IDisposable
                 notExact.Add(n.OpType);
             }
 
-            nodes.Add(new CompiledNode(info, kernel, IdsOf(n.Inputs, ids), IdsOf(n.Outputs, ids)));
+            int[] inputIdList = IdsOf(n.Inputs, ids);
+            if (kernel is ISubgraphKernel sub)
+            {
+                // The bodies' outer values travel as extra inputs after the declared ones, so planning and freeing see them.
+                List<IrValue> implicitIn = ImplicitInputs(n);
+                int declared = inputIdList.Length;
+                Array.Resize(ref inputIdList, declared + implicitIn.Count);
+                for (int k = 0; k < implicitIn.Count; k++)
+                {
+                    inputIdList[declared + k] = ids[implicitIn[k]];
+                }
+
+                sub.Bind(new SubgraphBinder(n, implicitIn, registry, mode, path, threads, ct));
+            }
+
+            nodes.Add(new CompiledNode(info, kernel, inputIdList, IdsOf(n.Outputs, ids)));
         }
 
         if (missing.Count > 0)
@@ -209,6 +292,18 @@ internal sealed class CompiledGraph : IDisposable
 
             inputIds.Add(ids[v]);
             inputInfos.Add(DescribeValue(v, "input"));
+            InputIndex[v.Name] = inputIds.Count - 1;
+        }
+
+        foreach (IrValue v in captures)
+        {
+            if (v.Initializer is not null)
+            {
+                continue;
+            }
+
+            inputIds.Add(ids[v]);
+            inputInfos.Add(DescribeValue(v, "captured value"));
             InputIndex[v.Name] = inputIds.Count - 1;
         }
 
@@ -248,7 +343,7 @@ internal sealed class CompiledGraph : IDisposable
         foreach (int id in used)
         {
             ct.ThrowIfCancellationRequested();
-            IrValue v = graph.Values[id];
+            IrValue v = all[id];
             if (v.SparseInitializer is not null)
             {
                 throw new SessionException(SessionErrorKind.Unsupported, $"'{v.Name}' is a sparse initializer; sparse weights are not supported yet.");
@@ -455,12 +550,23 @@ internal sealed class CompiledGraph : IDisposable
         IrType? t = v.Type;
         if (t is null)
         {
+            // A body of If, Loop or Scan may leave its inputs untyped; whatever arrives is accepted.
+            if (v.Graph.Parent is not null || what == "captured value")
+            {
+                return new TensorInfo(v.Name, DType.Undefined, [], false);
+            }
+
             throw new SessionException(SessionErrorKind.InvalidModel, $"Graph {what} '{v.Name}' declares no type.");
+        }
+
+        if (t.Kind is IrTypeKind.Sequence or IrTypeKind.Optional)
+        {
+            return new TensorInfo(v.Name, DType.U8, [], false, t.Kind == IrTypeKind.Sequence ? TensorInfoKind.Sequence : TensorInfoKind.Optional);
         }
 
         if (t.Kind != IrTypeKind.Tensor)
         {
-            throw new SessionException(SessionErrorKind.Unsupported, $"Graph {what} '{v.Name}' is a {t.Kind}; only tensors are supported as inputs and outputs.");
+            throw new SessionException(SessionErrorKind.Unsupported, $"Graph {what} '{v.Name}' is a {t.Kind}; only tensors, sequences and optionals are supported as inputs and outputs.");
         }
 
         if (!DTypes.TryFromOnnx(t.ElemType, out DType dt))

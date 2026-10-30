@@ -7,7 +7,7 @@ using RecursiveAI.OneModel.Tensors;
 namespace RecursiveAI.OneModel.Graph.Operators;
 
 /// <summary>
-/// ConvTranspose: the gradient-of-convolution upsampler, for one or two spatial axes. X [N, C, spatial...], W [C, M/group, kernel...],
+/// ConvTranspose: the gradient-of-convolution upsampler, for one, two or three spatial axes (three by direct loops). X [N, C, spatial...], W [C, M/group, kernel...],
 /// optional bias [M]. The output size comes from <c>output_shape</c> if given, else from strides, dilations, pads and
 /// <c>output_padding</c>. Three spatial axes are not supported yet.
 /// </summary>
@@ -69,9 +69,9 @@ internal sealed class ConvTransposeOp : OpKernel
             throw ctx.Fail($"X {x} and W {w} must have the same rank, at least 3");
         }
 
-        if (x.Rank > 4)
+        if (x.Rank > 5)
         {
-            throw ctx.Unsupported($"{x.Rank - 2} spatial axes are not supported yet (1 or 2)");
+            throw ctx.Unsupported($"{x.Rank - 2} spatial axes are not supported yet (1 to 3)");
         }
 
         if (w[0] != x[1] || x[1] % _group != 0)
@@ -84,15 +84,30 @@ internal sealed class ConvTransposeOp : OpKernel
             throw ctx.Fail($"the bias {ctx.InputShape(2)} must be 1-D with {w[1] * _group} values");
         }
 
+        if (x.Rank == 5)
+        {
+            Span<int> k3 = stackalloc int[3], st3 = stackalloc int[3], d3 = stackalloc int[3], p3 = stackalloc int[3], o3 = stackalloc int[3];
+            Geometry(x, w, ctx, out _, k3, st3, d3, p3, o3);
+            ctx.SetOutput(0, DType.F32, Shape.Create(x[0], w[1] * _group, o3[0], o3[1], o3[2]));
+            return;
+        }
+
         Geometry(x, w, ctx, out ConvTransposeShape s);
         ctx.SetOutput(0, DType.F32, x.Rank == 3 ? Shape.Create(s.N, s.Cout, s.OutW) : Shape.Create(s.N, s.Cout, s.OutH, s.OutW));
     }
 
     private void Geometry(Shape x, Shape w, InferContext? ctx, out ConvTransposeShape s)
     {
+        Span<int> a = stackalloc int[3], b = stackalloc int[3], c = stackalloc int[3], d = stackalloc int[3], e = stackalloc int[3];
+        Geometry(x, w, ctx, out s, a, b, c, d, e);
+    }
+
+    // kernel, strides, dil, padB and outDims receive the per-axis geometry (up to three axes); s is filled for one or two axes.
+    private void Geometry(Shape x, Shape w, InferContext? ctx, out ConvTransposeShape s, Span<int> kernel, Span<int> strides, Span<int> dil,
+        Span<int> padB, Span<int> outDims)
+    {
         int r = x.Rank - 2;
-        Span<int> kernel = stackalloc int[2], strides = stackalloc int[2], dil = stackalloc int[2], pads = stackalloc int[4];
-        Span<int> outDims = stackalloc int[2], padB = stackalloc int[2];
+        Span<int> pads = stackalloc int[6];
         _attrs.Resolve(ctx, r, w.Dimensions.Slice(2), kernel, strides, dil, pads);
         if (_outputPadding.Length != 0 && _outputPadding.Length != r)
         {
@@ -139,6 +154,12 @@ internal sealed class ConvTransposeOp : OpKernel
                 padB[i] = (int)b;
                 outDims[i] = (int)extent;
             }
+        }
+
+        if (r == 3)
+        {
+            s = default;
+            return;
         }
 
         int xw = r - 1;
@@ -195,6 +216,12 @@ internal sealed class ConvTransposeOp : OpKernel
             return;
         }
 
+        if (x.Rank == 5)
+        {
+            RunDirect3D(run, x, w, y);
+            return;
+        }
+
         Geometry(x.Shape, w.Shape, null, out ConvTransposeShape s);
         ReadOnlySpan<float> wt;
         if (run.State is Tensor prepared)
@@ -212,5 +239,73 @@ internal sealed class ConvTransposeOp : OpKernel
         Tensor cols = run.Scratch(DType.F32, Shape.Create(taps, s.H * s.W));
         ReadOnlySpan<float> bias = run.Inputs.Length > 2 && !run.Inputs[2].IsEmpty ? run.Inputs[2].Data<float>() : default;
         ConvTransposeKernel.Run(run.KernelMode, run.Path, in s, x.Data<float>(), wt, bias, y.MutableData<float>(), cols.MutableData<float>(), run.Threads);
+    }
+
+    // Three spatial axes: every input element adds its weighted kernel into the output (the definition, no matrix product).
+    private void RunDirect3D(in OpRun run, Tensor x, Tensor w, Tensor y)
+    {
+        Span<int> kernel = stackalloc int[3], strides = stackalloc int[3], dil = stackalloc int[3], padB = stackalloc int[3], od = stackalloc int[3];
+        Geometry(x.Shape, w.Shape, null, out _, kernel, strides, dil, padB, od);
+        int n = x.Shape[0], cin = x.Shape[1], cinG = cin / _group, coutG = w.Shape[1], cout = coutG * _group;
+        int id = x.Shape[2], ih = x.Shape[3], iw = x.Shape[4];
+        ReadOnlySpan<float> xs = x.Data<float>(), ws = w.Data<float>();
+        Span<float> ys = y.MutableData<float>();
+        int outVol = od[0] * od[1] * od[2], taps = kernel[0] * kernel[1] * kernel[2];
+        for (int b = 0; b < n; b++)
+        {
+            for (int co = 0; co < cout; co++)
+            {
+                float bias = run.Inputs.Length > 2 && !run.Inputs[2].IsEmpty ? run.Inputs[2].Data<float>()[co] : 0f;
+                ys.Slice(((b * cout) + co) * outVol, outVol).Fill(bias);
+            }
+
+            for (int c = 0; c < cin; c++)
+            {
+                int g = c / cinG;
+                for (int z = 0; z < id; z++)
+                {
+                    for (int yy = 0; yy < ih; yy++)
+                    {
+                        for (int xx = 0; xx < iw; xx++)
+                        {
+                            float v = xs[((((((b * cin) + c) * id) + z) * ih) + yy) * iw + xx];
+                            for (int m = 0; m < coutG; m++)
+                            {
+                                int plane = ((b * cout) + (g * coutG) + m) * outVol;
+                                int wBase = ((c * coutG) + m) * taps;
+                                for (int kz = 0; kz < kernel[0]; kz++)
+                                {
+                                    int oz = (z * strides[0]) - padB[0] + (kz * dil[0]);
+                                    if ((uint)oz >= (uint)od[0])
+                                    {
+                                        continue;
+                                    }
+
+                                    for (int ky = 0; ky < kernel[1]; ky++)
+                                    {
+                                        int oy = (yy * strides[1]) - padB[1] + (ky * dil[1]);
+                                        if ((uint)oy >= (uint)od[1])
+                                        {
+                                            continue;
+                                        }
+
+                                        for (int kx = 0; kx < kernel[2]; kx++)
+                                        {
+                                            int ox = (xx * strides[2]) - padB[2] + (kx * dil[2]);
+                                            if ((uint)ox >= (uint)od[2])
+                                            {
+                                                continue;
+                                            }
+
+                                            ys[plane + (((oz * od[1]) + oy) * od[2]) + ox] += v * ws[wBase + (((kz * kernel[1]) + ky) * kernel[2]) + kx];
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

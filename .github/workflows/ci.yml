@@ -75,9 +75,10 @@ jobs:
       - name: Run AOT smoke app
         shell: bash
         run: |
+          # The app exits non-zero on any failed check; its first line is a fixed self-check hash.
           out=$("$RUNNER_TEMP/smoke/AotSmoke")
           echo "$out"
-          [ "$out" = "4242dc5249c33625" ]
+          grep -qx 'self-check 4242dc5249c33625' <<< "$out"
 
   wasm:
     runs-on: ubuntu-latest
@@ -103,7 +104,7 @@ jobs:
         run: |
           out=$(node tests/WasmSmoke/main.mjs "$RUNNER_TEMP/wasm/wwwroot")
           echo "$out"
-          [ "$out" = "4242dc5249c33625" ]
+          grep -q '4242dc5249c33625' <<< "$out"
 
   pack:
     # Builds the package as an artifact only; nothing is pushed anywhere.

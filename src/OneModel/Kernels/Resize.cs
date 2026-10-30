@@ -37,7 +37,7 @@ internal enum ResizeNearest
 
 /// <summary>Resize attributes.</summary>
 internal readonly record struct ResizeOptions(
-    ResizeMode Mode, ResizeCoord Coord, ResizeNearest Nearest, float CubicA, bool ExcludeOutside, float ExtrapolationValue);
+    ResizeMode Mode, ResizeCoord Coord, ResizeNearest Nearest, float CubicA, bool ExcludeOutside, float ExtrapolationValue, bool Antialias = false);
 
 /// <summary>
 /// N-dimensional Resize done one axis at a time: each axis is resampled from per-output-position tap tables (source index and
@@ -49,6 +49,27 @@ internal static class Resize
 {
     /// <summary>Taps per axis for a mode.</summary>
     public static int TapsPer(ResizeMode mode) => mode switch { ResizeMode.Nearest => 1, ResizeMode.Linear => 2, _ => 4 };
+
+    // With antialiasing an axis that shrinks (scale < 1) filters over a window 1/scale times wider: the half-width of the base
+    // filter (1 for linear, 2 for cubic) divided by the scale, either side of the sample position.
+    private static bool Widens(in ResizeOptions o, float scale) => o.Antialias && o.Mode != ResizeMode.Nearest && scale < 1f;
+
+    private static float Support(in ResizeOptions o, float scale) => (o.Mode == ResizeMode.Linear ? 1f : 2f) / scale;
+
+    /// <summary>Taps on one axis: the base count, or the window width for an antialiased shrinking axis.</summary>
+    public static int TapsFor(in ResizeOptions o, float scale) => Widens(o, scale) ? (int)MathF.Floor(2f * Support(o, scale)) + 2 : TapsPer(o.Mode);
+
+    /// <summary>The most taps any axis needs, to size the tap tables.</summary>
+    public static int MaxTaps(in ResizeOptions o, ReadOnlySpan<float> scales)
+    {
+        int m = TapsPer(o.Mode);
+        for (int a = 0; a < scales.Length; a++)
+        {
+            m = Math.Max(m, TapsFor(o, scales[a]));
+        }
+
+        return m;
+    }
 
     /// <summary>
     /// Resamples <paramref name="x"/> (extents <paramref name="inDims"/>) into <paramref name="y"/> (extents <paramref name="outDims"/>).
@@ -105,10 +126,10 @@ internal static class Resize
         Span<int> cur = stackalloc int[Shape8];
         inDims.CopyTo(cur);
         ReadOnlySpan<float> src = x;
-        int taps = TapsPer(o.Mode);
         for (int p = 0; p < passes; p++)
         {
             int a = order[p];
+            int taps = TapsFor(o, scales[a]);
             Span<float> dst = p == passes - 1 ? y : (p % 2 == 0 ? bufA : bufB);
             long outer = 1, inner = 1;
             for (int i = 0; i < a; i++)
@@ -121,7 +142,15 @@ internal static class Resize
                 inner *= cur[i];
             }
 
-            BuildTaps(o, inDims[a], outDims[a], scales[a], roi.IsEmpty ? 0f : roi[a], roi.IsEmpty ? 1f : roi[a + rank], tapIdx, tapW);
+            if (Widens(o, scales[a]))
+            {
+                BuildWideTaps(o, inDims[a], outDims[a], scales[a], roi.IsEmpty ? 0f : roi[a], roi.IsEmpty ? 1f : roi[a + rank], taps, tapIdx, tapW);
+            }
+            else
+            {
+                BuildTaps(o, inDims[a], outDims[a], scales[a], roi.IsEmpty ? 0f : roi[a], roi.IsEmpty ? 1f : roi[a + rank], tapIdx, tapW);
+            }
+
             ApplyAxis(src, dst, (int)outer, inDims[a], outDims[a], (int)inner, taps, tapIdx, tapW, o.Mode == ResizeMode.Nearest);
             cur[a] = outDims[a];
             src = dst;
@@ -205,6 +234,58 @@ internal static class Resize
                 return outN > 1
                     ? (roiStart * (inN - 1)) + ((float)j * (roiEnd - roiStart) * (inN - 1) / (outN - 1))
                     : 0.5f * (roiStart + roiEnd) * (inN - 1);
+        }
+    }
+
+    // Antialiased shrinking axis. Every source position i within the filter's reach of the output sample's position x gets the weight
+    // filter((i - x) * scale); the weights are divided by their sum. Positions outside the input read the nearest edge sample, so their
+    // weights add to it (or, with exclude_outside, are dropped before the division). The filter is the triangle (linear) or the cubic
+    // convolution kernel of Keys 1981 with a = cubic_coeff_a.
+    private static void BuildWideTaps(in ResizeOptions o, int inN, int outN, float scale, float roiStart, float roiEnd, int taps, Span<int> idx, Span<float> w)
+    {
+        float support = Support(o, scale);
+        for (int j = 0; j < outN; j++)
+        {
+            float xo = Coordinate(o, j, inN, outN, scale, roiStart, roiEnd);
+            int first = (int)MathF.Ceiling(xo - support);
+            int b = j * taps;
+            float sum = 0f;
+            for (int k = 0; k < taps; k++)
+            {
+                int at = first + k;
+                float d = MathF.Abs((at - xo) * scale);
+                float f;
+                if (o.Mode == ResizeMode.Linear)
+                {
+                    f = d < 1f ? 1f - d : 0f;
+                }
+                else if (d < 1f)
+                {
+                    f = ((((o.CubicA + 2f) * d) - (o.CubicA + 3f)) * d * d) + 1f;
+                }
+                else if (d < 2f)
+                {
+                    f = ((((((d - 5f) * d) + 8f) * d) - 4f)) * o.CubicA;
+                }
+                else
+                {
+                    f = 0f;
+                }
+
+                if (o.ExcludeOutside && (at < 0 || at >= inN))
+                {
+                    f = 0f;
+                }
+
+                idx[b + k] = Math.Clamp(at, 0, inN - 1);
+                w[b + k] = f;
+                sum += f;
+            }
+
+            for (int k = 0; k < taps; k++)
+            {
+                w[b + k] = sum != 0f ? w[b + k] / sum : w[b + k];
+            }
         }
     }
 

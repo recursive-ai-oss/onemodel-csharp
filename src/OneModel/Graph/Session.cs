@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Threading;
@@ -79,6 +80,16 @@ public sealed class Session : IDisposable
         int threads = options.IntraOpThreads == 0 ? ParallelFor.DefaultThreads : options.IntraOpThreads;
         var env = new SessionEnv(options.Mode, chosen, threads, BufferPool.Shared);
         CompiledGraph graph = CompiledGraph.Create(model.Graph, registry, options.Mode, options.WeightStorage, options.OptimizationLevel, chosen, threads, cancellationToken);
+        return new Session(graph, options, env);
+    }
+
+    // A body of If, Loop, Scan or SequenceMap: the graph's own inputs, then the outer values it reads, as inputs.
+    internal static Session CreateNested(IrGraph body, IReadOnlyList<IrValue> captures, OpRegistry registry, ExecutionMode mode, KernelPath path, int threads,
+        CancellationToken cancellationToken)
+    {
+        var options = new SessionOptions { Mode = mode, IntraOpThreads = threads, OptimizationLevel = OptimizationLevel.None };
+        var env = new SessionEnv(mode, path, threads, BufferPool.Shared);
+        CompiledGraph graph = CompiledGraph.CreateNested(body, captures, registry, mode, path, threads, cancellationToken);
         return new Session(graph, options, env);
     }
 
@@ -395,7 +406,7 @@ public sealed class Session : IDisposable
     private void CheckInput(int slot, DType type, Shape shape)
     {
         TensorInfo info = _graph.Inputs[slot];
-        if (type != info.DType)
+        if (info.DType != DType.Undefined && type != info.DType)
         {
             throw Invalid($"Input '{info.Name}' must be {info.DType} but {type} was supplied.");
         }
