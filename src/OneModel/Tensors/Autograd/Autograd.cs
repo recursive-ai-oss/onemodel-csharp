@@ -68,6 +68,16 @@ public enum OpKind
     NllLoss,
     /// <summary>Scaled dot-product attention over [batch, heads, length, headDim]. Saves q, k, v and the mask (slots 0-3; the mask slot is empty without one). Floats = [scale].</summary>
     Attention,
+    /// <summary>One direction of one LSTM layer over a sequence (PyTorch gate order i, f, g, o). Inputs x, wIh, wHh, bIh, bHh, h0, c0. Ints = [reverse, T, B, I, H]. See <see cref="Ops.LstmLayer"/> for the slots.</summary>
+    Lstm,
+    /// <summary>One direction of one GRU layer over a sequence (r, z, n). Inputs x, wIh, wHh, bIh, bHh, h0. Ints = [reverse, T, B, I, H]. See <see cref="Ops.GruLayer"/> for the slots.</summary>
+    Gru,
+    /// <summary>Connectionist temporal classification loss per batch item. Input log-probabilities [T, B, C]. Ints = [blank, zeroInfinity, reduction, B, inputLengths.., targetLengths.., targets..].</summary>
+    CtcLoss,
+    /// <summary>2-D transposed convolution. Inputs x, weight, bias. Saves x and weight. Ints as Conv2d: [strideH, strideW, padTop, padLeft, padBottom, padRight, dilH, dilW, groups].</summary>
+    ConvTranspose2d,
+    /// <summary>2-D resize of an NCHW tensor (nearest or bilinear). Ints = [mode, alignCorners, outH, outW].</summary>
+    Resize2d,
 }
 
 /// <summary>

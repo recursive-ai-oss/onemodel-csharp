@@ -98,6 +98,11 @@ axes the forward broadcast, to the input's shape.
 | `AvgPool2d` | none | [kH, kW, sH, sW, padH, padW, countIncludePad] | each output's `g/count` added to every in-bounds element of its window |
 | `GlobalAvgPool2d` | (composition: Reshape, Mean, Reshape) | | |
 | `Concat` | none | [axis] | slices of `g` |
+| `ConvTranspose2d` (groups, stride, padding, output padding, dilation) | 0 = x, 1 = W | as `Conv2d` | the adjoint of the convolution with the same W: `dx = Conv2d(g, W)`; `dW` = the convolution weight gradient with input `g` and output gradient `x` (per image and group `x[og,P]·cols(g)[P,K]`); `dbias = Σ g` per channel |
+| `Resize2d` (nearest, bilinear, align corners) | none (input shape in the record) | [mode, alignCorners, outH, outW] | the forward's gather transposed: `g` scatter-added to the source pixel (nearest) or to the four neighbours with the bilinear weights, in output scan order |
+| `LstmLayer` (one direction of one layer) | 0 = x, 1 = Wih, 2 = Whh, 3 = activated gates i,f,g,o `[T,B,4H]`, 4 = c `[T,B,H]`, 5 = tanh c, 6 = y, 7 = h0, 8 = c0 (7, 8 empty if not given) | [reverse, T, B, I, H] | backpropagation through time, steps in reverse order of the forward: `dh = gy + dh'`, `do = dh·tanh c`, `dc = dc' + dh·o·(1−tanh²c)`, `di = dc·g`, `df = dc·c_prev`, `dg = dc·i`, `dc' = dc·f`; pre-activation gradients `di·i(1−i)`, `df·f(1−f)`, `dg(1−g²)`, `do·o(1−o)` form `dG[t]` (`[B,4H]`); `dh' = dG[t]·Whh`. After the loop (single products over all steps): `dx = dG·Wih`, `dWih = dGᵀ·x`, `dWhh = dGᵀ·H_prev` (the previous hidden states, h0 at the first step), `dbih = dbhh = Σ dG`, `dh0 = dh'`, `dc0 = dc'` |
+| `GruLayer` | 0 = x, 1 = Wih, 2 = Whh, 3 = activated r,z,n `[T,B,3H]`, 4 = hidden-side n part `Whn h + bhn`, 5 = y, 6 = h0 | [reverse, T, B, I, H] | `dh = gy + dh'`, `dz = dh·(h_prev − n)`, `dn = dh·(1−z)`, `dh'_direct = dh·z`, `dan = dn(1−n²)`, `dr = dan·(Whn h + bhn)`, `dar = dr·r(1−r)`, `daz = dz·z(1−z)`; input side `dX[t] = [dar, daz, dan]`, hidden side `dH[t] = [dar, daz, dan·r]`; `dh' = dH[t]·Whh + dh'_direct`; `dx = dX·Wih`, `dWih = dXᵀ·x`, `dWhh = dHᵀ·H_prev`, `dbih = Σ dX`, `dbhh = Σ dH` |
+| `CtcLoss` | 0 = log-probabilities `[T,B,C]` | [blank, zeroInfinity, reduction, B, input lengths, target lengths, targets] | per sequence, `−exp(log Σ_{s: l'(s)=c} α_t(s)β_t(s) − lp[t,c] + loss)` on frames `t < inputLength` (section 8), times `g` and the reduction weight (`1/(B·max(1, targetLength))` for `Mean`); zero for impossible alignments |
 | `Embedding` | 0 = ids | [paddingIndex] | add each `g` row to its table row in id order, skipping the padding id |
 | `NllLoss` | 0 = targets | [mean, ignoreIndex] | `−g/count` (or `−g`) at `[n, target_n]` of non-ignored rows |
 | `CrossEntropy` | (composition: LogSoftmax, NllLoss) | | |
@@ -107,7 +112,7 @@ axes the forward broadcast, to the input's shape.
 `Gelu`'s saved slot differs from the convention first written in `tensors.md` (input plus the tanh term): the slope is recomputed
 in backward, which needs no extra storage.
 
-Operators not in the table (LSTM/GRU, CTC loss, ConvTranspose, Resize, int8) have no backward yet.
+Multi-layer and bidirectional recurrent networks (`Ops.Lstm`, `Ops.Gru`) are compositions of `LstmLayer`/`GruLayer`, `Concat` and view operators, so their gradients come from the engine's ordinary traversal. Operators not in the table (int8) have no backward yet.
 
 ## 6. Checks
 
@@ -118,3 +123,47 @@ Operators not in the table (LSTM/GRU, CTC loss, ConvTranspose, Resize, int8) hav
   weights and writes weights, loss and every gradient to `testdata/autograd/`; `AutogradModelTests` runs the same models on the
   eager ops and requires each gradient within 1e-4 scaled error (max |ours − torch| / max |torch|). Gradients that are zero in theory
   (the bias of a convolution feeding a batch norm; the key bias of attention) must be below 1e-5 of the largest gradient.
+- `tools/rnn_oracle.py` (PyTorch 2.15.0 CPU, black box) builds a CRNN (two conv-relu-pool stages, collapse height, two-layer bidirectional LSTM,
+  linear, log-softmax, CTC loss with unequal input and target lengths and a repeated label), a bidirectional GRU with initial states, and a
+  decoder (conv, two `ConvTranspose2d` including stride 2 with output padding and groups, nearest and both bilinear resizes) and writes
+  `testdata/autograd/{crnn,gru,decoder}.*`. `RnnOracleTests` requires every parameter and input gradient within 1e-4 scaled error (measured
+  worst 9.4e-7), CTC loss values within 1e-5 relative for reduction none/mean/sum (measured 7e-8) and the zero-infinity behaviour.
+  `RecurrentGradTests`, `CtcLossTests` and `SpatialGradTests` run `GradientCheck` on every new operator: random shapes, both directions,
+  multi-layer, bidirectional, batch-first, with and without biases and initial states, CTC with repeated labels, empty targets, unequal
+  lengths, a non-zero blank and impossible alignments with zero-infinity.
+
+## 7. Element-wise loops
+
+`Add`, `Sub`, `Mul`, `Div`, `Neg`, `Relu`, the sigmoid, tanh and GELU forward passes, and the backward rules of `Relu`, `Sigmoid`, `Tanh` and
+`Gelu` run on fixed-width lane loops (`Kernels/TrainElementwise.cs`, `Vector128/256/512` by the machine's path) with a scalar instantiation of
+the same code finishing the tail. Each element is one IEEE `+ − × ÷` or a compare-and-select (no multiply-add is formed even in fast mode), plus
+the fixed polynomials of `exact-transcendentals.md` for sigmoid, tanh, GELU and their slopes. A lane therefore gives the bits of the scalar loop at
+every length and position (`VectorElementwiseTests`: lengths 1 to 150, NaN, infinities, signed zeros, subnormals, broadcast and strided
+operands). In exact mode a NaN result is rewritten to `0x7FC00000`; in fast mode NaNs are whatever the hardware makes. Sigmoid and tanh use the
+fast polynomial instantiation in fast mode (they used the BCL before, so fast-mode values moved in the last bits); GELU uses the exact
+single-lane definitions in both modes as before. The loops run on the calling thread, so thread count cannot matter.
+
+## 8. Recurrent layers, CTC loss, transposed convolution and resize
+
+- **LSTM and GRU** follow `torch.nn.LSTM`/`torch.nn.GRU` as documented: gate rows are stacked `i,f,g,o` (LSTM) and `r,z,n` (GRU); GRU's
+  `n = tanh(W_in x + b_in + r·(W_hn h + b_hn))`, `h = (1−z)·n + z·h'`. The input projection of all steps is one GEMM; each step is one
+  `[B,H]×[H,gH]` GEMM against the transposed recurrent weights, the gate sums and cell updates are plain float operations in a fixed order, and
+  activations use the lane loops above. A layer returns every step's hidden state `[T,B,H]`; the final hidden state is its last step (step 0
+  for a reverse layer), and the final cell state is not returned (see `ops-recurrent.md` for the inference operators). No sequence lengths or
+  dropout. `Ops.Lstm`/`Ops.Gru` take one `RnnLayer` per layer and direction in PyTorch's order (layer 0 forward, layer 0 reverse, layer 1
+  forward, …), feed layer l+1 with the concatenation of layer l's two directions, and accept batch-major input.
+- **CTC loss** (Graves et al. 2006; `ctc.md` for the log-space definitions): double-precision recursions with our fixed `exp`/`log`, the same
+  in fast and exact mode, so loss values are bit-identical everywhere. The gradient is the true partial derivative with respect to the
+  log-probabilities. PyTorch's `ctc_loss` (2.15.0, observed through its output; `CtcGradientDiffersFromPyTorchsByTheSoftmaxTerm`) returns that plus
+  `exp(lp)·w` on every used frame, which a following `log_softmax` removes, so gradients with respect to logits and everything upstream agree
+  (checked to 1e-6 scaled). Reductions: `None` (`[B]`), `Sum`, `Mean` (each loss divided by `max(1, targetLength)`, then averaged over the batch).
+  An input too short for its target has loss +∞, or 0 with `zeroInfinity`, and a zero gradient either way. Lengths and labels are validated
+  (`ArgumentException`); the blank may not appear in targets.
+- **ConvTranspose2d** reuses the inference kernel (GEMM + col2im, fast or exact per `TensorCompute.Mode`); its backward is the convolution
+  kernels' with roles swapped, so it follows `Conv2d`'s accumulation order. Output padding must be below `max(stride, dilation)`.
+- **Resize2d** uses PyTorch `interpolate`'s coordinates (nearest: `floor(dst·in/out)`; bilinear: half-pixel centres clamped at 0, or align
+  corners), in plain float arithmetic.
+
+All of it is exact-mode bit-identical across ISA paths, OS and thread count: the products are the canonical GEMM, the rest is IEEE
+operations, the fixed polynomials and double-precision sums in a fixed order. The exact hashes of the CRNN-with-CTC step and of the decoder step
+are pinned in `RnnOracleTests.GradientsDoNotDependOnThreads`.

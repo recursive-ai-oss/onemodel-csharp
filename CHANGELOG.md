@@ -16,9 +16,12 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `tools/training_oracle.py` and `testdata/training/`: PyTorch reference training runs (MLP with SGD+momentum, conv net with AdamW + cosine + clipping, two-layer transformer classifier with Adam + warm-up), optimizer step, clipping and schedule references. Losses agree with PyTorch's to 4e-6 relative over 50 to 100 steps.
 - `ActivationScope.Track` is public, so modules can hand masks and constants to a step's scope.
 - The Training package is built and packed by CI and the release workflow beside the runtime; fuzz target `checkpoint`.
+- Differentiable recurrent layers (`Ops.LstmLayer`, `GruLayer`, and multi-layer, bidirectional, batch-first `Ops.Lstm` / `Ops.Gru` over `RnnLayer` weights in PyTorch's gate layout), `Ops.CtcLoss` (log-space forward-backward, reductions none/mean/sum, zero-infinity), `Ops.ConvTranspose2d` and `Ops.Resize2d` (nearest, bilinear, align corners), with backward through time (`docs/autograd.md` section 8).
+- `tools/rnn_oracle.py` and `testdata/autograd/{crnn,gru,decoder}.*`: PyTorch gradients for a CRNN with CTC loss, a bidirectional GRU and a transposed-convolution/resize decoder, matched to 1e-6 scaled.
 
 ### Changed
 
+- The eager element-wise operators and the gradients of Relu, Sigmoid, Tanh and GELU run on fixed-width vector lanes (about 2x faster encoder training steps in a first look); results equal the scalar loops bit for bit, except that fast-mode sigmoid and tanh now use the fast polynomials instead of the BCL (`docs/autograd.md` section 7).
 - `Ops.MatMul` (default kernels, `DenseKernels`) runs on the blocked GEMM instead of the double-accumulating reference loop; pass `ReferenceKernels.Instance` for the old behaviour.
 - Faster convolution in fast mode: regular and grouped convolutions gather their input patches straight into the packed layout (no im2col matrix, no separate packing phase), their weights are packed once per session (`conv-pack` pass), tiles are balanced, and small layers use more threads (`docs/kernels-conv.md`). A single-row matrix product uses a matrix-vector kernel; large element-wise outputs and float `MaxPool` run in parallel chunks. Fast-mode results are independent of the thread count as before; exact mode is unchanged.
 - A convolution followed by an `Add` of a skip connection adds it on the finished tile (graph pass `conv-residual`, fast mode); ResNet-50 at 8 threads about 10% faster.
