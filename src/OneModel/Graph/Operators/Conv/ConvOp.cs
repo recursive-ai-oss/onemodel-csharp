@@ -16,6 +16,20 @@ internal sealed class ConvOp : OpKernel
 
     private readonly WindowAttrs _attrs;
     private readonly int _group;
+    private readonly FusedActivation? _activation;
+
+    private ConvOp(ConvOp source, FusedActivation activation)
+    {
+        _attrs = source._attrs;
+        _group = source._group;
+        _activation = activation;
+    }
+
+    /// <summary>The same convolution with <paramref name="activation"/> applied to every output after the bias (see ConvActivationFusionPass).</summary>
+    internal ConvOp WithActivation(FusedActivation activation) => new(this, activation);
+
+    /// <summary>True when an activation is already fused in.</summary>
+    internal bool HasActivation => _activation is not null;
 
     private ConvOp(NodeInfo node)
     {
@@ -103,6 +117,6 @@ internal sealed class ConvOp : OpKernel
 
         Geometry(x.Shape, w.Shape, null, out ConvShape s);
         ReadOnlySpan<float> bias = run.Inputs.Length > 2 && !run.Inputs[2].IsEmpty ? run.Inputs[2].Data<float>() : default;
-        Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), y.MutableData<float>(), run.Threads, bias);
+        Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
     }
 }

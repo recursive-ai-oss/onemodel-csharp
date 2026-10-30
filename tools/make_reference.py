@@ -1,6 +1,6 @@
 """Reference outputs from ONNX Runtime for every model and variant in the manifest.
 
-    make_reference.py [--threads 1] [name ...]
+    make_reference.py [--threads 1] [--variant fp16] [name ...]
 
 For each model file and batch size (1 and the model's N) this writes, under
 <cache>/reference/<os-arch>/<model>/<variant>/b<batch>/ :
@@ -88,6 +88,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*")
     ap.add_argument("--threads", type=int, default=1)
+    ap.add_argument("--variant", action="append", help="only this file variant (repeatable), e.g. fp16")
     a = ap.parse_args()
     man = load_manifest()
     names = a.names or [n for n, m in man["models"].items()
@@ -98,6 +99,8 @@ def main() -> None:
     for model in names:
         entry = man["models"][model]
         for variant, f in entry["files"].items():
+            if a.variant and variant not in a.variant:
+                continue
             path = MODELS / f["path"]
             for n in sorted({1, entry["batch"]}):
                 feeds = inputs_for(model, variant, n, entry)

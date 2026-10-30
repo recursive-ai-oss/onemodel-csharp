@@ -106,7 +106,28 @@ int8 outputs are much noisier. Between ONNX Runtime's own levels the scaled diff
 
 A row (model, variant, batch) passes when, for every float output compared with ONNX Runtime's `ORT_ENABLE_ALL` output:
 
-1. **Cosine.** The minimum cosine similarity, over every row of the last axis, is at least `min(0.99, c)`, where `c` is the same minimum for ONNX Runtime's `ORT_DISABLE_ALL` output against its `ORT_ENABLE_ALL` output. For outputs of rank 3 or more (encoders) the same holds for the mean-pooled vectors (mean over the second-to-last axis).
-2. **Decisions**, for models with a task head only: class per image for classifiers, token per position for the Whisper decoder and the text recognizer. The argmax over the last axis agrees on at least 95% of positions, or on at least as many as ONNX Runtime's two levels agree with each other. A single image (one decision) must agree. Argmax over a hidden dimension is not a decision, so encoders have no part 2.
+1. **Cosine.** The 1st-percentile cosine similarity over the rows of the last axis (the minimum when there are fewer than 100 rows) is at least `min(0.99, f)`, and for outputs of rank 3 or more (encoders) so is the minimum cosine of the mean-pooled vectors (mean over the second-to-last axis). `f` is the same statistic for the floor run against ONNX Runtime's `ORT_ENABLE_ALL` output. A single extreme row is not gated: with thousands of rows it is an extreme-value statistic that ONNX Runtime itself does not hold from run to run.
+2. **Decisions**, for models with a task head only: class per image for classifiers, token per position for the Whisper decoder and the text recognizer. The argmax over the last axis agrees on at least 95% of positions, or on at least as many as the floor run agrees. A single image (one decision) must agree. Argmax over a hidden dimension is not a decision, so encoders have no part 2.
+
+The floor run is ONNX Runtime's `ORT_DISABLE_ALL` output. Where that output is bit-identical to `ORT_ENABLE_ALL` (the Whisper decoder: the float kernels do not depend on the level, so the two levels carry no information), the floor run is instead the worst of four `ORT_ENABLE_ALL` runs with 1e-7 relative noise on the float inputs, which is the spread ONNX Runtime shows to one float32 ulp of difference upstream.
 
 Scaled error and ONNX Runtime's own difference are printed, not gated. Operator-level int8 (the oracle cases) must match bit for bit. `tools/check_int8.sh` runs `Bar check --dump` and `tools/check_int8.py` on any rows; `Bar check` itself prints the per-output row-cosine minimum and top-1 agreement.
+
+## float16 files
+
+`tools/export_models.py --fp16` writes `<model>_fp16.onnx` next to the float32 file (MiniLM-L6 and ResNet-50): float16 weights and
+float16 activations, float32 graph inputs and outputs with a `Cast` at each end, finite values beyond the float16 range clamped to
+±65504. `make_reference.py --variant fp16` stores ONNX Runtime's output on the same file and inputs. Both engines run it on the CPU.
+
+Gate: scaled error of ours against ONNX Runtime on the same file ≤ 4e-3, and our error against the float32 model's output ≤ 1.5 times
+ONNX Runtime's. Reason: half precision has 11 significant bits (4.9e-4 per rounding), the models chain dozens of roundings, and two
+correct engines that round in slightly different places differ by that much. Measured on x64 (AVX-512), fast mode, scaled errors:
+
+| Model (batch) | Ours vs ORT fp16 | ORT fp16 vs ORT fp32 | Ours fp16 vs ORT fp32 | ORT fp16, enabled vs disabled |
+|---|---|---|---|---|
+| MiniLM-L6 (1) | 9.8e-4 | 7.9e-4 | 1.05e-3 | 6.6e-4 |
+| MiniLM-L6 (32) | 1.9e-3 | 1.33e-3 | 1.72e-3 | 1.26e-3 |
+| ResNet-50 (1) | 3.6e-4 | 1.37e-3 | 1.02e-3 | 2.9e-7 |
+| ResNet-50 (8) | 4.8e-4 | 1.49e-3 | 1.75e-3 | 2.7e-7 |
+
+Output hashes are equal at 1 and 8 threads.

@@ -253,6 +253,50 @@ internal sealed class InferContext
         return _inPresent[i] && !value.IsEmpty;
     }
 
+    /// <summary>
+    /// For the half-precision adapter: treats every binary16 and bfloat16 input as binary32 (their values are hidden, so a kernel cannot
+    /// read them as float) and returns the element type the outputs should be stored in: the type of the first such input that is not
+    /// marked in <paramref name="keepFloat"/>, or <see cref="DType.F32"/> when there is none.
+    /// </summary>
+    internal DType WidenHalfInputs(ReadOnlySpan<bool> keepFloat)
+    {
+        DType storage = DType.F32;
+        bool found = false;
+        for (int i = 0; i < InputCount; i++)
+        {
+            if (_inPresent[i] && _inType[i] is DType.F16 or DType.BF16)
+            {
+                if (!found && !(i < keepFloat.Length && keepFloat[i]))
+                {
+                    storage = _inType[i];
+                    found = true;
+                }
+
+                _inType[i] = DType.F32;
+                _inValue[i] = default;
+            }
+        }
+
+        return storage;
+    }
+
+    /// <summary>For the half-precision adapter: outputs the kernel stated as binary32 are stored as <paramref name="storage"/> instead.</summary>
+    internal void RetypeFloatOutputs(DType storage)
+    {
+        for (int i = 0; i < OutputCount; i++)
+        {
+            if (_outSet[i] && _outType[i] == DType.F32 && storage != DType.F32)
+            {
+                if (!_outConst[i].IsEmpty)
+                {
+                    throw Unsupported("a constant binary32 result of a half-precision node is not supported");
+                }
+
+                _outType[i] = storage;
+            }
+        }
+    }
+
     /// <summary>Asks for the node to be shaped at run time, when the values it needs exist. Call it and return.</summary>
     public void RequireRunTimeValues() => NeedsRunTimeValues = true;
 
@@ -290,8 +334,9 @@ internal sealed class PrepareContext
     private readonly Tensor[] _constants;
     private readonly List<Tensor> _owned;
 
-    internal PrepareContext(Tensor[] constants, List<Tensor> owned, ExecutionMode mode, KernelPath path)
+    internal PrepareContext(Tensor[] constants, List<Tensor> owned, ExecutionMode mode, KernelPath path, DType[]? inputTypes = null)
     {
+        InputTypes = inputTypes ?? [];
         _constants = constants;
         _owned = owned;
         Mode = mode;
@@ -301,6 +346,12 @@ internal sealed class PrepareContext
     public ExecutionMode Mode { get; }
 
     public KernelPath Path { get; }
+
+    /// <summary>The same context with other constants (the half-precision adapter hides or widens some).</summary>
+    internal PrepareContext WithConstants(Tensor[] constants) => new(constants, _owned, Mode, Path, InputTypes);
+
+    /// <summary>The element type of each input slot in this plan (undefined for omitted optional inputs).</summary>
+    public DType[] InputTypes { get; }
 
     /// <summary>Whether input <paramref name="i"/> is a constant (a weight, or the result of constant evaluation).</summary>
     public bool IsConstant(int i) => i < _constants.Length && !_constants[i].IsEmpty;
@@ -333,6 +384,10 @@ internal readonly ref struct OpRun
         Threads = threads;
         _arena = arena;
     }
+
+    /// <summary>The same run with other tensors and state (the half-precision adapter hands a kernel binary32 copies).</summary>
+    internal OpRun With(ReadOnlySpan<Tensor> inputs, Span<Tensor> outputs, object? state) =>
+        new(inputs, outputs, Mode, Path, Threads, _arena, state);
 
     /// <summary>Input tensors, contiguous; an omitted optional input is an empty tensor. Never written.</summary>
     public ReadOnlySpan<Tensor> Inputs { get; }

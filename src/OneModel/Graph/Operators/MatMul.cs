@@ -312,6 +312,14 @@ internal sealed class GemmOp : OpKernel
         }
     }
 
+    internal float Alpha => _alpha;
+
+    internal float Beta => _beta;
+
+    internal bool TransA => _transA;
+
+    internal bool TransB => _transB;
+
     public override bool SupportsExact => true;
 
     public override void Infer(InferContext ctx)

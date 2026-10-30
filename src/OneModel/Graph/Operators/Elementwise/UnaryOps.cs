@@ -35,6 +35,9 @@ internal abstract class UnaryKernelBase : OpKernel
 /// <summary>A single-precision function from <see cref="IFloatUnary"/>, vectorized, exact and fast.</summary>
 internal sealed class FloatFunctionOp<TOp>(TOp op) : UnaryKernelBase where TOp : struct, IFloatUnary
 {
+    /// <summary>The function, for passes that apply it to a finished tile instead of a whole tensor.</summary>
+    internal TOp Function => op;
+
     protected override bool IsSupported(DType t) => t == DType.F32;
 
     public override void Run(in OpRun run) =>
@@ -142,6 +145,12 @@ internal sealed class ClipOp : UnaryKernelBase
             _hiAttr = n.GetFloat("max", float.MaxValue);
         }
     }
+
+    /// <summary>True before opset 11, when the bounds are attributes (see <see cref="AttributeBounds"/>).</summary>
+    internal bool BoundsAreAttributes => _attributes;
+
+    /// <summary>The bounds of the attribute form; an omitted bound is the type's finite extreme, as the kernel treats it.</summary>
+    internal (float Lo, float Hi) AttributeBounds => (_hasLoAttr ? _loAttr : float.MinValue, _hasHiAttr ? _hiAttr : float.MaxValue);
 
     protected override bool IsSupported(DType t) => TypeDispatch.IsNumber(t);
 

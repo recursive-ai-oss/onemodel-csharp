@@ -35,6 +35,22 @@ public enum OptimizationLevel
     All = 2,
 }
 
+/// <summary>How a session stores the large constant weights of float32 models.</summary>
+public enum WeightStorage
+{
+    /// <summary>Weights stay as the model has them. The default.</summary>
+    Original = 0,
+
+    /// <summary>
+    /// Weights of matrix products and convolutions are rounded to IEEE binary16 and kept that way: half the memory, widened to float32
+    /// for each use. The model's results change by the rounding of its weights.
+    /// </summary>
+    Binary16 = 1,
+
+    /// <summary>As <see cref="Binary16"/> with bfloat16 (same range as float32, 8 bits of precision).</summary>
+    BFloat16 = 2,
+}
+
 /// <summary>Settings fixed when a <see cref="Session"/> is created.</summary>
 public sealed class SessionOptions
 {
@@ -49,6 +65,14 @@ public sealed class SessionOptions
 
     /// <summary>Graph rewriting level. Default <see cref="OptimizationLevel.All"/>.</summary>
     public OptimizationLevel OptimizationLevel { get; init; } = OptimizationLevel.All;
+
+    /// <summary>
+    /// Whether large float32 weights are stored in half precision to save memory. Default <see cref="WeightStorage.Original"/>. Applies to
+    /// constant weights of MatMul, Gemm and Conv with at least 1024 values; each use widens them to float32 first, which costs time, so it
+    /// is a memory-for-speed trade. Models that are already stored in half precision run in any case, with their weights widened once
+    /// when the session plans a run.
+    /// </summary>
+    public WeightStorage WeightStorage { get; init; } = WeightStorage.Original;
 
     /// <summary>
     /// How many execution plans (one per distinct set of input shapes) a session keeps. When more distinct shapes arrive, the least
@@ -71,6 +95,11 @@ public sealed class SessionOptions
         if (!Enum.IsDefined(OptimizationLevel))
         {
             throw new ArgumentOutOfRangeException(nameof(OptimizationLevel), OptimizationLevel, "Unknown optimization level.");
+        }
+
+        if (!Enum.IsDefined(WeightStorage))
+        {
+            throw new ArgumentOutOfRangeException(nameof(WeightStorage), WeightStorage, "Unknown weight storage.");
         }
 
         if (MaxCachedPlans < 1)

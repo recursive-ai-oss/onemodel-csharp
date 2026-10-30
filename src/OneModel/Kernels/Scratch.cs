@@ -22,7 +22,10 @@ internal static unsafe class Scratch
     /// <summary>Padded depthwise input plane.</summary>
     public const int Plane = 3;
 
-    private const int Slots = 4;
+    /// <summary>Working memory of the fused attention kernel (used by whichever thread runs a work item).</summary>
+    public const int Attention = 4;
+
+    private const int Slots = 5;
 
     [ThreadStatic]
     private static float*[]? t_pointers;

@@ -29,6 +29,8 @@ internal sealed class BatchNormalizationOp : OpKernel
         }
     }
 
+    internal float Epsilon => _epsilon;
+
     public override bool SupportsExact => true;
 
     public override int InPlaceInput => 0;

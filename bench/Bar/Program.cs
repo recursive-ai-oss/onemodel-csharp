@@ -54,10 +54,10 @@ internal static class Program
     private static int Usage()
     {
         Console.Error.WriteLine(
-            "usage: Bar run --model FILE --ref DIR --model-name N --variant V --batch B --threads T [--side ort|ours] [--mode fast|exact]\n" +
+            "usage: Bar run --model FILE --ref DIR --model-name N --variant V --batch B --threads T [--side ort|ours] [--mode fast|exact] [--opt none|basic|all]\n" +
             "               [--reps 3] [--warmup 3] [--target-ms 1000] --row-out FILE [--sdk X] [--lock-label L]\n" +
             "       Bar emit --row FILE --rss-mb X [--csv FILE] [--md FILE]\n" +
-            "       Bar check --model FILE --ref DIR --threads T [--mode fast|exact] [--tol 1e-4] [--dump DIR]   (ours vs the stored ONNX Runtime outputs)");
+            "       Bar check --model FILE --ref DIR --threads T [--mode fast|exact] [--weights original|fp16|bf16] [--tol 1e-4] [--dump DIR]   (ours vs the stored ONNX Runtime outputs)");
         return 2;
     }
 
@@ -89,7 +89,7 @@ internal static class Program
         using ISide side = o.GetValueOrDefault("side", "ort") switch
         {
             "ort" => new OrtSide(),
-            "ours" => new OursSide(o.GetValueOrDefault("mode", "fast")),
+            "ours" => new OursSide(o.GetValueOrDefault("mode", "fast"), o.GetValueOrDefault("weights", "original"), o.GetValueOrDefault("opt", "all")),
             var s => throw new ArgumentException($"unknown side {s}"),
         };
 
@@ -180,7 +180,7 @@ internal static class Program
     {
         int threads = int.Parse(o["threads"], CultureInfo.InvariantCulture);
         double tol = double.Parse(o.GetValueOrDefault("tol", "1e-4"), CultureInfo.InvariantCulture);
-        using var side = new OursSide(o.GetValueOrDefault("mode", "fast"));
+        using var side = new OursSide(o.GetValueOrDefault("mode", "fast"), o.GetValueOrDefault("weights", "original"), o.GetValueOrDefault("opt", "all"));
         var inputs = new Dictionary<string, NpyArray>();
         foreach (string f in Directory.GetFiles(Path.Combine(o["ref"], "inputs"), "*.npy"))
         {

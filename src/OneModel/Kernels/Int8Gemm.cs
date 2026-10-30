@@ -303,7 +303,8 @@ internal static unsafe class Int8Gemm
         job.Dst = dst;
         job.ColSums = colSums;
         job.Strips = strips;
-        ParallelFor.Run(job, (strips + PackStripsPerChunk - 1) / PackStripsPerChunk, threads);
+        // Work estimates are nanoseconds on one thread and only decide how many threads are worth waking: about 1 ns to pack an element of B.
+        ParallelFor.Run(job, (strips + PackStripsPerChunk - 1) / PackStripsPerChunk, threads, (long)k * n);
     }
 
     /// <summary>
@@ -341,7 +342,7 @@ internal static unsafe class Int8Gemm
             pj.Dst = pa;
             pj.RowSums = rs;
             pj.Strips = aStrips;
-            ParallelFor.Run(pj, (aStrips + PackAStripsPerChunk - 1) / PackAStripsPerChunk, threads);
+            ParallelFor.Run(pj, (aStrips + PackAStripsPerChunk - 1) / PackAStripsPerChunk, threads, (long)m * k / 2);
             a2 = default;
             a2.Packed = pa;
             a2.RowSums = rs;
@@ -367,7 +368,8 @@ internal static unsafe class Int8Gemm
             _ => &ScalarKernel,
         };
         int tilesM = (m + f.Mc - 1) / f.Mc;
-        ParallelFor.Run(job, tilesM * job.TilesN, threads);
+        // About 50 multiply-adds per nanosecond per thread at the measured 100 giga-operations per second.
+        ParallelFor.Run(job, tilesM * job.TilesN, threads, (long)m * n * k / 50);
     }
 
     // The reference microkernel: a 4x4 tile over k pairs, A as bytes (k pair per row), B as bytes (k pair per column).

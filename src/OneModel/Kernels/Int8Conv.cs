@@ -141,7 +141,7 @@ internal static unsafe class Int8Conv
                         job.Dst = packed;
                         job.ColSums = sums;
                         job.Strips = strips;
-                        ParallelFor.Run(job, (strips + StripsPerChunk - 1) / StripsPerChunk, c.Threads);
+                        ParallelFor.Run(job, (strips + StripsPerChunk - 1) / StripsPerChunk, c.Threads, (long)nCols * k);
                     }
 
                     var call = new Int8Call
@@ -228,7 +228,7 @@ internal static unsafe class Int8Conv
             job.Mult = c.Mult;
             job.MultVec = c.MultVec.IsEmpty ? null : pm;
             int planes = s.N * s.Cin;
-            ParallelFor.Run(job, (planes + PlanesPerChunk - 1) / PlanesPerChunk, c.Threads);
+            ParallelFor.Run(job, (planes + PlanesPerChunk - 1) / PlanesPerChunk, c.Threads, (long)planes * nCols * s.KH * s.KW / 4);
         }
     }
 

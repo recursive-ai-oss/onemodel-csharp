@@ -1,3 +1,4 @@
+using System;
 using RecursiveAI.OneModel.Threading;
 
 namespace RecursiveAI.OneModel.Graph.Operators;
@@ -15,6 +16,9 @@ internal interface IChunkWork
 
 internal static class Chunked
 {
+    // Rough single-thread time of one chunk, in nanoseconds; only decides how many threads are worth using.
+    private const long WorkPerChunkNs = 16_000;
+
     /// <summary>Runs chunks <c>[0, chunks)</c> of <paramref name="work"/> on up to <paramref name="threads"/> threads.</summary>
     public static void Run<TWork>(TWork work, int chunks, int threads)
         where TWork : struct, IChunkWork
@@ -29,15 +33,25 @@ internal static class Chunked
             return;
         }
 
-        ParallelFor.Run(new Job<TWork>(work), chunks, threads);
+        // A chunk is about ChunkElements elements of streaming work; a few of them are not worth waking helpers for.
+        ParallelFor.Run(Job<TWork>.Get(work), chunks, threads, chunks * WorkPerChunkNs);
     }
 
     private sealed class Job<TWork> : ChunkJob
         where TWork : struct, IChunkWork
     {
-        private readonly TWork _work;
+        // Kept per thread and refilled, so a parallel call allocates nothing in steady state; the call is done with it before it returns.
+        [ThreadStatic]
+        private static Job<TWork>? t_job;
 
-        public Job(TWork work) => _work = work;
+        private TWork _work;
+
+        public static Job<TWork> Get(TWork work)
+        {
+            Job<TWork> job = t_job ??= new Job<TWork>();
+            job._work = work;
+            return job;
+        }
 
         public override void RunChunk(int chunk) => _work.RunChunk(chunk);
     }

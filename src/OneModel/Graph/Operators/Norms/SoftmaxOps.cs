@@ -135,6 +135,11 @@ internal abstract class SoftmaxFamilyOp : OpKernel
         _axis = node.GetInt("axis", coerce ? 1 : -1);
     }
 
+    /// <summary>True for Softmax (not LogSoftmax or Hardmax) in the opset 13 form, whose axis is the one named, default the last.</summary>
+    internal bool IsPlainSoftmax => _kind == SoftmaxKind.Softmax && !_coerce;
+
+    internal long AxisAttribute => _axis;
+
     public override bool SupportsExact => true;
 
     public override int InPlaceInput => 0;

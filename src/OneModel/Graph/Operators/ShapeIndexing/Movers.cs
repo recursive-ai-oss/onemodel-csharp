@@ -20,6 +20,9 @@ internal sealed class TransposeOp : OpKernel
         _perm = node.Has("perm") ? [.. node.GetInts("perm")] : null;
     }
 
+    /// <summary>The permutation attribute, or empty when it was omitted (reverse the axes).</summary>
+    internal ReadOnlySpan<long> Permutation => _perm is null ? default : _perm;
+
     public override bool SupportsExact => true;
 
     public override void Infer(InferContext ctx)

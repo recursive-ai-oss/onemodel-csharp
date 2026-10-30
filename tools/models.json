@@ -23,6 +23,12 @@
           "sha256": "8788be7fa81cdc1229170feae233d3a04f2950f16dfa7f752f0ac688fe856c5a",
           "bytes": 26080934,
           "path": "resnet50/resnet50_int8_qdq.onnx"
+        },
+        "fp16": {
+          "path": "resnet50/resnet50_fp16.onnx",
+          "conversion": "tools/export_models.py to_fp16 (weights and activations float16, float32 inputs and outputs)",
+          "sha256": "d647ad394098d9a5b4523ebe877cdfbd619097ccd912a443791af4399f1e0eca",
+          "bytes": 51085545
         }
       }
     },
@@ -99,6 +105,12 @@
           "sha256": "c0ae56495a1352a51de579c979c3b34bc17ef1b52ab02e8893ab6f2585e9c703",
           "bytes": 22944316,
           "path": "minilm_l6/minilm_l6_int8_dyn.onnx"
+        },
+        "fp16": {
+          "path": "minilm_l6/minilm_l6_fp16.onnx",
+          "conversion": "tools/export_models.py to_fp16 (weights and activations float16, float32 inputs and outputs)",
+          "sha256": "9bede0fa3e5e37bae0b249ccd990e27a7f18bc52f7d909c3fe465c65adea5baa",
+          "bytes": 45228808
         }
       }
     },
