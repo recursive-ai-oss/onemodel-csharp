@@ -1,0 +1,465 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261030,
+ "tensors": {
+  "in.emb": {
+   "shape": [
+    11,
+    16
+   ],
+   "offset": 0
+  },
+  "in.l0.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 176
+  },
+  "in.l0.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 432
+  },
+  "in.l0.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 448
+  },
+  "in.l0.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 704
+  },
+  "in.l0.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 720
+  },
+  "in.l0.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 976
+  },
+  "in.l0.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 992
+  },
+  "in.l0.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 1248
+  },
+  "in.l0.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 1264
+  },
+  "in.l0.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 1280
+  },
+  "in.l0.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 1296
+  },
+  "in.l0.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 1808
+  },
+  "in.l0.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 1840
+  },
+  "in.l0.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 2352
+  },
+  "in.l0.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 2368
+  },
+  "in.l0.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 2384
+  },
+  "in.l1.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2400
+  },
+  "in.l1.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 2656
+  },
+  "in.l1.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2672
+  },
+  "in.l1.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 2928
+  },
+  "in.l1.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2944
+  },
+  "in.l1.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 3200
+  },
+  "in.l1.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 3216
+  },
+  "in.l1.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 3472
+  },
+  "in.l1.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 3488
+  },
+  "in.l1.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 3504
+  },
+  "in.l1.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 3520
+  },
+  "in.l1.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 4032
+  },
+  "in.l1.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 4064
+  },
+  "in.l1.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 4576
+  },
+  "in.l1.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 4592
+  },
+  "in.l1.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 4608
+  },
+  "in.ids": {
+   "shape": [
+    2,
+    5
+   ],
+   "offset": 4624
+  },
+  "in.mask": {
+   "shape": [
+    2,
+    5,
+    5
+   ],
+   "offset": 4634
+  },
+  "in.proj": {
+   "shape": [
+    2,
+    5,
+    16
+   ],
+   "offset": 4684
+  },
+  "out.loss": {
+   "shape": [
+    1
+   ],
+   "offset": 4844
+  },
+  "out.y": {
+   "shape": [
+    2,
+    5,
+    16
+   ],
+   "offset": 4845
+  },
+  "grad.emb": {
+   "shape": [
+    11,
+    16
+   ],
+   "offset": 5005
+  },
+  "grad.l0.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 5181
+  },
+  "grad.l0.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 5437
+  },
+  "grad.l0.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 5453
+  },
+  "grad.l0.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 5709
+  },
+  "grad.l0.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 5725
+  },
+  "grad.l0.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 5981
+  },
+  "grad.l0.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 5997
+  },
+  "grad.l0.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 6253
+  },
+  "grad.l0.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 6269
+  },
+  "grad.l0.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 6285
+  },
+  "grad.l0.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 6301
+  },
+  "grad.l0.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 6813
+  },
+  "grad.l0.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 6845
+  },
+  "grad.l0.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 7357
+  },
+  "grad.l0.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 7373
+  },
+  "grad.l0.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 7389
+  },
+  "grad.l1.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 7405
+  },
+  "grad.l1.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 7661
+  },
+  "grad.l1.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 7677
+  },
+  "grad.l1.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 7933
+  },
+  "grad.l1.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 7949
+  },
+  "grad.l1.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 8205
+  },
+  "grad.l1.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 8221
+  },
+  "grad.l1.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 8477
+  },
+  "grad.l1.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 8493
+  },
+  "grad.l1.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 8509
+  },
+  "grad.l1.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 8525
+  },
+  "grad.l1.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 9037
+  },
+  "grad.l1.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 9069
+  },
+  "grad.l1.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 9581
+  },
+  "grad.l1.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 9597
+  },
+  "grad.l1.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 9613
+  }
+ }
+}

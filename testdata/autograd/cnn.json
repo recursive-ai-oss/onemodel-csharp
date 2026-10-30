@@ -1,0 +1,201 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261030,
+ "tensors": {
+  "in.x": {
+   "shape": [
+    4,
+    1,
+    12,
+    12
+   ],
+   "offset": 0
+  },
+  "in.c1w": {
+   "shape": [
+    4,
+    1,
+    3,
+    3
+   ],
+   "offset": 576
+  },
+  "in.c1b": {
+   "shape": [
+    4
+   ],
+   "offset": 612
+  },
+  "in.bn1g": {
+   "shape": [
+    4
+   ],
+   "offset": 616
+  },
+  "in.bn1b": {
+   "shape": [
+    4
+   ],
+   "offset": 620
+  },
+  "in.c2w": {
+   "shape": [
+    8,
+    4,
+    3,
+    3
+   ],
+   "offset": 624
+  },
+  "in.c2b": {
+   "shape": [
+    8
+   ],
+   "offset": 912
+  },
+  "in.bn2g": {
+   "shape": [
+    8
+   ],
+   "offset": 920
+  },
+  "in.bn2b": {
+   "shape": [
+    8
+   ],
+   "offset": 928
+  },
+  "in.fcw": {
+   "shape": [
+    5,
+    72
+   ],
+   "offset": 936
+  },
+  "in.fcb": {
+   "shape": [
+    5
+   ],
+   "offset": 1296
+  },
+  "in.targets": {
+   "shape": [
+    4
+   ],
+   "offset": 1301
+  },
+  "out.loss": {
+   "shape": [
+    1
+   ],
+   "offset": 1305
+  },
+  "out.logits": {
+   "shape": [
+    4,
+    5
+   ],
+   "offset": 1306
+  },
+  "out.rm1": {
+   "shape": [
+    4
+   ],
+   "offset": 1326
+  },
+  "out.rv1": {
+   "shape": [
+    4
+   ],
+   "offset": 1330
+  },
+  "out.rm2": {
+   "shape": [
+    8
+   ],
+   "offset": 1334
+  },
+  "out.rv2": {
+   "shape": [
+    8
+   ],
+   "offset": 1342
+  },
+  "grad.x": {
+   "shape": [
+    4,
+    1,
+    12,
+    12
+   ],
+   "offset": 1350
+  },
+  "grad.c1w": {
+   "shape": [
+    4,
+    1,
+    3,
+    3
+   ],
+   "offset": 1926
+  },
+  "grad.c1b": {
+   "shape": [
+    4
+   ],
+   "offset": 1962
+  },
+  "grad.bn1g": {
+   "shape": [
+    4
+   ],
+   "offset": 1966
+  },
+  "grad.bn1b": {
+   "shape": [
+    4
+   ],
+   "offset": 1970
+  },
+  "grad.c2w": {
+   "shape": [
+    8,
+    4,
+    3,
+    3
+   ],
+   "offset": 1974
+  },
+  "grad.c2b": {
+   "shape": [
+    8
+   ],
+   "offset": 2262
+  },
+  "grad.bn2g": {
+   "shape": [
+    8
+   ],
+   "offset": 2270
+  },
+  "grad.bn2b": {
+   "shape": [
+    8
+   ],
+   "offset": 2278
+  },
+  "grad.fcw": {
+   "shape": [
+    5,
+    72
+   ],
+   "offset": 2286
+  },
+  "grad.fcb": {
+   "shape": [
+    5
+   ],
+   "offset": 2646
+  }
+ }
+}

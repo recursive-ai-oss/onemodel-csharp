@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using RecursiveAI.OneModel.Format;
 using RecursiveAI.OneModel.Graph;
 using RecursiveAI.OneModel.Onnx;
 using RecursiveAI.OneModel.Tensors;
+using RecursiveAI.OneModel.Training;
 using SharpFuzz;
 
 namespace RecursiveAI.OneModel.Fuzz;
@@ -35,8 +37,29 @@ internal static class Program
             case "format":
                 Fuzzer.LibFuzzer.Run(static input => FuzzFormat(input));
                 break;
+            case "checkpoint":
+                Fuzzer.LibFuzzer.Run(static input => FuzzCheckpoint(input));
+                break;
+            case "seed-checkpoint":
+                // Writes valid checkpoints of every fuzz configuration into the directory args[1], as corpus seeds.
+                Directory.CreateDirectory(args[1]);
+                for (int c = 0; c < CheckpointConfigs; c++)
+                {
+                    (NnModule m, Optimizer? o) = CheckpointConfig(c);
+                    using (m)
+                    using (o)
+                    {
+                        Checkpoint.Save(Path.Combine(args[1], $"seed-{c}.ckpt"), m, o, new Dictionary<string, long> { ["step"] = 3, ["epoch"] = 1 });
+                        if (o is not null)
+                        {
+                            Checkpoint.Save(Path.Combine(args[1], $"seed-{c}-model-only.ckpt"), m);
+                        }
+                    }
+                }
+
+                break;
             default:
-                Console.Error.WriteLine("unknown target '" + target + "'; use onnx, tensor or format");
+                Console.Error.WriteLine("unknown target '" + target + "'; use onnx, tensor, format or checkpoint");
                 Environment.ExitCode = 2;
                 break;
         }
@@ -60,6 +83,102 @@ internal static class Program
         catch (OnnxImportException)
         {
             // Rejecting bad input is the expected outcome.
+        }
+    }
+
+    private const int CheckpointConfigs = 4;
+
+    // The model and optimizer pairs a checkpoint input is tried against: batch norm, dropout and Adam; an embedding with SGD
+    // momentum; a bare linear layer with no optimizer; an LSTM with AdamW and AMSGrad.
+    private static (NnModule Model, Optimizer? Optimizer) CheckpointConfig(int index)
+    {
+        var g = new Generator(1);
+        switch (index)
+        {
+            case 0:
+                var a = new Sequential(new Linear(3, 2, g), new BatchNorm2d(2), new Dropout(0.1f, 5));
+                return (a, new Adam(a.Parameters()));
+            case 1:
+                var b = new Sequential(new Embedding(4, 3, g), new Linear(3, 2, g));
+                return (b, new Sgd(b.Parameters(), 0.1f, momentum: 0.9f));
+            case 2:
+                return (new Linear(2, 2, g), null);
+            default:
+                var d = new Recurrent(gru: false, 2, 2, g);
+                return (d, new AdamW(d.Parameters(), amsgrad: true));
+        }
+    }
+
+    // The reader rejects a file whose header lengths disagree with its size, which almost every mutation breaks. So each input is
+    // also tried with the header's length fields repaired, which lets mutations of the manifest and the data reach the code behind.
+    private static byte[] RepairHeader(byte[] input)
+    {
+        if (input.Length < 64 || !input.AsSpan(0, 8).SequenceEqual("ONEMCKPT"u8))
+        {
+            return input;
+        }
+
+        byte[] f = (byte[])input.Clone();
+        ulong manifestLength = System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(f.AsSpan(24));
+        if (manifestLength > (ulong)(f.Length - 64))
+        {
+            manifestLength = (ulong)(f.Length - 64);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(f.AsSpan(24), manifestLength);
+        }
+
+        ulong dataOffset = (64 + manifestLength + 63) / 64 * 64;
+        if (dataOffset > (ulong)f.Length)
+        {
+            return f;
+        }
+
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(f.AsSpan(8), 1);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(f.AsSpan(12), 0);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(f.AsSpan(16), 64);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(f.AsSpan(32), dataOffset);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(f.AsSpan(40), (ulong)f.Length - dataOffset);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(f.AsSpan(48), (ulong)f.Length);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(f.AsSpan(56), 0);
+        return f;
+    }
+
+    private static void FuzzCheckpoint(ReadOnlySpan<byte> input)
+    {
+        byte[] raw = input.ToArray();
+        byte[] repaired = RepairHeader(raw);
+        for (int c = 0; c < CheckpointConfigs; c++)
+        {
+            TryCheckpoint(raw, c);
+            if (!ReferenceEquals(repaired, raw))
+            {
+                TryCheckpoint(repaired, c);
+            }
+        }
+    }
+
+    private static void TryCheckpoint(byte[] bytes, int config)
+    {
+        (NnModule model, Optimizer? opt) = CheckpointConfig(config);
+        using (model)
+        using (opt)
+        {
+            try
+            {
+                Checkpoint.Load(new MemoryStream(bytes), model, opt);
+                // Whatever loads must save, and what it saves must load into a fresh pair.
+                using var ms = new MemoryStream();
+                Checkpoint.Save(ms, model, opt);
+                (NnModule again, Optimizer? opt2) = CheckpointConfig(config);
+                using (again)
+                using (opt2)
+                {
+                    Checkpoint.Load(new MemoryStream(ms.ToArray()), again, opt2);
+                }
+            }
+            catch (CheckpointException)
+            {
+                // Rejecting bad input is the expected outcome.
+            }
         }
     }
 

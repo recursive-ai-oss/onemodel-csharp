@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+    <ProjectReference Include="../../src/OneModel.Training/OneModel.Training.csproj" />
     <EmbeddedResource Include="../../testdata/graphs/mlp.onnx" LogicalName="mlp.onnx" />
     <EmbeddedResource Include="../../testdata/graphs/reference.json" LogicalName="reference.json" />
     <EmbeddedResource Include="../../testdata/graphs/shape_ops.onnx" LogicalName="shape_ops.onnx" />

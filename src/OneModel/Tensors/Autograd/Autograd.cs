@@ -38,6 +38,46 @@ public enum OpKind
     Flip,
     /// <summary>View: one index along one axis, removing it. Ints = [axis, index].</summary>
     Select,
+    /// <summary>GELU. Ints = [0 erf form, 1 tanh form]. Saves the input.</summary>
+    Gelu,
+    /// <summary>Logistic sigmoid. Saves the output.</summary>
+    Sigmoid,
+    /// <summary>Hyperbolic tangent. Saves the output.</summary>
+    Tanh,
+    /// <summary>Sum over all elements (Ints[0] = -1) or one axis (Ints = [axis, keepDim]).</summary>
+    Sum,
+    /// <summary>Mean over all elements (Ints[0] = -1) or one axis (Ints = [axis, keepDim]).</summary>
+    Mean,
+    /// <summary>Softmax over the last axis. Saves the output.</summary>
+    Softmax,
+    /// <summary>Log-softmax over the last axis. Saves the output.</summary>
+    LogSoftmax,
+    /// <summary>Layer normalization over the last axis. Inputs x, gamma, beta. Saves x, gamma, mean, 1/std. Floats = [epsilon].</summary>
+    LayerNorm,
+    /// <summary>Batch normalization of an NCHW tensor. Inputs x, gamma, beta. Saves x, gamma, mean, 1/std. Ints = [training].</summary>
+    BatchNorm,
+    /// <summary>2-D convolution. Inputs x, weight, bias. Saves x and weight.</summary>
+    Conv2d,
+    /// <summary>2-D average pooling. Ints = [kernelH, kernelW, strideH, strideW, padH, padW, countIncludePad].</summary>
+    AvgPool2d,
+    /// <summary>Concatenation along Ints[0].</summary>
+    Concat,
+    /// <summary>Row gather from a table. Saves the index tensor. Ints = [paddingIndex or -1].</summary>
+    Embedding,
+    /// <summary>Negative log-likelihood of class indices under log-probabilities. Ints = [mean, ignoreIndex].</summary>
+    NllLoss,
+    /// <summary>Scaled dot-product attention over [batch, heads, length, headDim]. Saves q, k, v and the mask (slots 0-3; the mask slot is empty without one). Floats = [scale].</summary>
+    Attention,
+    /// <summary>One direction of one LSTM layer over a sequence (PyTorch gate order i, f, g, o). Inputs x, wIh, wHh, bIh, bHh, h0, c0. Ints = [reverse, T, B, I, H]. See <see cref="Ops.LstmLayer"/> for the slots.</summary>
+    Lstm,
+    /// <summary>One direction of one GRU layer over a sequence (r, z, n). Inputs x, wIh, wHh, bIh, bHh, h0. Ints = [reverse, T, B, I, H]. See <see cref="Ops.GruLayer"/> for the slots.</summary>
+    Gru,
+    /// <summary>Connectionist temporal classification loss per batch item. Input log-probabilities [T, B, C]. Ints = [blank, zeroInfinity, reduction, B, inputLengths.., targetLengths.., targets..].</summary>
+    CtcLoss,
+    /// <summary>2-D transposed convolution. Inputs x, weight, bias. Saves x and weight. Ints as Conv2d: [strideH, strideW, padTop, padLeft, padBottom, padRight, dilH, dilW, groups].</summary>
+    ConvTranspose2d,
+    /// <summary>2-D resize of an NCHW tensor (nearest or bilinear). Ints = [mode, alignCorners, outH, outW].</summary>
+    Resize2d,
 }
 
 /// <summary>
@@ -67,6 +107,9 @@ public sealed class AutogradMeta
 
     /// <summary>The accumulated gradient of a leaf; empty until a backward pass writes it. The engine owns the accumulation.</summary>
     public Tensor Grad { get; set; }
+
+    /// <summary>The tracer's value for this tensor while a trace is recording, else null.</summary>
+    internal object? Trace { get; set; }
 }
 
 /// <summary>
@@ -83,7 +126,19 @@ public static class GradMode
     public static bool IsEnabled => !s_disabled;
 
     /// <summary>Disables recording on this thread until the returned scope is disposed.</summary>
+    /// <exception cref="TraceException">A trace is recording on this thread: skipping recording there would silently freeze the values computed inside the scope into the traced graph.</exception>
     public static NoGradScope NoGrad()
+    {
+        if (TraceContext.Current is not null)
+        {
+            throw new TraceException(TraceErrorKind.NoGradInTrace, "GradMode.NoGrad() was entered while tracing: operations inside it would not be recorded, so their results would be frozen into the graph as constants. Leave it out; traced graphs have no gradients.");
+        }
+
+        return NoGradInternal();
+    }
+
+    // The library's own scratch work (broadcast views, copies inside an operation) must not be recorded, trace or not.
+    internal static NoGradScope NoGradInternal()
     {
         bool prev = s_disabled;
         s_disabled = true;

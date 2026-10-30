@@ -23,6 +23,14 @@ public sealed class BackwardRecord
     private long[] _ints = [];
     private double[] _floats = [];
 
+    // Engine state for one backward pass: the gradient that has arrived at this record's output, and the pass that last visited it.
+    internal Tensor PendingGrad;
+    internal int VisitMark;
+    internal int Pending;
+
+    /// <summary>True after <see cref="Release"/>: the saved tensors are gone, so backward through this record is no longer possible.</summary>
+    public bool IsReleased { get; private set; }
+
     private BackwardRecord(OpKind op, AutogradMeta?[] inputs, Shape[] shapes, DType[] types, int savedSlots)
     {
         Op = op;
@@ -48,7 +56,27 @@ public sealed class BackwardRecord
             types[i] = inputs[i].DType;
         }
 
-        return new BackwardRecord(op, metas, shapes, types, savedSlots);
+        var rec = new BackwardRecord(op, metas, shapes, types, savedSlots);
+        if (TraceContext.Current is not null)
+        {
+            rec.TraceInputs = inputs.ToArray();
+        }
+
+        return rec;
+    }
+
+    /// <summary>The inputs as passed to <see cref="Create"/>, kept only while a trace records (the tracer needs the tensors, not just their gradient edges).</summary>
+    internal Tensor[]? TraceInputs { get; private set; }
+
+    /// <summary>Inputs the operation does not differentiate through (index tensors, a mask, running statistics), for the tracer. No effect outside a trace.</summary>
+    internal Tensor[]? TraceExtras { get; private set; }
+
+    internal void AddTraceExtras(params ReadOnlySpan<Tensor> extras)
+    {
+        if (TraceContext.Current is not null)
+        {
+            TraceExtras = extras.ToArray();
+        }
     }
 
     /// <summary>The operation.</summary>
@@ -98,11 +126,17 @@ public sealed class BackwardRecord
 
     /// <summary>Makes <paramref name="output"/> the result of this record: returns a handle to the same data that requires a gradient and points here.</summary>
     public Tensor Attach(in Tensor output, int outputIndex = 0) =>
-        output.WithAutograd(new AutogradMeta(true, this, outputIndex));
+        TraceContext.Current is { } sink
+            ? sink.Attach(this, output, outputIndex)
+            : output.WithAutograd(new AutogradMeta(true, this, outputIndex));
+
+    /// <summary>The record's saved tensors, or null if none, as a span for the engine and for composite operations.</summary>
+    internal ReadOnlySpan<SavedTensor> SavedSlots => _saved;
 
     /// <summary>Frees the tensors the record owns. Call after backward has run (or when the graph is dropped).</summary>
     public void Release()
     {
+        IsReleased = true;
         for (int i = 0; i < _saved.Length; i++)
         {
             if (_saved[i].Owned)

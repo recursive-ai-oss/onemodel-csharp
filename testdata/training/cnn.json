@@ -1,0 +1,198 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261031,
+ "tensors": {
+  "in.x": {
+   "shape": [
+    64,
+    1,
+    12,
+    12
+   ],
+   "offset": 0
+  },
+  "in.y": {
+   "shape": [
+    64
+   ],
+   "offset": 9216
+  },
+  "in.order": {
+   "shape": [
+    60,
+    8
+   ],
+   "offset": 9280
+  },
+  "in.c1w": {
+   "shape": [
+    4,
+    1,
+    3,
+    3
+   ],
+   "offset": 9760
+  },
+  "in.c1b": {
+   "shape": [
+    4
+   ],
+   "offset": 9796
+  },
+  "in.bn1g": {
+   "shape": [
+    4
+   ],
+   "offset": 9800
+  },
+  "in.bn1b": {
+   "shape": [
+    4
+   ],
+   "offset": 9804
+  },
+  "in.c2w": {
+   "shape": [
+    8,
+    4,
+    3,
+    3
+   ],
+   "offset": 9808
+  },
+  "in.c2b": {
+   "shape": [
+    8
+   ],
+   "offset": 10096
+  },
+  "in.bn2g": {
+   "shape": [
+    8
+   ],
+   "offset": 10104
+  },
+  "in.bn2b": {
+   "shape": [
+    8
+   ],
+   "offset": 10112
+  },
+  "in.fcw": {
+   "shape": [
+    5,
+    72
+   ],
+   "offset": 10120
+  },
+  "in.fcb": {
+   "shape": [
+    5
+   ],
+   "offset": 10480
+  },
+  "out.loss": {
+   "shape": [
+    60
+   ],
+   "offset": 10485
+  },
+  "out.gradnorm": {
+   "shape": [
+    60
+   ],
+   "offset": 10545
+  },
+  "out.c1w": {
+   "shape": [
+    4,
+    1,
+    3,
+    3
+   ],
+   "offset": 10605
+  },
+  "out.c1b": {
+   "shape": [
+    4
+   ],
+   "offset": 10641
+  },
+  "out.bn1g": {
+   "shape": [
+    4
+   ],
+   "offset": 10645
+  },
+  "out.bn1b": {
+   "shape": [
+    4
+   ],
+   "offset": 10649
+  },
+  "out.c2w": {
+   "shape": [
+    8,
+    4,
+    3,
+    3
+   ],
+   "offset": 10653
+  },
+  "out.c2b": {
+   "shape": [
+    8
+   ],
+   "offset": 10941
+  },
+  "out.bn2g": {
+   "shape": [
+    8
+   ],
+   "offset": 10949
+  },
+  "out.bn2b": {
+   "shape": [
+    8
+   ],
+   "offset": 10957
+  },
+  "out.fcw": {
+   "shape": [
+    5,
+    72
+   ],
+   "offset": 10965
+  },
+  "out.fcb": {
+   "shape": [
+    5
+   ],
+   "offset": 11325
+  },
+  "out.rm1": {
+   "shape": [
+    4
+   ],
+   "offset": 11330
+  },
+  "out.rv1": {
+   "shape": [
+    4
+   ],
+   "offset": 11334
+  },
+  "out.rm2": {
+   "shape": [
+    8
+   ],
+   "offset": 11338
+  },
+  "out.rv2": {
+   "shape": [
+    8
+   ],
+   "offset": 11346
+  }
+ }
+}

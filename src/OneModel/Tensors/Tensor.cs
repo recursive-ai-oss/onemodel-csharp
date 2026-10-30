@@ -266,6 +266,13 @@ public readonly partial struct Tensor : IDisposable
     /// <exception cref="StaleTensorException">The storage was released.</exception>
     public ReadOnlySpan<T> Data<T>() where T : unmanaged
     {
+        RejectIfTraced(TraceErrorKind.DataDependent, "Data<T>()");
+        return InternalData<T>();
+    }
+
+    // The library's own reads: operations run on traced tensors while recording, users' reads of them are rejected above.
+    internal ReadOnlySpan<T> InternalData<T>() where T : unmanaged
+    {
         CheckType<T>();
         if (!IsContiguous)
         {
@@ -284,6 +291,7 @@ public readonly partial struct Tensor : IDisposable
     /// <inheritdoc cref="Data{T}"/>
     public Span<T> MutableData<T>() where T : unmanaged
     {
+        RejectIfTraced(TraceErrorKind.InPlaceMutation, "MutableData<T>()");
         CheckType<T>();
         if (!IsContiguous)
         {
@@ -300,6 +308,12 @@ public readonly partial struct Tensor : IDisposable
     /// <inheritdoc cref="Data{T}"/>
     public ReadOnlySpan<T> Storage<T>() where T : unmanaged
     {
+        RejectIfTraced(TraceErrorKind.DataDependent, "Storage<T>()");
+        return InternalStorage<T>();
+    }
+
+    internal ReadOnlySpan<T> InternalStorage<T>() where T : unmanaged
+    {
         CheckType<T>();
         return _buffer!.GetSpan<T>(_generation);
     }
@@ -308,6 +322,7 @@ public readonly partial struct Tensor : IDisposable
     /// <inheritdoc cref="Data{T}"/>
     public Span<T> MutableStorage<T>() where T : unmanaged
     {
+        RejectIfTraced(TraceErrorKind.InPlaceMutation, "MutableStorage<T>()");
         CheckType<T>();
         Span<T> s = _buffer!.GetSpan<T>(_generation);
         _buffer.Touch();
@@ -318,6 +333,7 @@ public readonly partial struct Tensor : IDisposable
     /// <exception cref="ArgumentException">Wrong index count, or an index outside its dimension.</exception>
     public T Get<T>(params ReadOnlySpan<int> index) where T : unmanaged
     {
+        RejectIfTraced(TraceErrorKind.DataDependent, "Get<T>()");
         CheckType<T>();
         ThrowIfBlocked();
         return _buffer!.GetSpan<T>(_generation)[ElementOffset(index)];
@@ -327,6 +343,7 @@ public readonly partial struct Tensor : IDisposable
     /// <inheritdoc cref="Get{T}"/>
     public void Set<T>(T value, params ReadOnlySpan<int> index) where T : unmanaged
     {
+        RejectIfTraced(TraceErrorKind.InPlaceMutation, "Set<T>()");
         CheckType<T>();
         ThrowIfBlocked();
         _buffer!.GetSpan<T>(_generation)[ElementOffset(index)] = value;
@@ -374,6 +391,8 @@ public readonly partial struct Tensor : IDisposable
     /// <summary>The accumulated gradient (empty if none).</summary>
     public Tensor Grad => _meta?.Grad ?? default;
 
+    internal int Generation => _generation;
+
     /// <summary>
     /// Returns a handle to the same data that is a gradient leaf (<paramref name="requiresGrad"/> true) or is not tracked (false).
     /// Because a tensor is a value, the flag lives on the returned handle; keep and use that handle.
@@ -391,7 +410,20 @@ public readonly partial struct Tensor : IDisposable
     }
 
     /// <summary>A handle to the same data with no autograd state.</summary>
-    public Tensor Detach() => WithAutograd(null);
+    public Tensor Detach() => IsTraced ? this : WithAutograd(null);
+
+    /// <summary>True while a trace is recording on this thread and this tensor is one of its values.</summary>
+    internal bool IsTraced => _meta?.Trace is { } t && TraceContext.Current is { } sink && sink.Owns(t);
+
+    // Reads and writes of a traced tensor's data by user code are refused: what they would see is the example run's data, and anything
+    // decided from it (a branch, a loop count, a copy into another tensor) would be frozen into the graph.
+    internal void RejectIfTraced(TraceErrorKind kind, string what)
+    {
+        if (_meta?.Trace is { } t && TraceContext.Current is { } sink && sink.Owns(t))
+        {
+            sink.Reject(kind, this, what);
+        }
+    }
 
     internal Tensor WithAutograd(AutogradMeta? meta) =>
         new(_buffer!, _generation, _offset, _shape, _strides, _dtype, _block, meta);

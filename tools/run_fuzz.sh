@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs one libFuzzer target against a reader for a fixed time, in a single process, with the Checked build.
 #
-#   run_fuzz.sh <workdir> <target: onnx|tensor|format> <seconds> <seed-dir>...
+#   run_fuzz.sh <workdir> <target: onnx|tensor|format|checkpoint> <seconds> <seed-dir>...
 #
 # <workdir> must already hold what setup_fuzz.sh prepared. Run from the repository root with `dotnet` on PATH. The run stops
 # early if ~/WORKER-BENCH.lock appears without "gpu-train" in it, because a timing run is under way. Findings (crash-*,
@@ -13,14 +13,22 @@ out="$work/$target"
 rm -rf "$out"; mkdir -p "$out/corpus" "$out/findings"
 
 dotnet publish fuzz/OneModel.Fuzz -c Checked -o "$out/pub" -v quiet -clp:NoSummary >/dev/null || exit 1
+if [ "$target" = checkpoint ]; then
+  # The seed is written before instrumentation: instrumented code only runs under the fuzzer.
+  dotnet "$out/pub/RecursiveAI.OneModel.Fuzz.dll" seed-checkpoint "$out/seeds" || exit 1
+  DOTNET_ROLL_FORWARD=Major "$work/tools/sharpfuzz" "$out/pub/RecursiveAI.OneModel.Training.dll" >/dev/null || exit 1
+fi
 DOTNET_ROLL_FORWARD=Major "$work/tools/sharpfuzz" "$out/pub/RecursiveAI.OneModel.dll" >/dev/null || exit 1
 
 i=0
 for d in "$@"; do
   while IFS= read -r f; do
     i=$((i+1)); cp "$f" "$out/corpus/seed-$i"
-  done < <(find "$d" -type f \( -name '*.onnx' -o -name '*.pb' -o -name '*.onemodel' \) -size -256k)
+  done < <(find "$d" -type f \( -name '*.onnx' -o -name '*.pb' -o -name '*.onemodel' -o -name '*.ckpt' \) -size -256k)
 done
+if [ -d "$out/seeds" ]; then
+  for f in "$out"/seeds/*; do i=$((i+1)); cp "$f" "$out/corpus/gen-$i"; done
+fi
 echo "seeds: $i"
 
 export ONEMODEL_FUZZ_EXTDIR="$repo/testdata/onnx/external"
