@@ -2,6 +2,7 @@ using RecursiveAI.OneModel.Graph.Operators.Activation;
 using RecursiveAI.OneModel.Graph.Operators.Bitwise;
 using RecursiveAI.OneModel.Graph.Operators.Loss;
 using RecursiveAI.OneModel.Graph.Operators.Scatter;
+using RecursiveAI.OneModel.Graph.Operators.Transformer;
 
 namespace RecursiveAI.OneModel.Graph.Operators;
 
@@ -62,6 +63,14 @@ internal static class CoverageTable
         LrnOp.Def,
         DetOp.Def,
         EinsumOp.Def,
+
+        // Spatial operators.
+        LpPoolOp.Def,
+        MaxUnpoolOp.Def,
+        Col2ImOp.Def,
+
+        // Attention.
+        OnnxAttentionOp.Def,
 
         // Losses.
         NllLossOp.Nll,
