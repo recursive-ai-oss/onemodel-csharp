@@ -207,7 +207,11 @@ def main() -> None:
       "must be equal; shapes and element types must be equal.")
     w("- **Status.** `unsupported-op`: no kernel for the operator at that opset, or the operator rejects an attribute value or rank it "
       "does not handle. `unsupported-type`: an element type or value kind the library does not have (string, 4-bit, 8-bit float, "
-      "sequence, optional, map). `not-exact`: exact mode only, an operator without an exact kernel. `fail`: anything else that is not a pass.")
+      "map; sequences and optionals of tensors are supported). `not-exact`: exact mode only, an operator without an exact kernel. `fail`: anything else that is not a pass.")
+    w("- **Reading the gaps.** Cases at opset 6 (the legacy pytorch models and a few operator versions) are below the supported "
+      "range, which starts at opset 7. The rest are listed by cause in the operator table: element types the tensor layer does not have, "
+      "the `ai.onnx.ml` and training domains, random-number operators and training modes, and the newest preview operators. "
+      "`known-diff` cases are explained in the runner (`ConformanceRunner.KnownDifferences`) and count as neither pass nor fail.")
     w("- **Attribution.** A node case counts under its only operator; a case with several operators (the `_expanded` "
       "function bodies) counts under the longest operator name its case name starts with.")
     w("")
