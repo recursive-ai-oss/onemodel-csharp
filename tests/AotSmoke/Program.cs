@@ -12,6 +12,7 @@ using RecursiveAI.OneModel.Graph;
 using RecursiveAI.OneModel.Onnx;
 using RecursiveAI.OneModel.Tensors;
 using RecursiveAI.OneModel.Training;
+using RecursiveAI.OneModel.Training.Data;
 
 // Calls the library from a NativeAOT binary: the tensor/kernel self-check, then a small model end to end (import, session, plan,
 // fast and exact runs) against the ONNX Runtime reference output stored with the model. CI fails on any trim or AOT warning when
@@ -279,6 +280,47 @@ foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
     if (!(dworst < 2e-2))
     {
         return 10;
+    }
+}
+
+{
+    // Data loading: the same batches from the calling thread and from two workers, hashed.
+    var images = new ImageExample[40];
+    for (int i = 0; i < images.Length; i++)
+    {
+        int w = 6 + (i * 7) % 19;
+        var px = new float[2 * 4 * w];
+        for (int k = 0; k < px.Length; k++)
+        {
+            px[k] = ((i + k) % 13) / 13f;
+        }
+
+        images[i] = new ImageExample(px, 2, 4, w, new[] { 1 + (i % 5), 2 + (i % 3) }, i % 4);
+    }
+
+    string LoaderHash(int workers)
+    {
+        var loader = new DataLoader<ImageExample, ImageBatch>(new ListDataset<ImageExample>(images), EpochSampler.Shuffled(images.Length, 6, 3),
+            new ImageBatchCollator(4, -1f, (Span<float> px, int c, int h, int w, ref SampleRng rng) => px[0] += rng.NextSingle()),
+            new DataLoaderOptions { Seed = 9, Workers = workers, Prefetch = 3 });
+        using IncrementalHash ih = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using BatchSequence<ImageBatch> seq = loader.Start(2, 20);
+        while (seq.TryNext(out ImageBatch? b))
+        {
+            ih.AppendData(MemoryMarshal.AsBytes(b.Images.Data<float>()));
+            ih.AppendData(MemoryMarshal.AsBytes(b.Targets.Data<int>()));
+            ih.AppendData(MemoryMarshal.AsBytes(b.Widths.Data<int>()));
+            b.Dispose();
+        }
+
+        return Convert.ToHexString(ih.GetHashAndReset());
+    }
+
+    string lh0 = LoaderHash(0), lh2 = LoaderHash(2);
+    Console.WriteLine($"data loader: 18 batches, hash {lh0[..16]}, workers 0 and 2 {(lh0 == lh2 ? "equal" : "DIFFER")}");
+    if (lh0 != lh2)
+    {
+        return 11;
     }
 }
 

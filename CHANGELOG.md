@@ -18,6 +18,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - The Training package is built and packed by CI and the release workflow beside the runtime; fuzz target `checkpoint`.
 - Differentiable recurrent layers (`Ops.LstmLayer`, `GruLayer`, and multi-layer, bidirectional, batch-first `Ops.Lstm` / `Ops.Gru` over `RnnLayer` weights in PyTorch's gate layout), `Ops.CtcLoss` (log-space forward-backward, reductions none/mean/sum, zero-infinity), `Ops.ConvTranspose2d` and `Ops.Resize2d` (nearest, bilinear, align corners), with backward through time (`docs/autograd.md` section 8).
 - `tools/rnn_oracle.py` and `testdata/autograd/{crnn,gru,decoder}.*`: PyTorch gradients for a CRNN with CTC loss, a bidirectional GRU and a transposed-convolution/resize decoder, matched to 1e-6 scaled.
+- Data loading in `RecursiveAI.OneModel.Training.Data` (`docs/data-loading.md`): `IDataset<T>` with list, concatenated, mapped and fixed-record file datasets; sequential, seeded-shuffle, weighted-mixing and width-bucketed samplers; `ImageBatchCollator` (padding to a width multiple, widths, CTC-style concatenated targets, seeded in-place augmentation into pooled tensors); `ImageTensors` for 8-bit gray and RGB pixels; and a prefetching `DataLoader` whose batch at step g depends only on (seed, g), whatever the worker count or prefetch depth, and resumes exactly at any step.
 
 ### Changed
 

@@ -21,6 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../OneModel/OneModel.csproj" />
   </ItemGroup>
 
