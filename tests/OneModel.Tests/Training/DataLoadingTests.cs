@@ -226,10 +226,13 @@ public class DataLoadingTests
             var bytes = new byte[4 + 10 * 6];
             for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)i;
             File.WriteAllBytes(path, bytes);
-            using var ds = new RecordFileDataset<int>(path, 6, (r, i) => r[0] * 1000 + i, headerBytes: 4);
-            Assert.Equal(10, ds.Count);
-            Assert.Equal((4 + 6 * 3) * 1000 + 3, ds.GetSample(3));
-            Assert.Throws<ArgumentOutOfRangeException>(() => ds.GetSample(10));
+            // Closed before the file is rewritten: Windows refuses to write a file another handle has open.
+            using (var ds = new RecordFileDataset<int>(path, 6, (r, i) => r[0] * 1000 + i, headerBytes: 4))
+            {
+                Assert.Equal(10, ds.Count);
+                Assert.Equal((4 + 6 * 3) * 1000 + 3, ds.GetSample(3));
+                Assert.Throws<ArgumentOutOfRangeException>(() => ds.GetSample(10));
+            }
             File.WriteAllBytes(path, new byte[11]);
             Assert.Throws<InvalidDataException>(() => new RecordFileDataset<int>(path, 6, (r, i) => 0));
         }
@@ -262,9 +265,15 @@ public class DataLoadingTests
             new DataLoaderOptions { Workers = 0 });
         using BatchSequence<ImageBatch> s = loader.Start();
         for (int i = 0; i < 400; i++) { s.TryNext(out ImageBatch? w); w.Dispose(); }
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++) { s.TryNext(out ImageBatch? b); b.Dispose(); }
-        long per = (GC.GetAllocatedBytesForCurrentThread() - before) / 100;
+        // The minimum over three windows: a late tier-up of a method by the JIT can allocate once on this thread while other
+        // tests load the machine, which is not the loader allocating per batch.
+        long per = long.MaxValue;
+        for (int window = 0; window < 3 && per != 0; window++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 100; i++) { s.TryNext(out ImageBatch? b); b.Dispose(); }
+            per = Math.Min(per, (GC.GetAllocatedBytesForCurrentThread() - before) / 100);
+        }
         Assert.Equal(0, per);
     }
 

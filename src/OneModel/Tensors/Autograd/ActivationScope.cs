@@ -41,7 +41,8 @@ public sealed class ActivationScope : IDisposable
 
     internal static void Resume(ActivationScope? s) => t_current = s;
 
-    internal static void Track(in Tensor t)
+    /// <summary>Hands a tensor the caller created (a mask, a constant) to the innermost open scope so it is released with the others. Does nothing when no scope is open or the tensor is empty.</summary>
+    public static void Track(in Tensor t)
     {
         ActivationScope? s = t_current;
         if (s is not null && !t.IsEmpty)

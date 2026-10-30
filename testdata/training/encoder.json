@@ -1,0 +1,480 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261031,
+ "tensors": {
+  "in.ids": {
+   "shape": [
+    96,
+    6
+   ],
+   "offset": 0
+  },
+  "in.y": {
+   "shape": [
+    96
+   ],
+   "offset": 576
+  },
+  "in.order": {
+   "shape": [
+    80,
+    16
+   ],
+   "offset": 672
+  },
+  "in.emb": {
+   "shape": [
+    11,
+    16
+   ],
+   "offset": 1952
+  },
+  "in.l0.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2128
+  },
+  "in.l0.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 2384
+  },
+  "in.l0.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2400
+  },
+  "in.l0.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 2656
+  },
+  "in.l0.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2672
+  },
+  "in.l0.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 2928
+  },
+  "in.l0.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2944
+  },
+  "in.l0.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 3200
+  },
+  "in.l0.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 3216
+  },
+  "in.l0.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 3232
+  },
+  "in.l0.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 3248
+  },
+  "in.l0.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 3760
+  },
+  "in.l0.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 3792
+  },
+  "in.l0.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 4304
+  },
+  "in.l0.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 4320
+  },
+  "in.l0.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 4336
+  },
+  "in.l1.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 4352
+  },
+  "in.l1.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 4608
+  },
+  "in.l1.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 4624
+  },
+  "in.l1.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 4880
+  },
+  "in.l1.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 4896
+  },
+  "in.l1.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 5152
+  },
+  "in.l1.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 5168
+  },
+  "in.l1.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 5424
+  },
+  "in.l1.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 5440
+  },
+  "in.l1.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 5456
+  },
+  "in.l1.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 5472
+  },
+  "in.l1.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 5984
+  },
+  "in.l1.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 6016
+  },
+  "in.l1.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 6528
+  },
+  "in.l1.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 6544
+  },
+  "in.l1.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 6560
+  },
+  "in.clsw": {
+   "shape": [
+    2,
+    16
+   ],
+   "offset": 6576
+  },
+  "in.clsb": {
+   "shape": [
+    2
+   ],
+   "offset": 6608
+  },
+  "out.loss": {
+   "shape": [
+    80
+   ],
+   "offset": 6610
+  },
+  "out.emb": {
+   "shape": [
+    11,
+    16
+   ],
+   "offset": 6690
+  },
+  "out.l0.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 6866
+  },
+  "out.l0.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 7122
+  },
+  "out.l0.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 7138
+  },
+  "out.l0.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 7394
+  },
+  "out.l0.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 7410
+  },
+  "out.l0.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 7666
+  },
+  "out.l0.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 7682
+  },
+  "out.l0.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 7938
+  },
+  "out.l0.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 7954
+  },
+  "out.l0.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 7970
+  },
+  "out.l0.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 7986
+  },
+  "out.l0.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 8498
+  },
+  "out.l0.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 8530
+  },
+  "out.l0.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 9042
+  },
+  "out.l0.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 9058
+  },
+  "out.l0.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 9074
+  },
+  "out.l1.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 9090
+  },
+  "out.l1.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 9346
+  },
+  "out.l1.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 9362
+  },
+  "out.l1.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 9618
+  },
+  "out.l1.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 9634
+  },
+  "out.l1.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 9890
+  },
+  "out.l1.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 9906
+  },
+  "out.l1.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 10162
+  },
+  "out.l1.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 10178
+  },
+  "out.l1.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 10194
+  },
+  "out.l1.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 10210
+  },
+  "out.l1.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 10722
+  },
+  "out.l1.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 10754
+  },
+  "out.l1.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 11266
+  },
+  "out.l1.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 11282
+  },
+  "out.l1.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 11298
+  },
+  "out.clsw": {
+   "shape": [
+    2,
+    16
+   ],
+   "offset": 11314
+  },
+  "out.clsb": {
+   "shape": [
+    2
+   ],
+   "offset": 11346
+  }
+ }
+}

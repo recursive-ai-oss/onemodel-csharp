@@ -10,7 +10,9 @@ internal sealed class OracleFile
 {
     private readonly Dictionary<string, (Shape Shape, float[] Data)> _items = new();
 
-    public static string DataDir([CallerFilePath] string file = "")
+    public static string DataDir([CallerFilePath] string file = "") => DataDir("autograd", file);
+
+    public static string DataDir(string set, string file)
     {
         string? dir = Path.GetDirectoryName(file);
         while (dir is not null && !File.Exists(Path.Combine(dir, "global.json")))
@@ -18,12 +20,12 @@ internal sealed class OracleFile
             dir = Path.GetDirectoryName(dir);
         }
 
-        return Path.Combine(dir ?? throw new InvalidOperationException("global.json not found"), "testdata", "autograd");
+        return Path.Combine(dir ?? throw new InvalidOperationException("global.json not found"), "testdata", set);
     }
 
-    public static OracleFile Load(string model)
+    public static OracleFile Load(string model, string set = "autograd", [CallerFilePath] string file = "")
     {
-        string basePath = Path.Combine(DataDir(), model);
+        string basePath = Path.Combine(DataDir(set, file), model);
         byte[] bin = File.ReadAllBytes(basePath + ".bin");
         float[] all = new float[bin.Length / 4];
         Buffer.BlockCopy(bin, 0, all, 0, bin.Length);
