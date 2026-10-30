@@ -65,7 +65,7 @@ public static partial class Ops
     {
         Tensor xc = Contig(x, out bool copied);
         Tensor r = NewOut(x.Shape, pool);
-        ReadOnlySpan<float> s = xc.Data<float>();
+        ReadOnlySpan<float> s = xc.InternalData<float>();
         Span<float> d = r.MutableData<float>();
         // The polynomial forms, in both modes: the lane loop and its scalar tail give the bits of Fn.GeluErf / Fn.GeluTanh.
         if (approximateTanh)
@@ -100,7 +100,7 @@ public static partial class Ops
         bool exact = TensorCompute.Exact;
         Tensor xc = Contig(x, out bool copied);
         Tensor r = NewOut(x.Shape, pool);
-        ReadOnlySpan<float> s = xc.Data<float>();
+        ReadOnlySpan<float> s = xc.InternalData<float>();
         Span<float> d = r.MutableData<float>();
         if (op == OpKind.Sigmoid)
         {
@@ -147,7 +147,7 @@ public static partial class Ops
     private static Tensor Reduce(OpKind op, in Tensor x, int axis, bool keepDim, BufferPool? pool, bool all = false)
     {
         Tensor xc = Contig(x, out bool copied);
-        ReadOnlySpan<float> s = xc.Data<float>();
+        ReadOnlySpan<float> s = xc.InternalData<float>();
         int outer = 1, n = s.Length, inner = 1, ax = -1;
         Shape os = default;
         if (!all)

@@ -26,7 +26,7 @@ public static partial class Ops
         Tensor r = NewOut(x.Shape, pool);
         int cols = x.Shape[ax];
         int rows = cols == 0 ? 0 : x.Length / cols;
-        Kernels.Softmax.Rows(TensorCompute.Exact, TensorCompute.Isa, xc.Data<float>(), r.MutableData<float>(), rows, cols, cols, cols);
+        Kernels.Softmax.Rows(TensorCompute.Exact, TensorCompute.Isa, xc.InternalData<float>(), r.MutableData<float>(), rows, cols, cols, cols);
         Free(xc, copied);
         if (!Recording(x))
         {
@@ -57,7 +57,7 @@ public static partial class Ops
         Tensor r = NewOut(x.Shape, pool);
         int cols = x.Shape[ax];
         int rows = cols == 0 ? 0 : x.Length / cols;
-        ReadOnlySpan<float> s = xc.Data<float>();
+        ReadOnlySpan<float> s = xc.InternalData<float>();
         Span<float> d = r.MutableData<float>();
         for (int row = 0; row < rows; row++)
         {
@@ -120,8 +120,8 @@ public static partial class Ops
         bool rec = Recording(x, gamma, beta);
         Tensor mean = rec ? Tensor.Create(DType.F32, Shape.Create(rows), pool) : default;
         Tensor inv = rec ? Tensor.Create(DType.F32, Shape.Create(rows), pool) : default;
-        NormKernels.Rows(TensorCompute.Isa, xc.Data<float>(), r.MutableData<float>(), 0, rows, cols, false, epsilon,
-            gc.Data<float>(), 1f, bc.Data<float>(), true, 0f,
+        NormKernels.Rows(TensorCompute.Isa, xc.InternalData<float>(), r.MutableData<float>(), 0, rows, cols, false, epsilon,
+            gc.InternalData<float>(), 1f, bc.InternalData<float>(), true, 0f,
             rec ? mean.MutableData<float>() : default, rec ? inv.MutableData<float>() : default);
         Free(bc, bcopied);
         if (!rec)
@@ -180,7 +180,7 @@ public static partial class Ops
 
         Tensor xc = Contig(x, out bool xcopied), gc = Contig(gamma, out bool gcopied), bc = Contig(beta, out bool bcopied);
         Tensor mean = Tensor.Create(DType.F32, Shape.Create(c), pool), inv = Tensor.Create(DType.F32, Shape.Create(c), pool);
-        ReadOnlySpan<float> xv = xc.Data<float>(), gam = gc.Data<float>(), bet = bc.Data<float>();
+        ReadOnlySpan<float> xv = xc.InternalData<float>(), gam = gc.InternalData<float>(), bet = bc.InternalData<float>();
         Span<float> mu = mean.MutableData<float>(), iv = inv.MutableData<float>();
         if (training)
         {
@@ -219,7 +219,7 @@ public static partial class Ops
         }
         else
         {
-            ReadOnlySpan<float> rm = runningMean.Data<float>(), rv = runningVar.Data<float>();
+            ReadOnlySpan<float> rm = runningMean.InternalData<float>(), rv = runningVar.InternalData<float>();
             for (int ch = 0; ch < c; ch++)
             {
                 mu[ch] = rm[ch];
@@ -253,6 +253,7 @@ public static partial class Ops
         }
 
         BackwardRecord br = BackwardRecord.Create(OpKind.BatchNorm, 4, x, gamma, beta);
+        br.AddTraceExtras(runningMean, runningVar);
         SaveContig(br, 0, xc, xcopied);
         SaveContig(br, 1, gc, gcopied);
         br.Save(2, mean, owned: true);
@@ -313,8 +314,8 @@ public static partial class Ops
         Tensor xc = Contig(x, out bool xcopied), wc = Contig(weight, out bool wcopied);
         Tensor bc = bias.IsEmpty ? default : Contig(bias, out _);
         Tensor r = NewOut(Shape.Create(s.N, s.Cout, s.OutH, s.OutW), pool);
-        Conv.Run(TensorCompute.KMode, TensorCompute.Path, s, xc.Data<float>(), wc.Data<float>(), r.MutableData<float>(), TensorCompute.Threads,
-            bc.IsEmpty ? default : bc.Data<float>());
+        Conv.Run(TensorCompute.KMode, TensorCompute.Path, s, xc.InternalData<float>(), wc.InternalData<float>(), r.MutableData<float>(), TensorCompute.Threads,
+            bc.IsEmpty ? default : bc.InternalData<float>());
         if (!bias.IsEmpty && !bias.IsContiguous)
         {
             bc.Dispose();
@@ -356,7 +357,7 @@ public static partial class Ops
         Tensor xc = Contig(x, out bool copied);
         Tensor r = NewOut(Shape.Create(x.Shape[0], x.Shape[1], oh, ow), pool);
         Span<long> ints = [p.KernelH, p.KernelW, p.StrideH, p.StrideW, p.PadH, p.PadW, countIncludePad ? 1 : 0];
-        ReadOnlySpan<float> s = xc.Data<float>();
+        ReadOnlySpan<float> s = xc.InternalData<float>();
         Span<float> d = r.MutableData<float>();
         int planes = x.Shape[0] * x.Shape[1];
         for (int pl = 0; pl < planes; pl++)
@@ -442,12 +443,12 @@ public static partial class Ops
         first.Dimensions.CopyTo(dims);
         dims[ax] = total;
         Tensor r = NewOut(Shape.Create(dims.Slice(0, first.Rank)), pool);
-        using (GradMode.NoGrad())
+        using (GradMode.NoGradInternal())
         {
             int start = 0;
             foreach (Tensor t in parts)
             {
-                r.Slice(ax, start, start + t.Shape[ax]).CopyFrom(t);
+                r.Slice(ax, start, start + t.Shape[ax]).CopyFromCore(t);
                 start += t.Shape[ax];
             }
         }
@@ -498,7 +499,7 @@ public static partial class Ops
         ids.Shape.Dimensions.CopyTo(dims);
         dims[ids.Rank] = dim;
         Tensor r = NewOut(Shape.Create(dims.Slice(0, ids.Rank + 1)), pool);
-        ReadOnlySpan<float> tv = tc.Data<float>();
+        ReadOnlySpan<float> tv = tc.InternalData<float>();
         Span<float> d = r.MutableData<float>();
         for (int i = 0; i < ids.Length; i++)
         {
@@ -519,7 +520,7 @@ public static partial class Ops
         }
 
         Free(tc, tcopied);
-        if (!Recording(table))
+        if (!Recording(table, ids))
         {
             if (!ids.IsContiguous)
             {
@@ -530,6 +531,7 @@ public static partial class Ops
         }
 
         BackwardRecord rec = BackwardRecord.Create(OpKind.Embedding, 1, table);
+        rec.AddTraceExtras(ids);
         rec.Save(0, ic, owned: !ids.IsContiguous);
         rec.SetInts(paddingIndex);
         return rec.Attach(r);
@@ -560,7 +562,7 @@ public static partial class Ops
         int rows = logProbs.Shape[0], cols = logProbs.Shape[1];
         Tensor lc = Contig(logProbs, out bool copied);
         Tensor tc = targets.IsContiguous ? targets : targets.Clone();
-        ReadOnlySpan<float> lv = lc.Data<float>();
+        ReadOnlySpan<float> lv = lc.InternalData<float>();
         double sum = 0;
         int count = 0;
         for (int i = 0; i < rows; i++)
@@ -684,9 +686,9 @@ public static partial class Ops
             sh.MaskBatchStride = 0;
         }
 
-        AttentionDriver.Run(TensorCompute.Exact, TensorCompute.Path, sh, qc.Data<float>(), kc.Data<float>(), vc.Data<float>(),
-            mc.IsEmpty ? default : mc.Data<float>(), r.MutableData<float>(), TensorCompute.Threads);
-        if (!Recording(q, k, v))
+        AttentionDriver.Run(TensorCompute.Exact, TensorCompute.Path, sh, qc.InternalData<float>(), kc.InternalData<float>(), vc.InternalData<float>(),
+            mc.IsEmpty ? default : mc.InternalData<float>(), r.MutableData<float>(), TensorCompute.Threads);
+        if (!Recording(q, k, v, mask))
         {
             Free(qc, qcopied);
             Free(kc, kcopied);
@@ -700,6 +702,7 @@ public static partial class Ops
         }
 
         BackwardRecord rec = BackwardRecord.Create(OpKind.Attention, 4, q, k, v);
+        rec.AddTraceExtras(mask);
         SaveContig(rec, 0, qc, qcopied);
         SaveContig(rec, 1, kc, kcopied);
         SaveContig(rec, 2, vc, vcopied);

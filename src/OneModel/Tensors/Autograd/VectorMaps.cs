@@ -10,7 +10,7 @@ internal static class VectorMaps
     public static Tensor Map2<TOp>(TOp op, in Tensor a, in Tensor b, BufferPool? pool = null, bool? exact = null) where TOp : struct, IFloatBinary
     {
         Tensor r = Tensor.Create(DType.F32, a.Shape, pool);
-        TrainElementwise.Binary(TensorCompute.Path, exact ?? TensorCompute.Exact, op, a.Data<float>(), b.Data<float>(), r.MutableData<float>(), r.Length);
+        TrainElementwise.Binary(TensorCompute.Path, exact ?? TensorCompute.Exact, op, a.InternalData<float>(), b.InternalData<float>(), r.MutableData<float>(), r.Length);
         return r;
     }
 

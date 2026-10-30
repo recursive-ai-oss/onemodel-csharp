@@ -94,7 +94,7 @@ public static partial class Ops
         try
         {
             // wt[g][(co * KH + ky) * KW + kx][ci] = w[g * cinG + ci][co][ky][kx]: the group's weights as a taps x cinG matrix.
-            ReadOnlySpan<float> wv = wc.Data<float>();
+            ReadOnlySpan<float> wv = wc.InternalData<float>();
             Span<float> wtv = wt.MutableData<float>();
             for (int g = 0; g < p.Groups; g++)
             {
@@ -107,7 +107,7 @@ public static partial class Ops
                 }
             }
 
-            ConvTransposeKernel.Run(TensorCompute.KMode, TensorCompute.Path, s, xc.Data<float>(), wtv, bc.IsEmpty ? default : bc.Data<float>(),
+            ConvTransposeKernel.Run(TensorCompute.KMode, TensorCompute.Path, s, xc.InternalData<float>(), wtv, bc.IsEmpty ? default : bc.InternalData<float>(),
                 r.MutableData<float>(), cols.MutableData<float>(), TensorCompute.Threads);
         }
         finally
@@ -156,7 +156,7 @@ public static partial class Ops
         Tensor xc = Contig(x, out bool copied);
         int planes = x.Shape[0] * x.Shape[1], h = x.Shape[2], w = x.Shape[3];
         Tensor r = NewOut(Shape.Create(x.Shape[0], x.Shape[1], outH, outW), pool);
-        ReadOnlySpan<float> src = xc.Data<float>();
+        ReadOnlySpan<float> src = xc.InternalData<float>();
         Span<float> dst = r.MutableData<float>();
         bool align = alignCorners && mode == InterpolationMode.Bilinear;
         for (int pl = 0; pl < planes; pl++)

@@ -100,7 +100,7 @@ public static partial class Ops
         {
             ReadOnlySpan<int> tgt = targets.Slice(offset, targetLengths[b]);
             offset += targetLengths[b];
-            double nll = CtcLossMath.Alpha(lpc.Data<float>(), steps, batch, classes, b, inputLengths[b], tgt, blank, alpha);
+            double nll = CtcLossMath.Alpha(lpc.InternalData<float>(), steps, batch, classes, b, inputLengths[b], tgt, blank, alpha);
             per[b] = double.IsPositiveInfinity(nll) && zeroInfinity ? 0.0 : nll;
         }
 

@@ -90,7 +90,7 @@ internal static partial class BackwardOps
             {
                 ReadOnlySpan<long> p = r.Ints;
                 Tensor dx = Tensor.Zeros(DType.F32, r.InputShape(0));
-                dx.Slice((int)p[0], (int)p[1], (int)p[2], (int)p[3]).CopyFrom(g);
+                dx.Slice((int)p[0], (int)p[1], (int)p[2], (int)p[3]).CopyFromCore(g);
                 Engine.Emit(r, 0, dx, owned: true);
                 break;
             }
@@ -99,7 +99,7 @@ internal static partial class BackwardOps
             {
                 ReadOnlySpan<long> p = r.Ints;
                 Tensor dx = Tensor.Zeros(DType.F32, r.InputShape(0));
-                dx.Select((int)p[0], (int)p[1]).CopyFrom(g);
+                dx.Select((int)p[0], (int)p[1]).CopyFromCore(g);
                 Engine.Emit(r, 0, dx, owned: true);
                 break;
             }
@@ -230,7 +230,7 @@ internal static partial class BackwardOps
 
         Tensor scratch = Tensor.Create(DType.F64, target, zero: true);
         Span<double> sum = scratch.MutableData<double>();
-        ReadOnlySpan<float> src = g.Data<float>();
+        ReadOnlySpan<float> src = g.InternalData<float>();
         Span<int> idx = stackalloc int[Shape.MaxRank];
         int inner = rank == 0 ? 1 : g.Shape[rank - 1];
         int innerStride = rank == 0 ? 0 : tstride[rank - 1];
@@ -273,7 +273,7 @@ internal static partial class BackwardOps
     {
         Tensor r = Tensor.Create(DType.F32, a.Shape);
         Span<float> d = r.MutableData<float>();
-        ReadOnlySpan<float> x = a.Data<float>(), y = b.Data<float>();
+        ReadOnlySpan<float> x = a.InternalData<float>(), y = b.InternalData<float>();
         for (int i = 0; i < d.Length; i++)
         {
             d[i] = f(x[i], y[i]);
@@ -287,8 +287,8 @@ internal static partial class BackwardOps
         Tensor idx = r.Saved(0).Unpack();
         Tensor dx = Tensor.Zeros(DType.F32, r.InputShape(0));
         Span<float> d = dx.MutableData<float>();
-        ReadOnlySpan<float> gv = g.Data<float>();
-        ReadOnlySpan<int> iv = idx.Data<int>();
+        ReadOnlySpan<float> gv = g.InternalData<float>();
+        ReadOnlySpan<int> iv = idx.InternalData<int>();
         for (int i = 0; i < gv.Length; i++)
         {
             d[iv[i]] += gv[i];

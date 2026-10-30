@@ -55,7 +55,7 @@ public static class Backprop
 
         AutogradMeta meta = root.Autograd!;
         ActivationScope? suspended = ActivationScope.Suspend();
-        using var noGrad = GradMode.NoGrad();
+        using var noGrad = GradMode.NoGradInternal();
         var engine = new Engine();
         try
         {
@@ -262,7 +262,7 @@ internal sealed class Engine
         }
 
         Span<float> d = dst.MutableData<float>();
-        ReadOnlySpan<float> s = src.Data<float>();
+        ReadOnlySpan<float> s = src.InternalData<float>();
         for (int i = 0; i < d.Length; i++)
         {
             d[i] += s[i];

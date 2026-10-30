@@ -22,7 +22,7 @@ internal static class VectorRows
 
         if (a.IsContiguous && b.IsContiguous && dst.IsContiguous)
         {
-            Run(op, a.Storage<float>().Slice(a.Offset), b.Storage<float>().Slice(b.Offset), dst.MutableStorage<float>().Slice(dst.Offset), shape.Length);
+            Run(op, a.InternalStorage<float>().Slice(a.Offset), b.InternalStorage<float>().Slice(b.Offset), dst.MutableStorage<float>().Slice(dst.Offset), shape.Length);
             return;
         }
 
@@ -39,7 +39,7 @@ internal static class VectorRows
         Tensor scratchB = splatB ? Tensor.Create(DType.F32, Shape.Create(inner)) : default;
         try
         {
-            ReadOnlySpan<float> sa = a.Storage<float>(), sb = b.Storage<float>();
+            ReadOnlySpan<float> sa = a.InternalStorage<float>(), sb = b.InternalStorage<float>();
             Span<float> d = dst.MutableStorage<float>();
             Strides stA = a.Strides, stB = b.Strides, stD = dst.Strides;
             Span<int> idx = stackalloc int[Shape.MaxRank];
@@ -50,7 +50,7 @@ internal static class VectorRows
                 if (splatA)
                 {
                     scratchA.MutableData<float>().Fill(sa[pa]);
-                    ra = scratchA.Data<float>();
+                    ra = scratchA.InternalData<float>();
                 }
                 else
                 {
@@ -60,7 +60,7 @@ internal static class VectorRows
                 if (splatB)
                 {
                     scratchB.MutableData<float>().Fill(sb[pb]);
-                    rb = scratchB.Data<float>();
+                    rb = scratchB.InternalData<float>();
                 }
                 else
                 {
@@ -116,7 +116,7 @@ internal static class VectorRows
 
         if (x.IsContiguous && dst.IsContiguous)
         {
-            RunUnary(op, x.Storage<float>().Slice(x.Offset), dst.MutableStorage<float>().Slice(dst.Offset), shape.Length);
+            RunUnary(op, x.InternalStorage<float>().Slice(x.Offset), dst.MutableStorage<float>().Slice(dst.Offset), shape.Length);
             return;
         }
 
@@ -128,7 +128,7 @@ internal static class VectorRows
         }
 
         int inner = shape[rank - 1];
-        ReadOnlySpan<float> sx = x.Storage<float>();
+        ReadOnlySpan<float> sx = x.InternalStorage<float>();
         Span<float> d = dst.MutableStorage<float>();
         Strides stX = x.Strides, stD = dst.Strides;
         Span<int> idx = stackalloc int[Shape.MaxRank];

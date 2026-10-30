@@ -19,7 +19,7 @@ internal static class Dense
             {
                 ta = Tensor.Create(DType.F32, Shape.Create(m, k));
                 Transpose(a, lda, k, m, ta.MutableData<float>());
-                a = ta.Data<float>();
+                a = ta.InternalData<float>();
                 lda = k;
             }
 
@@ -27,7 +27,7 @@ internal static class Dense
             {
                 tb = Tensor.Create(DType.F32, Shape.Create(k, n));
                 Transpose(b, ldb, n, k, tb.MutableData<float>());
-                b = tb.Data<float>();
+                b = tb.InternalData<float>();
                 ldb = n;
             }
 
@@ -104,7 +104,7 @@ public sealed class DenseKernels : ITensorKernels
             return;
         }
 
-        ReadOnlySpan<float> sa = a.Storage<float>(), sb = b.Storage<float>();
+        ReadOnlySpan<float> sa = a.InternalStorage<float>(), sb = b.InternalStorage<float>();
         bool transA = false, transB = false;
         int lda, ldb;
         Tensor ca = default, cb = default;
@@ -122,7 +122,7 @@ public sealed class DenseKernels : ITensorKernels
             else
             {
                 ca = am.Clone();
-                sa = ca.Data<float>();
+                sa = ca.InternalData<float>();
                 lda = k;
                 am = ca;
             }
@@ -139,7 +139,7 @@ public sealed class DenseKernels : ITensorKernels
             else
             {
                 cb = bm.Clone();
-                sb = cb.Data<float>();
+                sb = cb.InternalData<float>();
                 ldb = n;
                 bm = cb;
             }

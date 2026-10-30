@@ -56,7 +56,27 @@ public sealed class BackwardRecord
             types[i] = inputs[i].DType;
         }
 
-        return new BackwardRecord(op, metas, shapes, types, savedSlots);
+        var rec = new BackwardRecord(op, metas, shapes, types, savedSlots);
+        if (TraceContext.Current is not null)
+        {
+            rec.TraceInputs = inputs.ToArray();
+        }
+
+        return rec;
+    }
+
+    /// <summary>The inputs as passed to <see cref="Create"/>, kept only while a trace records (the tracer needs the tensors, not just their gradient edges).</summary>
+    internal Tensor[]? TraceInputs { get; private set; }
+
+    /// <summary>Inputs the operation does not differentiate through (index tensors, a mask, running statistics), for the tracer. No effect outside a trace.</summary>
+    internal Tensor[]? TraceExtras { get; private set; }
+
+    internal void AddTraceExtras(params ReadOnlySpan<Tensor> extras)
+    {
+        if (TraceContext.Current is not null)
+        {
+            TraceExtras = extras.ToArray();
+        }
     }
 
     /// <summary>The operation.</summary>
@@ -106,7 +126,9 @@ public sealed class BackwardRecord
 
     /// <summary>Makes <paramref name="output"/> the result of this record: returns a handle to the same data that requires a gradient and points here.</summary>
     public Tensor Attach(in Tensor output, int outputIndex = 0) =>
-        output.WithAutograd(new AutogradMeta(true, this, outputIndex));
+        TraceContext.Current is { } sink
+            ? sink.Attach(this, output, outputIndex)
+            : output.WithAutograd(new AutogradMeta(true, this, outputIndex));
 
     /// <summary>The record's saved tensors, or null if none, as a span for the engine and for composite operations.</summary>
     internal ReadOnlySpan<SavedTensor> SavedSlots => _saved;

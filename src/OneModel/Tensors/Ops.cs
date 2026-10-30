@@ -166,7 +166,7 @@ public static partial class Ops
         RequireFloat32(a, b);
         Shape s = Shape.Broadcast(a.Shape, b.Shape);
         Tensor r = NewOut(s, pool);
-        using (GradMode.NoGrad())
+        using (GradMode.NoGradInternal())
         {
             (kernels ?? KernelSet.Default).Binary(op, a.Expand(s), b.Expand(s), r);
         }
