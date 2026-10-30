@@ -1,6 +1,7 @@
-"""Fetch pinned weights and export the reference models to ONNX (fp32).
+"""Fetch pinned weights and export the reference models to ONNX (fp32), and derive fp16 variants.
 
     export_models.py [--record] [--force] [name ...]
+    export_models.py --fp16 [--record] [--force] [name ...]    (default names: minilm_l6 resnet50)
 
 Weights come from pinned URLs / Hugging Face revisions and are checked against the SHA-256s in
 models.json. Exports go to <cache>/models/<name>/. With --record the resulting hashes are written
@@ -179,18 +180,104 @@ def export_whisper(name: str, entry: dict, opset: int, record: bool, force: bool
     finish(name, "decoder_fp32", dec_out, entry, record)
 
 
+FP16_MAX = 65504.0
+# Operator inputs that must stay float32 (ONNX types them separately from the data).
+KEEP_FP32 = {("Resize", 1), ("Resize", 2), ("Upsample", 1)}
+
+
+def to_fp16(src: Path, dst: Path) -> None:
+    """Rewrites a float32 model with float16 weights and float16 activations.
+
+    Float graph inputs and outputs keep their float32 type, with a Cast at each end, so the same inputs
+    drive both files. Finite values beyond the float16 range (the -3.4e38 of an attention mask) are
+    clamped to the largest finite float16 instead of becoming infinity, which would turn 0 * -inf into NaN.
+    """
+    import numpy as np
+    import onnx
+    from onnx import TensorProto, helper, numpy_helper
+
+    m = onnx.load(str(src))
+    g = m.graph
+    FLOAT, HALF = TensorProto.FLOAT, TensorProto.FLOAT16
+
+    def half_tensor(t):
+        a = numpy_helper.to_array(t).astype(np.float32)
+        a = np.where(np.isfinite(a), np.clip(a, -FP16_MAX, FP16_MAX), a).astype(np.float16)
+        return numpy_helper.from_array(a, t.name)
+
+    keep = {(n.input[i]) for n in g.node for i in range(len(n.input)) if (n.op_type, i) in KEEP_FP32}
+    for i, t in enumerate(list(g.initializer)):
+        if t.data_type == FLOAT and t.name not in keep:
+            g.initializer[i].CopyFrom(half_tensor(t))
+    for n in g.node:
+        if n.op_type in ("Cast",):
+            for a in n.attribute:
+                if a.name == "to" and a.i == FLOAT:
+                    a.i = HALF
+        for a in n.attribute:
+            if a.type == onnx.AttributeProto.TENSOR and a.t.data_type == FLOAT and n.op_type in ("Constant", "ConstantOfShape"):
+                a.t.CopyFrom(half_tensor(a.t))
+    del g.value_info[:]
+
+    head, tail = [], []
+    renames = {}
+    for v in g.input:
+        if v.type.tensor_type.elem_type == FLOAT and v.name not in {t.name for t in g.initializer}:
+            renames[v.name] = v.name + "__half"
+            head.append(helper.make_node("Cast", [v.name], [renames[v.name]], to=HALF, name="cast_in_" + v.name))
+    for n in g.node:
+        for i, x in enumerate(n.input):
+            if x in renames:
+                n.input[i] = renames[x]
+    produced = {o: n for n in g.node for o in n.output}
+    for v in g.output:
+        if v.type.tensor_type.elem_type == FLOAT and v.name in produced:
+            inner = v.name + "__half"
+            node = produced[v.name]
+            for i, o in enumerate(node.output):
+                if o == v.name:
+                    node.output[i] = inner
+            for n in g.node:
+                for i, x in enumerate(n.input):
+                    if x == v.name:
+                        n.input[i] = inner
+            tail.append(helper.make_node("Cast", [inner], [v.name], to=FLOAT, name="cast_out_" + v.name))
+    nodes = head + list(g.node) + tail
+    del g.node[:]
+    g.node.extend(nodes)
+    onnx.checker.check_model(m)
+    onnx.save(m, str(dst))
+
+
+def export_fp16(name: str, entry: dict, record: bool, force: bool) -> None:
+    src = MODELS / entry["files"]["fp32"]["path"]
+    out = MODELS / name / f"{name}_fp16.onnx"
+    if force or not out.exists():
+        log("converting", src.name, "->", out.name)
+        to_fp16(src, out)
+    entry["files"].setdefault("fp16", {"path": str(out.relative_to(MODELS)), "conversion": "tools/export_models.py to_fp16 (weights and activations float16, float32 inputs and outputs)"})
+    finish(name, "fp16", out, entry, record)
+
+
 EXPORTERS = {"resnet50": export_tv, "mobilenet_v3_large": export_tv, "bert_base": export_bert,
              "minilm_l6": export_bert, "whisper_small": export_whisper}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("names", nargs="*", default=list(EXPORTERS))
+    ap.add_argument("names", nargs="*")
+    ap.add_argument("--fp16", action="store_true", help="derive the float16 variants from the recorded float32 files")
     ap.add_argument("--record", action="store_true", help="write hashes into models.json")
     ap.add_argument("--force", action="store_true", help="re-export even if the file exists")
     a = ap.parse_args()
     man = load_manifest()
-    for n in a.names:
+    if a.fp16:
+        for n in a.names or ["minilm_l6", "resnet50"]:
+            export_fp16(n, man["models"][n], a.record, a.force)
+            if a.record:
+                save_manifest(man)
+        return
+    for n in a.names or list(EXPORTERS):
         EXPORTERS[n](n, man["models"][n], man["onnxOpset"], a.record, a.force)
         if a.record:
             save_manifest(man)

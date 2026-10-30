@@ -240,7 +240,7 @@ internal static unsafe class Gemm
         packJob.NStrips = nStrips;
         packJob.Groups = stripGroups;
         packJob.Dst = packedB;
-        ParallelFor.Run(packJob, kBlocks * stripGroups, threads);
+        ParallelFor.Run(packJob, kBlocks * stripGroups, threads, ((long)k * n) / 2);
     }
 
     private static void RunTiles(
@@ -265,7 +265,8 @@ internal static unsafe class Gemm
         job.TilesN = tilesN;
         job.Micro = SelectMicro(mode, path);
         job.Epilogue = epilogue;
-        ParallelFor.Run(job, tilesM * tilesN, threads);
+        // About 40 multiply-adds per nanosecond per thread (a good core on 256-bit FMA): a guess that only decides how many threads are worth waking.
+        ParallelFor.Run(job, tilesM * tilesN, threads, (long)m * n * k / 40);
         job.Epilogue = null;
     }
 

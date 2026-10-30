@@ -86,3 +86,30 @@ internal readonly struct FastLanes8 : ILanes<FastLanes8>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static FastLanes8 MulAdd(FastLanes8 a, FastLanes8 b, FastLanes8 c) => new(Fma.IsSupported ? Vector256.FusedMultiplyAdd(a._v, b._v, c._v) : Vector256.Add(c._v, Vector256.Multiply(a._v, b._v)));
 }
+
+/// <summary>16 lanes (AVX-512).</summary>
+internal readonly struct FastLanes16 : ILanes<FastLanes16>
+{
+    private readonly Vector512<float> _v;
+
+    private FastLanes16(Vector512<float> v) => _v = v;
+
+    public static int Width => 16;
+
+    public static FastLanes16 Zero => default;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static FastLanes16 Broadcast(float value) => new(Vector512.Create(value));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static unsafe FastLanes16 Load(float* source) => new(Vector512.Load(source));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static unsafe FastLanes16 Gather(float* source, nint stride) => new(Vector512.Create(source[0],source[1 * stride],source[2 * stride],source[3 * stride],source[4 * stride],source[5 * stride],source[6 * stride],source[7 * stride],source[8 * stride],source[9 * stride],source[10 * stride],source[11 * stride],source[12 * stride],source[13 * stride],source[14 * stride],source[15 * stride]));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public unsafe void Store(float* destination) => _v.Store(destination);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static FastLanes16 MulAdd(FastLanes16 a, FastLanes16 b, FastLanes16 c) => new(Vector512.FusedMultiplyAdd(a._v, b._v, c._v));
+}

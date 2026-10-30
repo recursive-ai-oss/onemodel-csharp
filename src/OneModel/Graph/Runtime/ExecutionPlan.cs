@@ -423,15 +423,20 @@ internal sealed class ExecutionPlan : IDisposable
         }
 
         var consts = new Tensor[node.Inputs.Length];
+        var inTypes = new DType[node.Inputs.Length];
         for (int i = 0; i < consts.Length; i++)
         {
-            if (node.Inputs[i] >= 0 && Kinds[node.Inputs[i]] == ValueKind.Const)
+            if (node.Inputs[i] >= 0)
             {
-                consts[i] = Consts[node.Inputs[i]];
+                inTypes[i] = Types[node.Inputs[i]];
+                if (Kinds[node.Inputs[i]] == ValueKind.Const)
+                {
+                    consts[i] = Consts[node.Inputs[i]];
+                }
             }
         }
 
-        step.State = k.Prepare(new PrepareContext(consts, _owned, Env.Mode, Env.Path));
+        step.State = k.Prepare(new PrepareContext(consts, _owned, Env.Mode, Env.Path, inTypes));
         steps.Add(step);
     }
 

@@ -69,6 +69,12 @@ internal sealed class ConstantFoldPass : IGraphPass
                 return false;
             }
 
+            // Compact (half-precision) weights are widened by an adapter that wraps the node later; the bare kernel cannot read them.
+            if (c.DType is DType.F16 or DType.BF16)
+            {
+                return false;
+            }
+
             present++;
             inBytes += (long)c.Shape.Length * DTypes.SizeOf(c.DType);
         }

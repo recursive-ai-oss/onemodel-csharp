@@ -30,7 +30,7 @@ internal static class PassTestKit
     public static string[] Kernels(byte[] model, OptimizationLevel level, ExecutionMode mode)
     {
         using IrModel ir = OnnxImporter.Load(new MemoryStream(model), null, default);
-        using CompiledGraph g = CompiledGraph.Create(ir.Graph, OpRegistry.Default, mode, level, KernelPaths.Best(), 1, default);
+        using CompiledGraph g = CompiledGraph.Create(ir.Graph, OpRegistry.Default, mode, WeightStorage.Original, level, KernelPaths.Best(), 1, default);
         return [.. g.Nodes.Select(n => n.Kernel.GetType().Name)];
     }
 

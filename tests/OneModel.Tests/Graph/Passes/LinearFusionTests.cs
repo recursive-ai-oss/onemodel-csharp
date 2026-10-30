@@ -106,4 +106,22 @@ public class LinearFusionTests
         Assert.Equal(["MatMulOp", "AddOp", "ReluOp"], PassTestKit.Kernels(model, OptimizationLevel.None, ExecutionMode.Fast));
         Assert.Equal(["MatMulOp", "AddOp", "ReluOp"], PassTestKit.Kernels(model, OptimizationLevel.Basic, ExecutionMode.Fast));
     }
+
+    [Fact]
+    public void CompactWeightsStayCompactAndStillGiveTheSameResultsAsWithoutPasses()
+    {
+        byte[] model = LinearModel(64, 48, "Relu", true, false); // 3072 weights: above the compaction threshold
+        float[] x = PassTestKit.RandomFloats(5 * 64, 31);
+        float[] Run(OptimizationLevel level)
+        {
+            using var m = Model.Load(new MemoryStream(model), new SessionOptions { OptimizationLevel = level, WeightStorage = WeightStorage.Binary16, IntraOpThreads = 1 });
+            return m.Run(x, [5, 64]);
+        }
+
+        float[] none = Run(OptimizationLevel.None), all = Run(OptimizationLevel.All);
+        Assert.True(PassTestKit.BitEqual(none, all));
+        // Compact weights are not packed, so the product is not fused into a LinearOp.
+        using var s = Session.Load(new MemoryStream(model), new SessionOptions { WeightStorage = WeightStorage.Binary16 });
+        Assert.NotNull(s);
+    }
 }

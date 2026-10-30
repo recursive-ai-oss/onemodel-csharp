@@ -37,3 +37,8 @@ Every pass states whether it **preserves bits**: results identical with and with
 ## Memory
 
 Fusion removes intermediates: the fused chains above keep one output tensor instead of two to five, and the in-place reuse of the plan applies to what remains. Packed weights replace the originals (the constant is released once nothing reads it), so resident weight memory is unchanged apart from padding of ragged strips.
+
+## Half-precision weights
+
+* A model that contains half-precision values of its own (types, initializers, casts) is not rewritten: its graph runs as imported, because the passes' kernels are binary32.
+* With `WeightStorage` set to `Binary16` or `BFloat16`, the weights that qualify are kept compact and are **not packed**: the passes pack and fold only binary32 constants, and the half-precision adapter widens a compact weight on each run. Everything around them is still rewritten (constant folding of other nodes, a Conv's batch-norm fold needs binary32 weights and is skipped for compact ones, a Conv's activation still fuses, attention and Gelu chains fuse). Packing exists to save the per-call copy of B; a compact weight is widened per call anyway. Compact and packed storage therefore never apply to the same weight. Weights below the compaction threshold (1024 elements) are binary32 and are packed.

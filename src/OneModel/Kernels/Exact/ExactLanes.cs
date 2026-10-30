@@ -86,3 +86,30 @@ internal readonly struct ExactLanes8 : ILanes<ExactLanes8>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ExactLanes8 MulAdd(ExactLanes8 a, ExactLanes8 b, ExactLanes8 c) => new(Vector256.Add(c._v, Vector256.Multiply(a._v, b._v)));
 }
+
+/// <summary>16 lanes (AVX-512).</summary>
+internal readonly struct ExactLanes16 : ILanes<ExactLanes16>
+{
+    private readonly Vector512<float> _v;
+
+    private ExactLanes16(Vector512<float> v) => _v = v;
+
+    public static int Width => 16;
+
+    public static ExactLanes16 Zero => default;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ExactLanes16 Broadcast(float value) => new(Vector512.Create(value));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static unsafe ExactLanes16 Load(float* source) => new(Vector512.Load(source));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static unsafe ExactLanes16 Gather(float* source, nint stride) => new(Vector512.Create(source[0],source[1 * stride],source[2 * stride],source[3 * stride],source[4 * stride],source[5 * stride],source[6 * stride],source[7 * stride],source[8 * stride],source[9 * stride],source[10 * stride],source[11 * stride],source[12 * stride],source[13 * stride],source[14 * stride],source[15 * stride]));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public unsafe void Store(float* destination) => _v.Store(destination);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ExactLanes16 MulAdd(ExactLanes16 a, ExactLanes16 b, ExactLanes16 c) => new(Vector512.Add(c._v, Vector512.Multiply(a._v, b._v)));
+}
