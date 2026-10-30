@@ -69,9 +69,9 @@ internal static class QuantParams
             throw ctx.Unsupported($"scale shape {s} (blocked quantization) is not supported");
         }
 
-        if (hasZero && !ctx.InputShape(zeroInput).Equals(s))
+        if (hasZero && ctx.InputShape(zeroInput).Length != s.Length)
         {
-            throw ctx.Fail($"the zero point {ctx.InputShape(zeroInput)} must have the scale's shape {s}");
+            throw ctx.Fail($"the zero point {ctx.InputShape(zeroInput)} must have as many values as the scale {s}");
         }
 
         return axis;

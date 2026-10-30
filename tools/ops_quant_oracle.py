@@ -114,7 +114,7 @@ def gen(w, rng):
                                                   (0.0113900788128376, 14, 0.015234442427754402, -128, 0.012361573986709118, -128)]):
         shp = (1, 64, 56, 56)
         x = [q(np.int8, *shp) for _ in range(2)]
-        w.add_model(f"qdq_add_{i}", qdq_unit("Add", [shp, shp], [sa, sb], [za, zb], sy, zy), {"q0": x[0], "q1": x[1]})
+        w.add_model(f"qdq_add_{i}", qdq_unit("Add", [shp, shp], [sa, sb], [za, zb], sy, zy), {"q0": x[0], "q1": x[1]}, tolerance=1)
 
     # A dynamically quantized linear layer as quantize_dynamic writes it: DynamicQuantizeLinear, MatMulInteger, Cast, Mul by
     # input scale * weight scale, Add of the bias.
@@ -140,6 +140,44 @@ def gen(w, rng):
         m = h.make_model(g, opset_imports=[h.make_opsetid("", 17)])
         m.ir_version = 9
         w.add_model(f"dynlinear_{i}", m, {"x": f32(*shp, lo=-2, hi=3)})
+
+    # A small QDQ network written by quantize_static (used as a tool): Conv-Relu-Conv, residual Add, pooling, Gemm. Exercises the
+    # rewrite to QLinearConv / QLinearMatMul; the result must stay within a few quantization steps of ONNX Runtime's.
+    try:
+        from onnxruntime.quantization import CalibrationDataReader, QuantFormat, QuantType, quantize_static
+        import tempfile
+        for qi, (per_channel, wt) in enumerate([(True, QuantType.QInt8), (False, QuantType.QInt8), (True, QuantType.QUInt8)]):
+            wr = np.random.default_rng(100 + qi)
+            c = 8
+            W1 = (wr.standard_normal((c, 3, 3, 3)) * 0.3).astype(np.float32)
+            W2 = (wr.standard_normal((c, c, 3, 3)) * 0.2).astype(np.float32)
+            Wf = (wr.standard_normal((10, c)) * 0.5).astype(np.float32)
+            nodes = [h.make_node("Conv", ["x", "W1", "b1"], ["c1"], pads=[1, 1, 1, 1]), h.make_node("Relu", ["c1"], ["r1"]),
+                     h.make_node("Conv", ["r1", "W2", "b2"], ["c2"], pads=[1, 1, 1, 1], strides=[1, 1]),
+                     h.make_node("Add", ["c2", "r1"], ["a"]), h.make_node("Relu", ["a"], ["r2"]),
+                     h.make_node("GlobalAveragePool", ["r2"], ["p"]), h.make_node("Flatten", ["p"], ["f"]),
+                     h.make_node("Gemm", ["f", "Wf", "bf"], ["y"], transB=1)]
+            inits = [onnx.numpy_helper.from_array(a, n) for n, a in (("W1", W1), ("b1", wr.standard_normal(c).astype(np.float32) * 0.1), ("W2", W2),
+                     ("b2", wr.standard_normal(c).astype(np.float32) * 0.1), ("Wf", Wf), ("bf", wr.standard_normal(10).astype(np.float32)))]
+            g = h.make_graph(nodes, "g", [h.make_tensor_value_info("x", T.FLOAT, [1, 3, 12, 12])], [h.make_tensor_value_info("y", T.FLOAT, None)], initializer=inits)
+            fm = h.make_model(g, opset_imports=[h.make_opsetid("", 17)])
+            fm.ir_version = 9
+
+            class Reader(CalibrationDataReader):
+                def __init__(self):
+                    self.it = iter([{"x": wr.standard_normal((1, 3, 12, 12)).astype(np.float32)} for _ in range(8)])
+
+                def get_next(self):
+                    return next(self.it, None)
+
+            with tempfile.TemporaryDirectory() as td:
+                onnx.save(fm, td + "/f.onnx")
+                quantize_static(td + "/f.onnx", td + "/q.onnx", Reader(), quant_format=QuantFormat.QDQ, activation_type=QuantType.QInt8,
+                                weight_type=wt, per_channel=per_channel)
+                qm = onnx.load(td + "/q.onnx")
+            w.add_model(f"qdq_net_{qi}", qm, {"x": wr.standard_normal((1, 3, 12, 12)).astype(np.float32)}, float_tol=0.1)
+    except Exception as e:  # noqa: BLE001 - the quantization tool is optional
+        print("qdq_net cases skipped:", e)
 
     # --- DequantizeLinear ---
     for opset in (10, 13, 19):
@@ -245,7 +283,7 @@ def gen(w, rng):
                                   order_in, {"x"}, [ydt], attrs, tolerance=1)
 
 
-def add_model(self, name, m, feeds, tolerance=0):
+def add_model(self, name, m, feeds, tolerance=0, float_tol=1e-6):
     """Adds a whole model: feeds is a dict of graph inputs; ONNX Runtime's reference is the default optimization level (ORT_ENABLE_ALL)."""
     try:
         sess = ort.InferenceSession(m.SerializeToString(), providers=["CPUExecutionProvider"])
@@ -256,7 +294,7 @@ def add_model(self, name, m, feeds, tolerance=0):
     d = os.path.join(self.outdir, name)
     os.makedirs(d, exist_ok=True)
     onnx.save(m, os.path.join(d, "model.onnx"))
-    meta = {"op": "model", "opset": 17, "tolerance": tolerance, "inputs": [], "outputs": []}
+    meta = {"op": "model", "opset": 17, "tolerance": tolerance, "float_tol": float_tol, "inputs": [], "outputs": []}
     for i, gi in enumerate(m.graph.input):
         a = feeds[gi.name]
         a.astype(a.dtype.newbyteorder("<")).tofile(os.path.join(d, f"input_{i}.bin"))

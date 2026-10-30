@@ -12,13 +12,13 @@ namespace RecursiveAI.OneModel.Tests.Graph.Operators.Quant;
 /// Compares the 8-bit quantization operators with ONNX Runtime's outputs on the cases written by tools/ops_quant_oracle.py. Set
 /// ONEMODEL_QUANT_ORACLE to the directory the script wrote; without it the test does nothing. Integer outputs must be equal
 /// (a case may allow one step in the last place where ONNX Runtime requantizes with its own float rounding), float outputs equal
-/// to a scaled error of 1e-6. The result must be identical on every kernel path and on one thread and many, in both modes.
+/// to a scaled error of 1e-6 unless the case states more (whole quantized networks, where one flipped rounding is amplified). The result must be identical on every kernel path and on one thread and many, in both modes.
 /// </summary>
 public class OracleQuantTests
 {
     private sealed record Spec(string Name, string DType, int[] Shape);
 
-    private static (List<Spec> In, List<Spec> Out, int Tol) ReadMeta(string dir)
+    private static (List<Spec> In, List<Spec> Out, int Tol, double FloatTol) ReadMeta(string dir)
     {
         using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "meta.json")));
         static List<Spec> Specs(JsonElement e) =>
@@ -28,7 +28,8 @@ public class OracleQuantTests
                 s.GetProperty("dtype").GetString()!,
                 [.. s.GetProperty("shape").EnumerateArray().Select(d => d.GetInt32())])),
         ];
-        return (Specs(doc.RootElement.GetProperty("inputs")), Specs(doc.RootElement.GetProperty("outputs")), doc.RootElement.GetProperty("tolerance").GetInt32());
+        return (Specs(doc.RootElement.GetProperty("inputs")), Specs(doc.RootElement.GetProperty("outputs")), doc.RootElement.GetProperty("tolerance").GetInt32(),
+            doc.RootElement.TryGetProperty("float_tol", out JsonElement ft) ? ft.GetDouble() : 1e-6);
     }
 
     private static Tensor FromRaw(Spec sp, byte[] raw)
@@ -96,7 +97,7 @@ public class OracleQuantTests
     };
 
     /// <summary>Returns an error text, or null; <paramref name="offByOne"/> counts elements that differ by one step.</summary>
-    private static string? Compare(Tensor got, Spec want, byte[] raw, int tol, ref int offByOne)
+    private static string? Compare(Tensor got, Spec want, byte[] raw, int tol, double floatTol, ref int offByOne)
     {
         if (got.Shape != Shape.Create(want.Shape))
         {
@@ -115,7 +116,7 @@ public class OracleQuantTests
                 max = Math.Max(max, Math.Abs((double)gf[i] - wf[i]));
             }
 
-            return max / scale <= 1e-6 ? null : $"scaled error {max / scale:g3}";
+            return max / scale <= floatTol ? null : $"scaled error {max / scale:g3}";
         }
 
         int n = want.Shape.Aggregate(1, (a, b) => a * b);
@@ -155,14 +156,14 @@ public class OracleQuantTests
             cases++;
             try
             {
-                (List<Spec> ins, List<Spec> outs, int tol) = ReadMeta(dir);
+                (List<Spec> ins, List<Spec> outs, int tol, double floatTol) = ReadMeta(dir);
                 Tensor[] fast = RunCase(dir, ins, outs.Count, ExecutionMode.Fast, null, 1);
                 Tensor[] many = RunCase(dir, ins, outs.Count, ExecutionMode.Fast, null, 7);
                 Tensor[] exact = RunCase(dir, ins, outs.Count, ExecutionMode.Exact, null, 3);
                 for (int i = 0; i < outs.Count; i++)
                 {
                     byte[] raw = File.ReadAllBytes(Path.Combine(dir, $"output_{i}.bin"));
-                    string? e = Compare(fast[i], outs[i], raw, tol, ref offByOne);
+                    string? e = Compare(fast[i], outs[i], raw, tol, floatTol, ref offByOne);
                     elements += outs[i].Shape.Aggregate(1, (a, b) => a * b);
                     if (e is not null)
                     {
