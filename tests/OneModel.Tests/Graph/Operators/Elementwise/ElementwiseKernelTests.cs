@@ -101,6 +101,25 @@ public class ElementwiseKernelTests
         }
     }
 
+    [Fact]
+    public void LargeUnaryFunctionsDoNotDependOnTheThreadCountAndWorkInPlace()
+    {
+        var rng = new KernelTestData.Rng(6);
+        var x = new float[200003];
+        KernelTestData.Fill(ref rng, x, true);
+        foreach (bool exact in new[] { false, true })
+        {
+            var one = new float[x.Length];
+            var many = new float[x.Length];
+            UnaryParallel.Run(KernelPaths.Best(), exact, new GeluUnary(false), x, one, 1);
+            UnaryParallel.Run(KernelPaths.Best(), exact, new GeluUnary(false), x, many, 7);
+            Assert.True(KernelTestData.SameBits(one, many));
+            var inPlace = (float[])x.Clone();
+            UnaryParallel.Run(KernelPaths.Best(), exact, new GeluUnary(false), inPlace, inPlace, 7);
+            Assert.True(KernelTestData.SameBits(one, inPlace));
+        }
+    }
+
     /// <summary>One graph through Exp, Sub, Greater, Where, Cast, Max, Neg, Tanh, Gelu and Mean.</summary>
     private static byte[] Chain() => new ModelBuilder(20)
         .Input("x", 1, "n")

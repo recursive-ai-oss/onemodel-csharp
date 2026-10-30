@@ -22,7 +22,11 @@ internal abstract class ChunkJob
 internal static class ParallelFor
 {
     private const int MaxThreads = 256;
-    private const int SpinsBeforeSleep = 2000;
+    // A helper spins about 270 microseconds (300 rounds of SpinWait(20), roughly 0.9 us each) before it sleeps: long enough to bridge the
+    // gaps between consecutive operators of a model, short enough that idle helpers do not compete with the caller's serial work, with
+    // hyperthread siblings, or with other processes. At 2000 rounds (1.8 ms) all-core runs were up to 30% slower on a busy machine.
+    private const int SpinsBeforeSleep = 300;
+    private const int SpinUnit = 20;
     private const int SpinsBeforeYield = 4000;
 
     private static readonly object s_gate = new();
@@ -41,11 +45,13 @@ internal static class ParallelFor
     private const int GenBits = 20;
     private const long IndexMask = (1L << IndexBits) - 1;
     private const long GenMask = (1L << GenBits) - 1;
-    private static long s_next;
-    private static int s_done;
-    // Generation in the high 32 bits, helper count in the low 32: one atomic read tells a worker both whether there is new work and
-    // whether it is wanted, so a worker can never join a job twice.
-    private static long s_state;
+    // The three words every thread touches all the time: the claim word (NextAt), the count of finished chunks (DoneAt) and the state
+    // (StateAt: generation in the high 32 bits, helper count in the low 32, so one atomic read tells a worker both whether there is new
+    // work and whether it is wanted, and a worker can never join a job twice). They live a cache line apart in an array of longs, with
+    // room before the first and after the last. Helpers spin reading the state while others claim chunks and count them done; as
+    // adjacent static fields every claim would knock the line out of all the spinners' caches, and that cost grew with the thread count.
+    private const int StateAt = 16, NextAt = 32, DoneAt = 48;
+    private static readonly long[] s_hot = new long[64 + 16];
     private static Exception? s_error;
 
     /// <summary>The thread count used when the caller does not choose one: the machine's logical processor count. It affects speed only.</summary>
@@ -101,12 +107,12 @@ internal static class ParallelFor
         try
         {
             EnsureWorkers(helpers);
-            long generation = (Volatile.Read(ref s_state) >> 32) + 1;
+            long generation = (Volatile.Read(ref s_hot[StateAt]) >> 32) + 1;
             s_job = job;
             s_error = null;
-            Volatile.Write(ref s_done, 0);
-            Volatile.Write(ref s_next, Pack(generation, chunks, 0));
-            Volatile.Write(ref s_state, (generation << 32) | (uint)helpers);
+            Volatile.Write(ref s_hot[DoneAt], 0);
+            Volatile.Write(ref s_hot[NextAt], Pack(generation, chunks, 0));
+            Volatile.Write(ref s_hot[StateAt], (generation << 32) | (uint)helpers);
             lock (s_gate)
             {
                 Monitor.PulseAll(s_gate);
@@ -119,7 +125,7 @@ internal static class ParallelFor
             // Spin, and give the core away if a chunk is slow: SpinWait.SpinOnce would sleep for a whole millisecond or more after a few
             // spins, which is longer than most operators take.
             int spins = 0;
-            while (Volatile.Read(ref s_done) != chunks)
+            while (Volatile.Read(ref s_hot[DoneAt]) != chunks)
             {
                 if (++spins < SpinsBeforeYield)
                 {
@@ -152,7 +158,7 @@ internal static class ParallelFor
         long gen = generation & GenMask;
         while (true)
         {
-            long current = Volatile.Read(ref s_next);
+            long current = Volatile.Read(ref s_hot[NextAt]);
             if (((current >> (2 * IndexBits)) & GenMask) != gen)
             {
                 return;
@@ -164,7 +170,7 @@ internal static class ParallelFor
                 return;
             }
 
-            if (Interlocked.CompareExchange(ref s_next, current + 1, current) != current)
+            if (Interlocked.CompareExchange(ref s_hot[NextAt], current + 1, current) != current)
             {
                 continue;
             }
@@ -180,7 +186,7 @@ internal static class ParallelFor
                 Interlocked.CompareExchange(ref s_error, e, null);
             }
 
-            Interlocked.Increment(ref s_done);
+            Interlocked.Increment(ref s_hot[DoneAt]);
         }
     }
 
@@ -197,7 +203,7 @@ internal static class ParallelFor
             {
                 int index = s_workerCount;
                 // The worker starts "having seen" the current generation, so it joins the next job and never one already finished.
-                long born = Volatile.Read(ref s_state) >> 32;
+                long born = Volatile.Read(ref s_hot[StateAt]) >> 32;
                 var t = new Thread(() => WorkerLoop(index, born)) { IsBackground = true, Name = "OneModel worker " + index };
                 s_workers[index] = t;
                 s_workerCount++;
@@ -212,24 +218,24 @@ internal static class ParallelFor
         while (true)
         {
             int spins = 0;
-            while (Volatile.Read(ref s_state) >> 32 == seen)
+            while (Volatile.Read(ref s_hot[StateAt]) >> 32 == seen)
             {
                 if (++spins < SpinsBeforeSleep)
                 {
-                    Thread.SpinWait(20);
+                    Thread.SpinWait(SpinUnit);
                     continue;
                 }
 
                 lock (s_gate)
                 {
-                    while (Volatile.Read(ref s_state) >> 32 == seen)
+                    while (Volatile.Read(ref s_hot[StateAt]) >> 32 == seen)
                     {
                         Monitor.Wait(s_gate);
                     }
                 }
             }
 
-            long state = Volatile.Read(ref s_state);
+            long state = Volatile.Read(ref s_hot[StateAt]);
             seen = state >> 32;
             if (index < (int)(state & 0xFFFFFFFF))
             {

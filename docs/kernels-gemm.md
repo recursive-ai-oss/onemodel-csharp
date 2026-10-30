@@ -7,7 +7,7 @@ exist for every kernel; the exact mode's definition is in `exact-mode.md`.
 
 1. **Pack B** once per call, for all of `k` and `n`: for each block of `KC = 256` rows of B, strips of `NR` columns, element
    `(p, j)` of a strip at `p*NR + j`; a ragged last strip is padded with +0. Work is split into chunks of 8 strips per k-block.
-2. **Tiles.** C is cut into `MC x NC` tiles (the constants below). A tile is one chunk of work. For each k-block the tile packs its
+2. **Tiles.** C is cut into `MC x NC` tiles (the constants below, or smaller ones when the product is small, see "Tile choice"). A tile is one chunk of work. For each k-block the tile packs its
    `MC x KC` block of A into strips of `MR` rows (element `(p, r)` at `p*MR + r`, padded with +0), then for each `NR`-wide strip of
    B it runs the microkernel down the A strips, so the B strip (`KC x NR x 4` bytes, 16 KB for AVX2) stays in the first-level
    cache while the A block (about 100 KB) streams from the second level.
@@ -45,9 +45,19 @@ stored value, which is the tile kernel's order, so the bits are the same. Chunks
 same tile edges); the work estimate is the time to read B at about 10 bytes per nanosecond per thread, so a large weight matrix uses
 several threads, which read it faster together.
 
+## Tile choice
+
+A product with few rows (a transformer layer at batch 1: 128 x 384 x 384) would give two or three full-size tiles and leave most cores
+idle. From `m`, `n` and `k` alone, never the thread count, the tile is made smaller until there are at least 48 tiles or the next
+step would leave a tile under 500 000 multiply-adds. The steps alternate: halve `NC`, halve `MC`, halve `NC`, halve `MC` (each a
+whole number of register tiles, never below a quarter of the path's constant). Then the tiles of each axis are made equal in size, rounded
+up to whole register tiles, so no tile is a sliver. `NC` stays a multiple of `NR`, so a row of C is cut at the same columns
+whatever the tile width, and an epilogue sees the same vector and scalar-tail split. The one-row product keeps the path's `NC`.
+Every output still sums `k` in the same order, so the choice changes no bits.
+
 ## Fixed chunks and thread independence
 
-Chunk sizes (8 strips of B per packing chunk, one `MC x NC` tile per compute chunk, 16 im2col rows, planes per depthwise chunk from the plane size, the convolution tiles of [kernels-conv.md](kernels-conv.md)) are
+Chunk sizes (8 strips of B per packing chunk, one tile per compute chunk, 16 im2col rows, planes per depthwise chunk from the plane size, the convolution tiles of [kernels-conv.md](kernels-conv.md)) are
 constants of the kernel and the shape. They are never derived from the number of threads or processors. Every output is computed
 by exactly one chunk, with the whole of `k` in one order, so there are no partial results to combine and a result cannot depend on
 which thread ran a chunk or on how many threads there were. `k` is never split across threads. A fixed-chunk parallel-for
