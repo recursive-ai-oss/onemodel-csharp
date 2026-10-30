@@ -57,7 +57,14 @@ public sealed class Recurrent : NnModule
     /// <summary>Runs the stack over a float32 sequence and returns the last layer's hidden states [time, batch, directions·hidden] (or batch-first).</summary>
     /// <param name="input">Float32 [time, batch, inputSize], or [batch, time, inputSize] with batch-first.</param>
     public override Tensor Forward(Tensor input) =>
-        _gru ? Ops.Gru(input, _layers, _bidirectional, _batchFirst) : Ops.Lstm(input, _layers, _bidirectional, _batchFirst);
+        Forward(input, default);
+
+    /// <summary>Runs the stack over rows of different lengths padded to a common T (packed-sequence semantics, see <see cref="Ops.Lstm"/>).</summary>
+    /// <param name="input">Float32 [time, batch, inputSize], or [batch, time, inputSize] with batch-first.</param>
+    /// <param name="lengths">Valid steps per batch row, each in [1, T]; empty for all rows full length.</param>
+    /// <returns>The hidden states, zero at padded steps when lengths are given.</returns>
+    public Tensor Forward(Tensor input, ReadOnlySpan<int> lengths) =>
+        _gru ? Ops.Gru(input, _layers, _bidirectional, _batchFirst, null, lengths) : Ops.Lstm(input, _layers, _bidirectional, _batchFirst, null, lengths);
 }
 
 /// <summary>Transposed 2-D convolution over NCHW float32 input (<see cref="Ops.ConvTranspose2d"/>).</summary>

@@ -293,6 +293,50 @@ public sealed class WarmupLr : LrSchedule
 }
 
 /// <summary>
+/// Linear warm-up then a floored half cosine, as a pure function of the step: for step s &lt; <c>warmupSteps</c> the rate is
+/// <c>base·(s+1)/warmupSteps</c>; afterwards, with <c>p = (s − warmupSteps)/max(1, totalSteps − warmupSteps)</c>, it is
+/// <c>base·(floor + (1 − floor)·(1 + cos(π·p))/2)</c>. Unlike <see cref="WarmupLr"/> the first step already has a nonzero rate and the
+/// decay is measured over the steps after the warm-up. Steps past <c>totalSteps</c> hold the floor.
+/// </summary>
+public sealed class WarmupCosineLr : LrSchedule
+{
+    private readonly double _base;
+    private readonly long _warmup;
+    private readonly long _total;
+    private readonly double _floor;
+
+    /// <summary>Creates the schedule.</summary>
+    /// <param name="baseLr">The peak rate.</param>
+    /// <param name="warmupSteps">Warm-up length, at least 1.</param>
+    /// <param name="totalSteps">Step at which the decay ends, greater than <paramref name="warmupSteps"/>.</param>
+    /// <param name="floorFraction">Final rate as a fraction of <paramref name="baseLr"/>, in [0, 1] (default 0).</param>
+    public WarmupCosineLr(float baseLr, long warmupSteps, long totalSteps, float floorFraction = 0f)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(warmupSteps, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(totalSteps, warmupSteps);
+        ArgumentOutOfRangeException.ThrowIfNegative(floorFraction);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(floorFraction, 1f);
+        _base = baseLr;
+        _warmup = warmupSteps;
+        _total = totalSteps;
+        _floor = floorFraction;
+    }
+
+    /// <inheritdoc/>
+    public override float LrAt(long stepNumber)
+    {
+        long s = Clamp(stepNumber);
+        if (s < _warmup)
+        {
+            return (float)(_base * (s + 1) / _warmup);
+        }
+
+        double p = Math.Min(1.0, (double)(s - _warmup) / Math.Max(1, _total - _warmup));
+        return (float)(_base * (_floor + ((1.0 - _floor) * 0.5 * (1.0 + Cos(p)))));
+    }
+}
+
+/// <summary>
 /// The one-cycle policy (Smith and Topin 2018): the rate rises from <c>max/divFactor</c> to <c>max</c> over the first
 /// <c>pctStart</c> of the steps, then falls to <c>max/divFactor/finalDivFactor</c>, both phases along a half cosine. Momentum is not cycled.
 /// </summary>

@@ -277,9 +277,18 @@ public static partial class Ops
     /// <param name="bidirectional">Run each layer in both directions.</param>
     /// <param name="batchFirst">Input and output are batch-major.</param>
     /// <param name="pool">Pool for the results; default <see cref="BufferPool.Shared"/>.</param>
+    /// <param name="lengths">Optional valid steps per batch row (packed-sequence semantics, see remarks); empty means every row has all T steps.</param>
     /// <returns>The last layer's output <c>[T, B, dirs·H]</c> (or batch-major).</returns>
-    public static Tensor Lstm(in Tensor x, ReadOnlySpan<RnnLayer> layers, bool bidirectional = false, bool batchFirst = false, BufferPool? pool = null) =>
-        Stack(x, layers, bidirectional, batchFirst, pool, gru: false);
+    /// <remarks>
+    /// With <paramref name="lengths"/>, row b is the sequence of its first <c>lengths[b]</c> steps, as <c>torch.nn.utils.rnn.pack_padded_sequence</c>
+    /// presents it: the forward direction ignores the padding after it (it cannot influence earlier steps anyway), the reverse direction
+    /// starts at step <c>lengths[b]-1</c> from the zero state, and outputs at padded steps are exactly zero with zero gradient.
+    /// The reverse direction is run as a forward pass over the row reversed within its length, so no kernel changes are needed.
+    /// </remarks>
+    /// <exception cref="ArgumentException">A length is outside [1, T] or the count differs from the batch size.</exception>
+    public static Tensor Lstm(in Tensor x, ReadOnlySpan<RnnLayer> layers, bool bidirectional = false, bool batchFirst = false, BufferPool? pool = null,
+        ReadOnlySpan<int> lengths = default) =>
+        Stack(x, layers, bidirectional, batchFirst, pool, gru: false, lengths);
 
     /// <summary>A multi-layer, optionally bidirectional GRU; see <see cref="Lstm"/> for the layer order and shapes.</summary>
     /// <param name="x">Input <c>[T, B, I]</c>, or <c>[B, T, I]</c> with <paramref name="batchFirst"/>.</param>
@@ -287,10 +296,13 @@ public static partial class Ops
     /// <param name="bidirectional">Run each layer in both directions.</param>
     /// <param name="batchFirst">Input and output are batch-major.</param>
     /// <param name="pool">Pool for the results; default <see cref="BufferPool.Shared"/>.</param>
-    public static Tensor Gru(in Tensor x, ReadOnlySpan<RnnLayer> layers, bool bidirectional = false, bool batchFirst = false, BufferPool? pool = null) =>
-        Stack(x, layers, bidirectional, batchFirst, pool, gru: true);
+    /// <param name="lengths">Optional valid steps per batch row; see <see cref="Lstm"/>.</param>
+    public static Tensor Gru(in Tensor x, ReadOnlySpan<RnnLayer> layers, bool bidirectional = false, bool batchFirst = false, BufferPool? pool = null,
+        ReadOnlySpan<int> lengths = default) =>
+        Stack(x, layers, bidirectional, batchFirst, pool, gru: true, lengths);
 
-    private static Tensor Stack(in Tensor x, ReadOnlySpan<RnnLayer> layers, bool bidirectional, bool batchFirst, BufferPool? pool, bool gru)
+    private static Tensor Stack(in Tensor x, ReadOnlySpan<RnnLayer> layers, bool bidirectional, bool batchFirst, BufferPool? pool, bool gru,
+        ReadOnlySpan<int> lengths)
     {
         int dirs = bidirectional ? 2 : 1;
         if (layers.Length == 0 || layers.Length % dirs != 0)
@@ -304,6 +316,38 @@ public static partial class Ops
         }
 
         Tensor cur = batchFirst ? x.Transpose(0, 1) : x;
+        int steps = cur.Shape[0], batch = cur.Shape[1];
+        bool packed = !lengths.IsEmpty;
+        Tensor map = default, mask = default;
+        if (packed)
+        {
+            if (lengths.Length != batch)
+            {
+                throw new ArgumentException($"Expected {batch} lengths, got {lengths.Length}.", nameof(lengths));
+            }
+
+            // map[t*B+b] = the row of the [T*B] flattened sequence that step t of the reversed row reads; the permutation is its own inverse.
+            var idx = new int[steps * batch];
+            var m = new float[steps * batch];
+            for (int b = 0; b < batch; b++)
+            {
+                int len = lengths[b];
+                if (len < 1 || len > steps)
+                {
+                    throw new ArgumentException($"Length {len} of row {b} is outside [1, {steps}].", nameof(lengths));
+                }
+
+                for (int t = 0; t < steps; t++)
+                {
+                    idx[(t * batch) + b] = (((t < len) ? len - 1 - t : t) * batch) + b;
+                    m[(t * batch) + b] = t < len ? 1f : 0f;
+                }
+            }
+
+            map = Tensor.FromSpan<int>(idx, Shape.Create(steps * batch));
+            mask = Tensor.FromSpan<float>(m, Shape.Create(steps, batch, 1));
+        }
+
         Tensor prev = default;
         for (int l = 0; l < layers.Length / dirs; l++)
         {
@@ -311,8 +355,26 @@ public static partial class Ops
             Tensor next = outF;
             if (bidirectional)
             {
-                Tensor outR = RunLayer(cur, layers[(l * dirs) + 1], true, pool, gru);
+                Tensor outR;
+                if (packed)
+                {
+                    int width = cur.Shape[2];
+                    Tensor rev = Embedding(cur.Reshape(steps * batch, width), map, -1, pool).Reshape(steps, batch, width);
+                    Tensor run = RunLayer(rev, layers[(l * dirs) + 1], false, pool, gru);
+                    int h = run.Shape[2];
+                    outR = Embedding(run.Reshape(steps * batch, h), map, -1, pool).Reshape(steps, batch, h);
+                }
+                else
+                {
+                    outR = RunLayer(cur, layers[(l * dirs) + 1], true, pool, gru);
+                }
+
                 next = Concat([outF, outR], 2, pool);
+            }
+
+            if (packed)
+            {
+                next = Mul(next, mask, pool);
             }
 
             prev = next;
