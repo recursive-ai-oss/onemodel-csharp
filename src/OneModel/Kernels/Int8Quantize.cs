@@ -43,10 +43,7 @@ internal static unsafe class Int8Quantize
                 Vector128<int> q1 = Quant4(x + i + 4, vs, vz, vlo, vhi);
                 Vector128<int> q2 = Quant4(x + i + 8, vs, vz, vlo, vhi);
                 Vector128<int> q3 = Quant4(x + i + 12, vs, vz, vlo, vhi);
-                // The values are inside [lo, hi], so truncating narrowing keeps the low byte, which is the answer for both signednesses.
-                Vector128<ushort> s0 = Vector128.Narrow(q0.AsUInt32(), q1.AsUInt32());
-                Vector128<ushort> s1 = Vector128.Narrow(q2.AsUInt32(), q3.AsUInt32());
-                Vector128.Narrow(s0, s1).Store(y + i);
+                Pack16(q0, q1, q2, q3, unsigned).Store(y + i);
             }
         }
 
@@ -54,6 +51,21 @@ internal static unsafe class Int8Quantize
         {
             y[i] = (byte)QuantizeOne(x[i], scale, zeroPoint, lo, hi);
         }
+    }
+
+    /// <summary>
+    /// Narrows sixteen already-clamped values to bytes. Every step narrows to a type that holds all the values (int to short, then short
+    /// to sbyte for signed output or to byte for unsigned), so truncating and saturating narrowing agree. A runtime that implements
+    /// narrowing with a saturating instruction (the browser-wasm runtime does once code is hot) then gives the same bytes as every other.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static Vector128<byte> Pack16(Vector128<int> q0, Vector128<int> q1, Vector128<int> q2, Vector128<int> q3, bool unsigned)
+    {
+        Vector128<short> s0 = Vector128.Narrow(q0, q1);
+        Vector128<short> s1 = Vector128.Narrow(q2, q3);
+        return unsigned
+            ? Vector128.Narrow(s0.AsUInt16(), s1.AsUInt16())
+            : Vector128.Narrow(s0, s1).AsByte();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

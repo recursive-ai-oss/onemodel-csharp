@@ -45,6 +45,14 @@ jobs:
             for p in tests/OneModel.Tests tests/AotSmoke bench/Micro fuzz/OneModel.Fuzz; do dotnet build "$p" -c "$c" --no-restore; done
             dotnet test --project tests/OneModel.Tests -c "$c" --no-build
           done
+      # Exact mode promises the same bits on every OS and CPU: the hashes are committed, so any runner that differs fails.
+      - name: Exact-mode golden hashes (JIT)
+        shell: bash
+        run: |
+          dotnet publish tools/GoldenModels -c Release -o "$RUNNER_TEMP/golden"
+          APP="$RUNNER_TEMP/golden/GoldenModels.dll" tools/golden_ci.sh jit
+          ONEMODEL_THREADS=1 APP="$RUNNER_TEMP/golden/GoldenModels.dll" tools/golden_ci.sh jit
+          DOTNET_EnableHWIntrinsic=0 APP="$RUNNER_TEMP/golden/GoldenModels.dll" tools/golden_ci.sh jit
 
   aot:
     strategy:
@@ -78,6 +86,12 @@ jobs:
           out=$("$RUNNER_TEMP/smoke/AotSmoke")
           echo "$out"
           [ "$out" = "4242dc5249c33625" ]
+      - name: Exact-mode golden hashes (NativeAOT)
+        shell: bash
+        run: |
+          dotnet publish tools/GoldenModels -c Release -r ${{ matrix.rid }} -p:PublishAot=true -o "$RUNNER_TEMP/golden-aot"
+          ext=""; [ "${{ runner.os }}" = Windows ] && ext=".exe"
+          APP="$RUNNER_TEMP/golden-aot/GoldenModels$ext" tools/golden_ci.sh aot
 
   wasm:
     runs-on: ubuntu-latest
@@ -104,6 +118,8 @@ jobs:
           out=$(node tests/WasmSmoke/main.mjs "$RUNNER_TEMP/wasm/wwwroot")
           echo "$out"
           [ "$out" = "4242dc5249c33625" ]
+      - name: Exact-mode golden hashes on browser-wasm
+        run: tools/golden_ci.sh wasm "$RUNNER_TEMP/wasm/wwwroot"
 
   pack:
     # Builds the package as an artifact only; nothing is pushed anywhere.
