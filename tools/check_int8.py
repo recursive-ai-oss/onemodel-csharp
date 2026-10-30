@@ -11,7 +11,7 @@ REFERENCE_DIR holds inputs/*.npy and outputs/*.npy (ONNX Runtime ORT_ENABLE_ALL,
   * the decision agreement: rows whose argmax over the last axis is the same as the reference's.
 
 The floor for each is what ONNX Runtime itself shows against its own ORT_ENABLE_ALL output: ORT_DISABLE_ALL, or, when those two
-outputs are bit-identical (the float kernels do not depend on the level), the worst of four runs of ORT_ENABLE_ALL with relative
+outputs agree to within 1e-5 of the output scale (the float kernels do not depend on the level), the worst of four runs of ORT_ENABLE_ALL with relative
 noise of 1e-7 on the float inputs. A row passes when, for every float output,
 
   (a) the 1st-percentile row cosine and (rank >= 3) the pooled cosine are each at least min(0.99, their floor); and
@@ -66,8 +66,8 @@ names = [o.name for o in sess.get_outputs()]
 floor_outs = [dict(zip(names, sess.run(None, feeds)))]
 refs = {n: np.load(os.path.join(a.ref, "outputs", n + ".npy")) for n in names if os.path.exists(os.path.join(a.ref, "outputs", n + ".npy"))}
 floor_kind = "ORT_DISABLE_ALL"
-if all(np.array_equal(floor_outs[0][n], refs[n]) for n in refs):
-    # The two levels are bit-identical: use ONNX Runtime's response to 1e-7 relative noise on the float inputs instead.
+if all(np.abs(floor_outs[0][n] - refs[n]).max() <= 1e-5 * max(np.abs(refs[n]).max(), 1e-30) for n in refs):
+    # The two levels agree to 1e-5 of the output scale (the float kernels do not depend on the level): use ONNX Runtime's response to 1e-7 relative noise on the float inputs instead.
     floor_kind = "1e-7 input noise"
     rng = np.random.default_rng(1)
     full = session(ort.GraphOptimizationLevel.ORT_ENABLE_ALL)
