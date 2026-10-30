@@ -152,10 +152,26 @@ internal sealed class MaxPoolOp : WindowPoolKernel
                 Pooling.Max(g, planes, x.Data<double>(), y.MutableData<double>(), idx, _columnMajor);
                 break;
             case DType.I8:
-                Pooling.Max(g, planes, x.Data<sbyte>(), y.MutableData<sbyte>(), idx, _columnMajor);
+                if (idx.IsEmpty && Int8Pool.Supports(in g))
+                {
+                    Int8Pool.Run(in g, planes, Int8Quantize.AsBytes(x.Data<sbyte>()), Int8Quantize.AsBytes(y.MutableData<sbyte>()), true, run.Threads);
+                }
+                else
+                {
+                    Pooling.Max(g, planes, x.Data<sbyte>(), y.MutableData<sbyte>(), idx, _columnMajor);
+                }
+
                 break;
             case DType.U8:
-                Pooling.Max(g, planes, x.Data<byte>(), y.MutableData<byte>(), idx, _columnMajor);
+                if (idx.IsEmpty && Int8Pool.Supports(in g))
+                {
+                    Int8Pool.Run(in g, planes, x.Data<byte>(), y.MutableData<byte>(), false, run.Threads);
+                }
+                else
+                {
+                    Pooling.Max(g, planes, x.Data<byte>(), y.MutableData<byte>(), idx, _columnMajor);
+                }
+
                 break;
             default:
                 throw new InvalidOperationException($"Element type {y.DType} reached the kernel although inference rejects it.");

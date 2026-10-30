@@ -57,6 +57,14 @@ internal static unsafe class Int8Conv
     [ThreadStatic]
     private static DepthwiseJob? t_depthwise;
 
+    [ThreadStatic]
+    private static PadJob? t_pad;
+
+    [ThreadStatic]
+    private static PanelSource? t_panel;
+
+    private const int PlanesPerPadChunk = 4;
+
     public static void Run(ref Int8ConvCall c)
     {
         ConvShape s = c.S;
@@ -112,9 +120,37 @@ internal static unsafe class Int8Conv
         bool pointwise = s.KH == 1 && s.KW == 1 && s.StrideH == 1 && s.StrideW == 1 &&
                          s.PadTop == 0 && s.PadLeft == 0 && s.PadBottom == 0 && s.PadRight == 0;
         Int8Format f = c.Format;
-        byte* packed = (byte*)Scratch.Get(Scratch.PackB, (f.PackedBBytes(k, nCols) + 3) / 4);
-        int* sums = (int*)Scratch.Get(Scratch.Plane, nCols);
         int hw = s.H * s.W;
+
+        // The column sums only matter when the weights have a nonzero zero point (symmetric weights, the usual case, need none).
+        bool wantSums = c.WZeroScalar != 0;
+        for (int i = 0; !wantSums && i < c.WZeroVec.Length; i++)
+        {
+            wantSums = c.WZeroVec[i] != 0;
+        }
+
+        // Convolutions with horizontal stride 1 or 2 gather from zero-point-bordered copies of the planes with vector loads (Int8Pack).
+        int hp = s.H + s.PadTop + s.PadBottom, wp = s.W + s.PadLeft + s.PadRight;
+        bool vectorGather = !pointwise && Int8Pack.Supported(in f) && s.StrideW <= 2 && s.OutW >= 4 && s.DilW >= 1 && s.DilH >= 1 &&
+                            hp > 0 && wp > 0 && ((long)(s.OutH - 1) * s.StrideH) + ((long)(s.KH - 1) * s.DilH) < hp &&
+                            ((long)(s.OutW - 1) * s.StrideW) + ((long)(s.KW - 1) * s.DilW) < wp && (long)cinG * hp * wp < (int.MaxValue / 2);
+        long planeSize = (long)hp * wp;
+
+        // With vector packers the patches of a panel of columns are packed by the thread that multiplies them (Int8BPanelSource);
+        // otherwise the whole matrix is packed first.
+        bool pointwiseVector = pointwise && Int8Pack.Supported(in f);
+        // Only worth it when more than one thread will work on the product: one thread packs the whole matrix once, with no repeats.
+        long work = (long)coutG * nCols * k / 50;
+        bool onDemand = (pointwiseVector || vectorGather) && c.Threads > 1 && work / ParallelFor.MinWorkPerThread > 1;
+        byte* packed = null;
+        int* sums = null;
+        if (!onDemand)
+        {
+            packed = (byte*)Scratch.Get(Scratch.PackB, (f.PackedBBytes(k, nCols) + 3) / 4);
+            sums = (int*)Scratch.Get(Scratch.Plane, nCols);
+        }
+
+        PanelSource panel = t_panel ??= new PanelSource();
         fixed (byte* px = c.X)
         {
             for (int img = 0; img < s.N; img++)
@@ -122,9 +158,34 @@ internal static unsafe class Int8Conv
                 for (int g = 0; g < s.Groups; g++)
                 {
                     byte* src = px + ((((long)img * s.Cin) + (g * cinG)) * hw);
-                    if (pointwise)
+                    if (pointwise && onDemand)
                     {
-                        Int8Gemm.PackB(in f, src, nCols, c.XU8, k, nCols, packed, sums, c.Threads);
+                        panel.Set(in f, src, nCols, c.XU8, k, nCols, wantSums);
+                    }
+                    else if (pointwise)
+                    {
+                        Int8Gemm.PackB(in f, src, nCols, c.XU8, k, nCols, packed, sums, c.Threads, wantSums);
+                    }
+                    else if (vectorGather)
+                    {
+                        // 32 bytes of slack on both sides of the bordered planes: a run's 16-byte load may start before its first lane.
+                        sbyte* padded = (sbyte*)Scratch.Get(Scratch.Im2Col, (((long)cinG * planeSize) + 64 + 3) / 4) + 32;
+                        PadJob pj = t_pad ??= new PadJob();
+                        pj.Src = src;
+                        pj.U8 = c.XU8;
+                        pj.Pad = (sbyte)Int8Gemm.Shift((byte)c.XZeroRaw, c.XU8);
+                        pj.S = s;
+                        pj.Dst = padded;
+                        pj.Planes = cinG;
+                        ParallelFor.Run(pj, (cinG + PlanesPerPadChunk - 1) / PlanesPerPadChunk, c.Threads, (long)cinG * planeSize / 8);
+                        if (onDemand)
+                        {
+                            panel.Set(in f, in s, padded, (int)planeSize, cinG, k, wantSums);
+                        }
+                        else
+                        {
+                            Int8Pack.Im2ColStrips(in f, in s, padded, (int)planeSize, cinG, k, (sbyte*)packed, sums, wantSums, 0, (nCols + f.Nr - 1) / f.Nr);
+                        }
                     }
                     else
                     {
@@ -150,8 +211,9 @@ internal static unsafe class Int8Conv
                         M = coutG,
                         N = nCols,
                         K = k,
-                        BPacked = new ReadOnlySpan<byte>(packed, (int)f.PackedBBytes(k, nCols)),
-                        BSums = new ReadOnlySpan<int>(sums, nCols),
+                        BPacked = onDemand ? default : new ReadOnlySpan<byte>(packed, (int)f.PackedBBytes(k, nCols)),
+                        BSums = onDemand ? default : new ReadOnlySpan<int>(sums, nCols),
+                        BSource = onDemand ? panel : null,
                         ZbScalar = c.XZeroShifted,
                         ZaScalar = c.WZeroScalar,
                         QuantUnsigned = c.QuantUnsigned,
@@ -314,6 +376,78 @@ internal static unsafe class Int8Conv
                 {
                     ColSums[j0 + c] = sums[c];
                 }
+            }
+        }
+    }
+
+    private sealed class PadJob : ChunkJob
+    {
+        public byte* Src;
+        public bool U8;
+        public sbyte Pad;
+        public ConvShape S;
+        public sbyte* Dst;
+        public int Planes;
+
+        public override void RunChunk(int chunk)
+        {
+            int p0 = chunk * PlanesPerPadChunk;
+            Int8Pack.PadPlanes(Src, U8, Pad, S.H, S.W, S.PadTop, S.PadLeft, S.PadBottom, S.PadRight, Dst, p0, Math.Min(Planes, p0 + PlanesPerPadChunk));
+        }
+    }
+
+    // Packs strips of B on demand: the columns of a 1x1 convolution's input as they are, or the patches of a larger one gathered from
+    // the bordered planes. Strip indices are absolute; the packers address by absolute strip, so the destination is offset back.
+    private sealed class PanelSource : Int8BPanelSource
+    {
+        private Int8Format _f;
+        private ConvShape _s;
+        private bool _pointwise;
+        private byte* _src;
+        private long _ldb;
+        private bool _u8;
+        private int _k;
+        private int _n;
+        private sbyte* _planes;
+        private int _planeSize;
+        private int _cinG;
+        private bool _wantSums;
+
+        public void Set(in Int8Format f, byte* src, long ldb, bool u8, int k, int n, bool wantSums)
+        {
+            _f = f;
+            _pointwise = true;
+            _src = src;
+            _ldb = ldb;
+            _u8 = u8;
+            _k = k;
+            _n = n;
+            _wantSums = wantSums;
+        }
+
+        public void Set(in Int8Format f, in ConvShape s, sbyte* planes, int planeSize, int cinG, int k, bool wantSums)
+        {
+            _f = f;
+            _s = s;
+            _pointwise = false;
+            _planes = planes;
+            _planeSize = planeSize;
+            _cinG = cinG;
+            _k = k;
+            _wantSums = wantSums;
+        }
+
+        public override void Pack(int firstStrip, int strips, byte* dst, int* sums)
+        {
+            long back = (long)firstStrip * _f.Nr * _f.KPad(_k);
+            int* sumsBack = sums - ((long)firstStrip * _f.Nr);
+            if (_pointwise)
+            {
+                Int8Pack.PackBStrips(in _f, _src, _ldb, _u8, _k, _n, dst - back, sumsBack, _wantSums, firstStrip, firstStrip + strips);
+            }
+            else
+            {
+                Int8Pack.Im2ColStrips(in _f, in _s, _planes, _planeSize, _cinG, _k, (sbyte*)(dst - back), sumsBack, _wantSums, firstStrip, firstStrip + strips);
             }
         }
     }

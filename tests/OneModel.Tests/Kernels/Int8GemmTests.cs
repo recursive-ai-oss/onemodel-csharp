@@ -22,7 +22,8 @@ public class Int8GemmTests
             {
                 int m = ms[rng.Next(ms.Length)], n = ns[rng.Next(ns.Length)], k = ks[rng.Next(ks.Length)];
                 bool aU8 = rng.Next(2) == 0, bU8 = rng.Next(2) == 0, packA = rng.Next(2) == 0;
-                bool perRow = rng.Next(2) == 0, perCol = rng.Next(2) == 0, toInt = rng.Next(2) == 0;
+                bool perRow = rng.Next(2) == 0, perCol = rng.Next(2) == 0, toInt = rng.Next(3) == 0, toFloat = !toInt && rng.Next(3) == 0;
+                int zaS = rng.Next(3) == 0 ? 0 : 7;
                 int threads = rng.Next(2) == 0 ? 1 : 5;
                 byte[] a = new byte[m * k], b = new byte[k * n];
                 // Extremes are the likely overflow and sign-extension traps: mix them in.
@@ -39,7 +40,7 @@ public class Int8GemmTests
                 int[] za = new int[m], zb = new int[n];
                 for (int i = 0; i < m; i++)
                 {
-                    za[i] = perRow ? rng.Next(-128, 128) : 7;
+                    za[i] = perRow ? (rng.Next(4) == 0 ? 0 : rng.Next(-128, 128)) : zaS;
                 }
 
                 for (int j = 0; j < n; j++)
@@ -59,15 +60,20 @@ public class Int8GemmTests
                 Int8Packed? pa = packA ? Int8Packed.ForA(in f, a, k, aU8, m, k) : null;
                 int[] gotI = new int[m * n];
                 byte[] gotQ = new byte[m * n];
+                float[] gotF = new float[m * n];
                 var call = new Int8Call
                 {
                     Format = f, M = m, N = n, K = k, ARaw = a, Lda = k, AU8 = aU8, APacked = pa, BPacked = packed, BSums = sums,
-                    ZaScalar = 7, ZaVec = perRow ? za : default, ZbScalar = -3, ZbVec = perCol ? zb : default, Ldc = n, Bias = bias,
+                    ZaScalar = zaS, ZaVec = perRow ? za : default, ZbScalar = -3, ZbVec = perCol ? zb : default, Ldc = n, Bias = bias,
                     Mult = mscalar, MultVec = mult, MultPerRow = false, QuantUnsigned = unsignedOut, QuantZero = yz, Threads = threads,
                 };
                 if (toInt)
                 {
                     call.OutInt32 = gotI;
+                }
+                else if (toFloat)
+                {
+                    call.OutFloat = gotF;
                 }
                 else
                 {
@@ -92,6 +98,12 @@ public class Int8GemmTests
                         if (toInt)
                         {
                             Assert.True((int)acc == gotI[i * n + j], $"{path} m{m} n{n} k{k} [{i},{j}]: {gotI[i * n + j]} vs {acc}");
+                        }
+                        else if (toFloat)
+                        {
+                            float mu = mult.Length > 0 ? mult[j] : mscalar;
+                            float wantF = (float)(int)acc * mu;
+                            Assert.True(BitConverter.SingleToInt32Bits(wantF) == BitConverter.SingleToInt32Bits(gotF[i * n + j]), $"{path} float m{m} n{n} k{k} [{i},{j}]: {gotF[i * n + j]} vs {wantF}");
                         }
                         else
                         {

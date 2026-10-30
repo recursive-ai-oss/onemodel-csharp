@@ -1,6 +1,8 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.X86;
 
 namespace RecursiveAI.OneModel.Kernels;
 
@@ -41,6 +43,7 @@ internal static unsafe class Int8Depthwise
 
         // Widen the plane: value = shifted input - zero point, as 16-bit; padding stays zero (the input's zero point).
         int bias8 = xU8 ? 128 + xZero : xZero;
+        byte* tmp = stackalloc byte[16];
         for (int iy = 0; iy < s.H; iy++)
         {
             int pr = iy + s.PadTop;
@@ -81,9 +84,18 @@ internal static unsafe class Int8Depthwise
                     hi.Store(dst + i + 8);
                 }
 
-                for (; i < cols; i++)
+                if (i < cols)
                 {
-                    dst[i] = (short)((xU8 ? src[i] : (sbyte)src[i]) - bias8);
+                    // The tail through a 16-byte stack copy padded with the zero point (which widens to the zero padding): the extra
+                    // lanes land in the row's slack, which is zero padding anyway.
+                    for (int t = 0; t < 16; t++)
+                    {
+                        tmp[t] = i + t < cols ? src[i + t] : (byte)bias8;
+                    }
+
+                    Widen(Vector128.Load(tmp), xU8, vb, out Vector128<short> t0, out Vector128<short> t1);
+                    t0.Store(dst + i);
+                    t1.Store(dst + i + 8);
                 }
             }
             else
@@ -91,7 +103,33 @@ internal static unsafe class Int8Depthwise
                 // Column c of the padded plane goes to copy c % 2, position c / 2.
                 short* d0 = sub + ((long)pr * stride);
                 short* d1 = sub + (((long)hp + pr) * stride);
-                for (int i = 0; i < cols; i++)
+                int i = 0;
+                if ((s.PadLeft & 1) != 0 && cols > 0)
+                {
+                    // Start on an even padded column so the pairs of a vector load split into copy 0 (even) and copy 1 (odd).
+                    int pc0 = s.PadLeft;
+                    d1[pc0 >> 1] = (short)((xU8 ? src[0] : (sbyte)src[0]) - bias8);
+                    i = 1;
+                }
+
+                if (Sse2.IsSupported || AdvSimd.Arm64.IsSupported)
+                {
+                    Vector128<short> vb = Vector128.Create((short)bias8);
+                    for (; i + 32 <= cols; i += 32)
+                    {
+                        int h = (i + s.PadLeft) >> 1;
+                        Vector128<byte> a = Vector128.Load(src + i), b = Vector128.Load(src + i + 16);
+                        SplitEvenOdd(a, b, out Vector128<byte> ev, out Vector128<byte> od);
+                        Widen(ev, xU8, vb, out Vector128<short> e0, out Vector128<short> e1);
+                        Widen(od, xU8, vb, out Vector128<short> o0, out Vector128<short> o1);
+                        e0.Store(d0 + h);
+                        e1.Store(d0 + h + 8);
+                        o0.Store(d1 + h);
+                        o1.Store(d1 + h + 8);
+                    }
+                }
+
+                for (; i < cols; i++)
                 {
                     int pc = i + s.PadLeft;
                     short v = (short)((xU8 ? src[i] : (sbyte)src[i]) - bias8);
@@ -107,9 +145,10 @@ internal static unsafe class Int8Depthwise
             }
         }
 
-        // The non-zero taps: weight and the offset of its first input element from the start of the output row's base.
-        int* tw = stackalloc int[kh * kw];
-        int* to = stackalloc int[kh * kw];
+        // The non-zero taps: weight and the offset of its first input element from the start of the output row's base. Consecutive taps
+        // are paired (an odd one out pairs with a zero weight) so the 16-bit multiply-add can take two taps per instruction.
+        int* tw = stackalloc int[(kh * kw) + 1];
+        int* to = stackalloc int[(kh * kw) + 1];
         int taps = 0;
         for (int t = 0; t < kh * kw; t++)
         {
@@ -125,9 +164,21 @@ internal static unsafe class Int8Depthwise
             taps++;
         }
 
+        bool pairs = block == 16 && Avx2.IsSupported;
+        if (pairs && (taps & 1) != 0)
+        {
+            tw[taps] = 0;
+            to[taps] = to[taps - 1];
+            taps++;
+        }
+
         for (int oy = 0; oy < outH; oy++)
         {
-            if (block == 16)
+            if (pairs)
+            {
+                RowPairs256(sub + ((long)oy * sy * stride), tw, to, taps, bias, owPad, acc);
+            }
+            else if (block == 16)
             {
                 RowV256(sub + ((long)oy * sy * stride), tw, to, taps, bias, owPad, acc);
             }
@@ -151,6 +202,65 @@ internal static unsafe class Int8Depthwise
         }
     }
 
+    // Sixteen bytes to sixteen 16-bit values minus the bias, as two vectors.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Widen(Vector128<byte> v, bool u8, Vector128<short> bias, out Vector128<short> lo, out Vector128<short> hi)
+    {
+        if (u8)
+        {
+            lo = Vector128.WidenLower(v).AsInt16() - bias;
+            hi = Vector128.WidenUpper(v).AsInt16() - bias;
+        }
+        else
+        {
+            Vector128<sbyte> sv = v.AsSByte();
+            lo = Vector128.WidenLower(sv) - bias;
+            hi = Vector128.WidenUpper(sv) - bias;
+        }
+    }
+
+    // The even-indexed and the odd-indexed bytes of the 32 bytes a, b.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void SplitEvenOdd(Vector128<byte> a, Vector128<byte> b, out Vector128<byte> even, out Vector128<byte> odd)
+    {
+        if (Sse2.IsSupported)
+        {
+            Vector128<short> m = Vector128.Create((short)0x00FF);
+            even = Sse2.PackUnsignedSaturate(a.AsInt16() & m, b.AsInt16() & m);
+            odd = Sse2.PackUnsignedSaturate(Sse2.ShiftRightLogical(a.AsUInt16(), 8).AsInt16(), Sse2.ShiftRightLogical(b.AsUInt16(), 8).AsInt16());
+            return;
+        }
+
+        even = AdvSimd.Arm64.UnzipEven(a, b);
+        odd = AdvSimd.Arm64.UnzipOdd(a, b);
+    }
+
+    // One output row on AVX2, 16 columns per step, two taps per multiply-add (vpmaddwd): the two taps' columns are interleaved
+    // into 16-bit pairs and multiplied by the pair of weights, so a pair of taps costs two loads, two unpacks, two multiply-adds and
+    // two adds. Sums are exact 32-bit integers (an input is at most 255 in magnitude and a weight at most 255).
+    private static void RowPairs256(short* rowBase, int* tw, int* to, int taps, int bias, int owPad, int* acc)
+    {
+        Vector256<int> vbias = Vector256.Create(bias);
+        for (int ox = 0; ox < owPad; ox += 16)
+        {
+            // a0 holds columns 0-3 and 8-11, a1 columns 4-7 and 12-15 (the unpacks work inside 128-bit halves).
+            Vector256<int> a0 = vbias, a1 = vbias;
+            for (int t = 0; t < taps; t += 2)
+            {
+                Vector256<short> v0 = Avx.LoadVector256(rowBase + to[t] + ox);
+                Vector256<short> v1 = Avx.LoadVector256(rowBase + to[t + 1] + ox);
+                Vector256<short> w = Vector256.Create((tw[t] & 0xFFFF) | (tw[t + 1] << 16)).AsInt16();
+                a0 = Avx2.Add(a0, Avx2.MultiplyAddAdjacent(Avx2.UnpackLow(v0, v1), w));
+                a1 = Avx2.Add(a1, Avx2.MultiplyAddAdjacent(Avx2.UnpackHigh(v0, v1), w));
+            }
+
+            a0.GetLower().Store(acc + ox);
+            a1.GetLower().Store(acc + ox + 4);
+            a0.GetUpper().Store(acc + ox + 8);
+            a1.GetUpper().Store(acc + ox + 12);
+        }
+    }
+
     // One output row, 16 columns per step: 16 sums in two 256-bit registers across every tap.
     private static void RowV256(short* rowBase, int* tw, int* to, int taps, int bias, int owPad, int* acc)
     {
@@ -171,19 +281,68 @@ internal static unsafe class Int8Depthwise
         }
     }
 
-    // The same with 128-bit vectors: 8 columns per step.
+    // The same with 128-bit vectors: 8 columns per step. On Arm the widening multiply-accumulate (smlal, smlal2) does the multiply and
+    // the add of each half in one instruction.
     private static void RowV128(short* rowBase, int* tw, int* to, int taps, int bias, int owPad, int* acc)
     {
         Vector128<int> vbias = Vector128.Create(bias);
-        for (int ox = 0; ox < owPad; ox += 8)
+        int ox = 0;
+        if (AdvSimd.IsSupported)
+        {
+            // Four blocks of eight columns at a time: eight independent accumulators hide the latency of the multiply-accumulate and
+            // each tap's weight is loaded once for all of them.
+            for (; ox + 32 <= owPad; ox += 32)
+            {
+                Vector128<int> a0 = vbias, a1 = vbias, a2 = vbias, a3 = vbias, a4 = vbias, a5 = vbias, a6 = vbias, a7 = vbias;
+                for (int t = 0; t < taps; t++)
+                {
+                    short* p = rowBase + to[t] + ox;
+                    Vector128<short> w = Vector128.Create((short)tw[t]);
+                    Vector64<short> wl = w.GetLower();
+                    Vector128<short> v0 = Vector128.Load(p), v1 = Vector128.Load(p + 8), v2 = Vector128.Load(p + 16), v3 = Vector128.Load(p + 24);
+                    a0 = AdvSimd.MultiplyWideningLowerAndAdd(a0, v0.GetLower(), wl);
+                    a1 = AdvSimd.MultiplyWideningUpperAndAdd(a1, v0, w);
+                    a2 = AdvSimd.MultiplyWideningLowerAndAdd(a2, v1.GetLower(), wl);
+                    a3 = AdvSimd.MultiplyWideningUpperAndAdd(a3, v1, w);
+                    a4 = AdvSimd.MultiplyWideningLowerAndAdd(a4, v2.GetLower(), wl);
+                    a5 = AdvSimd.MultiplyWideningUpperAndAdd(a5, v2, w);
+                    a6 = AdvSimd.MultiplyWideningLowerAndAdd(a6, v3.GetLower(), wl);
+                    a7 = AdvSimd.MultiplyWideningUpperAndAdd(a7, v3, w);
+                }
+
+                a0.Store(acc + ox);
+                a1.Store(acc + ox + 4);
+                a2.Store(acc + ox + 8);
+                a3.Store(acc + ox + 12);
+                a4.Store(acc + ox + 16);
+                a5.Store(acc + ox + 20);
+                a6.Store(acc + ox + 24);
+                a7.Store(acc + ox + 28);
+            }
+        }
+
+        for (; ox < owPad; ox += 8)
         {
             Vector128<int> a0 = vbias, a1 = vbias;
-            for (int t = 0; t < taps; t++)
+            if (AdvSimd.IsSupported)
             {
-                Vector128<short> v = Vector128.Load(rowBase + to[t] + ox);
-                Vector128<int> vw = Vector128.Create(tw[t]);
-                a0 += Vector128.WidenLower(v) * vw;
-                a1 += Vector128.WidenUpper(v) * vw;
+                for (int t = 0; t < taps; t++)
+                {
+                    Vector128<short> v = Vector128.Load(rowBase + to[t] + ox);
+                    Vector128<short> w = Vector128.Create((short)tw[t]);
+                    a0 = AdvSimd.MultiplyWideningLowerAndAdd(a0, v.GetLower(), w.GetLower());
+                    a1 = AdvSimd.MultiplyWideningUpperAndAdd(a1, v, w);
+                }
+            }
+            else
+            {
+                for (int t = 0; t < taps; t++)
+                {
+                    Vector128<short> v = Vector128.Load(rowBase + to[t] + ox);
+                    Vector128<int> vw = Vector128.Create(tw[t]);
+                    a0 += Vector128.WidenLower(v) * vw;
+                    a1 += Vector128.WidenUpper(v) * vw;
+                }
             }
 
             a0.Store(acc + ox);
