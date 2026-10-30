@@ -1,7 +1,7 @@
 <Project>
 
   <!-- Properties other files rely on:
-       LibName         the library name, used for assembly, namespace and project names. The provisional name changes here.
+       LibName         the library name, used for assembly, namespace and project names.
        PackagePrefix   publisher prefix; the package ID is $(PackagePrefix).$(LibName).
        Version         the one package version.
        ONEMODEL_ARTIFACTS (environment) where all bin/obj/package output goes.
