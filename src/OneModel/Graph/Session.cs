@@ -82,15 +82,16 @@ public sealed class Session : IDisposable
         return new Session(graph, options, env);
     }
 
-    /// <summary>Imports an ONNX file and creates a session from it.</summary>
+    /// <summary>Imports an ONNX file, or a file in the OneModel format (chosen by its first eight bytes), and creates a session from it.</summary>
     /// <param name="path">The model file; external weight files are read from its directory.</param>
     /// <param name="options">Defaults to fast mode, one thread per core.</param>
     /// <param name="cancellationToken">Checked while importing and between operators.</param>
-    /// <exception cref="OnnxImportException">The file is not a valid model.</exception>
+    /// <exception cref="OnnxImportException">The file is not a valid ONNX model.</exception>
+    /// <exception cref="Format.ModelFormatException">The file is in the OneModel format and is truncated, corrupt or unsupported.</exception>
     /// <exception cref="SessionException">As <see cref="Create(IrModel, SessionOptions?, CancellationToken)"/>.</exception>
     public static Session Load(string path, SessionOptions? options = null, CancellationToken cancellationToken = default)
     {
-        using IrModel model = OnnxImporter.Load(path, null, cancellationToken);
+        using IrModel model = Format.ModelFormat.LoadAny(path, cancellationToken);
         return Create(model, options, cancellationToken);
     }
 
@@ -98,7 +99,7 @@ public sealed class Session : IDisposable
     /// <inheritdoc cref="Load(string, SessionOptions?, CancellationToken)"/>
     public static Session Load(Stream stream, SessionOptions? options = null, CancellationToken cancellationToken = default)
     {
-        using IrModel model = OnnxImporter.Load(stream, null, cancellationToken);
+        using IrModel model = Format.ModelFormat.LoadAny(stream, cancellationToken);
         return Create(model, options, cancellationToken);
     }
 

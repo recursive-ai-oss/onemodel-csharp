@@ -24,3 +24,4 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 | CTC decoding: greedy and prefix beam search, confidences | [ctc.md](ctc.md) |
 | Element-wise operators, activations, comparisons, Where, Cast | [ops-elementwise.md](ops-elementwise.md) |
 | int8: operators, product kernel, requantization, QDQ rewrite | [int8.md](int8.md) |
+| The OneModel model file: header, JSON manifest, aligned tensors, reading and writing rules (version 1, unstable until 1.0) | [format.md](format.md) |

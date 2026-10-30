@@ -30,11 +30,12 @@ public sealed class Model : IDisposable
     /// <summary>The graph-layer session underneath, for anything the typed overloads do not cover.</summary>
     public Session Session { get; }
 
-    /// <summary>Loads an ONNX model from a file; weights stored in external data files next to it are read too.</summary>
+    /// <summary>Loads an ONNX model from a file, or a model saved in the OneModel format (see <see cref="Format.ModelFormat"/>); weights stored in ONNX external data files next to it are read too.</summary>
     /// <param name="path">The <c>.onnx</c> file.</param>
     /// <param name="options">Defaults to fast mode and one thread per core. Pass options for exact mode or a thread limit.</param>
     /// <param name="cancellationToken">Cancels loading.</param>
     /// <exception cref="Onnx.OnnxImportException">The file is not a valid ONNX model.</exception>
+    /// <exception cref="Format.ModelFormatException">The file is in the OneModel format and is truncated, corrupt or unsupported.</exception>
     /// <exception cref="SessionException">The model uses an operator this library does not implement (the exception lists all of them), or exact mode was requested and an operator is not exact.</exception>
     /// <exception cref="OperationCanceledException">Cancelled.</exception>
     public static Model Load(string path, SessionOptions? options = null, CancellationToken cancellationToken = default) =>
