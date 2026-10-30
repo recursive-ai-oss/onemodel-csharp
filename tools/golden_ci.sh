@@ -9,7 +9,8 @@
 # jit: dotnet <out>/GoldenModels.dll    aot: <out>/GoldenModels    (APP names the program; GRAPH_ARGS may be overridden)
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-g="$(cd "$here/../testdata/graphs" && pwd)"
+# Git Bash on Windows: hand .NET a drive-letter path (pwd -W), since it reads /d/a/... as D:\d\a\...
+g="$(cd "$here/../testdata/graphs" && { pwd -W 2>/dev/null || pwd; })"
 expected="$g/golden-exact.txt"
 args=(graph "mlp5=$g/mlp.onnx=$g/reference.json#mlp-5" graph "chain5=$g/chain.onnx=$g/reference.json#chain-5"
       graph "shape_ops=$g/shape_ops.onnx=$g/shape_ops.json" graph "int8_dyn=$g/int8_dyn.onnx=$g/int8_dyn.json"
