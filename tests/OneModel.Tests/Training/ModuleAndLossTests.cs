@@ -279,4 +279,48 @@ public class ModuleAndLossTests
         Assert.Throws<ArgumentOutOfRangeException>(() => Losses.CrossEntropy(l, t, 1.5f));
         Assert.Throws<TensorShapeException>(() => Losses.BceWithLogits(l, T(Shape.Create(3), 1, 2, 3)));
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RecurrentModuleNamesTrainAndFeedCtc(bool gru)
+    {
+        var g = new Generator(31);
+        using var rnn = new Recurrent(gru, 3, 4, g, layers: 2, bidirectional: true);
+        Assert.Equal(16, rnn.Parameters().Length);
+        Assert.Equal("weight_ih_l0", rnn.NamedParameters()[0].Name);
+        Assert.Equal("bias_hh_l1_reverse", rnn.NamedParameters()[^1].Name);
+        using var head = new Linear(8, 5, g);
+        using var scope = new ActivationScope();
+        Tensor x = Tensor.Create(DType.F32, Shape.Create(6, 2, 3));
+        foreach (ref float v in x.MutableData<float>())
+        {
+            v = g.Uniform(-1, 1);
+        }
+
+        ActivationScope.Track(x);
+        Tensor y = rnn.Forward(x);
+        Assert.Equal(Shape.Create(6, 2, 8), y.Shape);
+        Tensor lp = Ops.LogSoftmax(head.Forward(y.Reshape(12, 8)).Reshape(6, 2, 5));
+        Tensor loss = Losses.Ctc(lp, [1, 2, 3], [6, 6], [2, 1]);
+        Assert.True(float.IsFinite(loss.Data<float>()[0]));
+        Assert.Equal(Ops.CtcLoss(lp, [1, 2, 3], [6, 6], [2, 1]).Data<float>()[0], loss.Data<float>()[0]);
+        loss.Backward();
+        Assert.All(rnn.Parameters(), p => Assert.False(p.Grad.IsEmpty));
+    }
+
+    [Fact]
+    public void ConvTransposeModuleUpsamplesAndTrains()
+    {
+        var g = new Generator(32);
+        using var up = new ConvTranspose2d(2, 3, 2, g, stride: 2);
+        using var scope = new ActivationScope();
+        Tensor x = Tensor.Create(DType.F32, Shape.Create(1, 2, 3, 3));
+        x.Fill(0.5f);
+        ActivationScope.Track(x);
+        Tensor y = up.Forward(x);
+        Assert.Equal(Shape.Create(1, 3, 6, 6), y.Shape);
+        Ops.Sum(y).Backward();
+        Assert.All(up.Parameters(), p => Assert.False(p.Grad.IsEmpty));
+    }
 }

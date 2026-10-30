@@ -28,6 +28,8 @@ copying anything.
 | `Sequential(layers...)` | children `0`, `1`, ... | applies children in order |
 | `MultiHeadAttention(width, heads)` | children `q`,`k`,`v`,`o` (`Linear`, with bias) | `Ops.Attention` over heads of `width/heads`, scale `1/√(width/heads)`, optional additive mask (no gradient) |
 | `TransformerEncoderLayer(width, heads, ff, dropout)` | children `attn`, `norm1`, `ff1`, `ff2`, `norm2`, and `drop1`, `drop2` when dropout > 0 | post-norm: `x1 = LN1(x + Drop1(Attn(x)))`, `y = LN2(x1 + Drop2(ff2(GELU(ff1(x1)))))`, GELU in its erf form |
+| `Recurrent(gru, in, hidden, layers, bidirectional, batchFirst)` | PyTorch names `weight_ih_l0`, `weight_hh_l0`, `bias_ih_l0`, `bias_hh_l0`, `..._l0_reverse`, ... ([4H or 3H, ·]) | `Ops.Lstm` / `Ops.Gru`, zero initial state, hidden sequence out; weights from `Uniform(±1/√hidden)` in that order |
+| `ConvTranspose2d(in, out, k, stride, padding, outputPadding, dilation, groups, bias)` | `weight` [in,out/groups,k,k], `bias` [out] | `Ops.ConvTranspose2d`; bound 1/√(out/groups·k·k) |
 | `Lambda` | none | ReLU, GELU, sigmoid, tanh, max/avg pooling (square window, padding counted in the average), global average pooling, flatten, mean over an axis |
 
 ### 1.1 Initialisation
@@ -59,7 +61,7 @@ elements; otherwise the sum is returned.
 - `BceWithLogits(x, t)`: per element `softplus(x) − x·t`, `softplus(x) = −LogSoftmax([x, 0])[1]`, stable for any |x| (no overflow,
   no cancellation). No `pos_weight`, no class weights.
 
-CTC loss is not part of this package yet (it needs its backward pass).
+- `Ctc(logProbs[T,B,C], targets, inputLengths, targetLengths, blank, reduction, zeroInfinity)`: `Ops.CtcLoss`.
 
 ## 3. Optimizers
 

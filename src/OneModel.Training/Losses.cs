@@ -64,6 +64,21 @@ public static class Losses
     public static Tensor NllLoss(in Tensor logProbs, in Tensor targets, int ignoreIndex = -100, bool mean = true) =>
         Ops.NllLoss(logProbs, targets, mean, ignoreIndex);
 
+    /// <summary>
+    /// Connectionist temporal classification loss (Graves et al. 2006) over log-probabilities [T, B, C]; see <see cref="Ops.CtcLoss"/> for
+    /// the reductions and for how the gradient relates to PyTorch's (the two agree after a log-softmax).
+    /// </summary>
+    /// <param name="logProbs">Float32 [T, B, C], normally a log-softmax output.</param>
+    /// <param name="targets">All target labels concatenated, none equal to the blank.</param>
+    /// <param name="inputLengths">Valid steps per sequence.</param>
+    /// <param name="targetLengths">Target length per sequence.</param>
+    /// <param name="blank">The blank class (default 0).</param>
+    /// <param name="reduction">Default: each loss divided by its target length, then averaged over the batch.</param>
+    /// <param name="zeroInfinity">Replace infinite losses and their gradients by zero (default false).</param>
+    public static Tensor Ctc(in Tensor logProbs, ReadOnlySpan<int> targets, ReadOnlySpan<int> inputLengths, ReadOnlySpan<int> targetLengths,
+        int blank = 0, CtcReduction reduction = CtcReduction.Mean, bool zeroInfinity = false) =>
+        Ops.CtcLoss(logProbs, targets, inputLengths, targetLengths, blank, reduction, zeroInfinity);
+
     /// <summary>Mean (or sum) of squared differences <c>(prediction − target)²</c>.</summary>
     /// <param name="prediction">Float32 tensor.</param>
     /// <param name="target">Float32 tensor, broadcastable with <paramref name="prediction"/>. It may require gradients.</param>
