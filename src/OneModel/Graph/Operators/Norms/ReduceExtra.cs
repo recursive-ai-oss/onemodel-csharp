@@ -59,7 +59,7 @@ internal static class ReduceExtra
     }
 
     // Splits the axes into kept and reduced ones with the element strides of a contiguous input.
-    private static void Walk(ReadOnlySpan<int> dims, ReadOnlySpan<bool> reduced, Span<int> buf, out int outputs, out int reducedCount,
+    internal static void Walk(ReadOnlySpan<int> dims, ReadOnlySpan<bool> reduced, Span<int> buf, out int outputs, out int reducedCount,
         out Span<int> keptDims, out Span<int> keptStrides, out Span<int> redDims, out Span<int> redStrides)
     {
         int n = Shape.MaxRank;
@@ -92,7 +92,7 @@ internal static class ReduceExtra
     }
 
     // Axes were stored innermost first, so the least significant digit of an index is element 0.
-    private static int Base(int o, ReadOnlySpan<int> dims, ReadOnlySpan<int> strides)
+    internal static int Base(int o, ReadOnlySpan<int> dims, ReadOnlySpan<int> strides)
     {
         int off = 0;
         for (int i = 0; i < dims.Length; i++)
@@ -104,5 +104,5 @@ internal static class ReduceExtra
         return off;
     }
 
-    private static int Offset(int r, ReadOnlySpan<int> dims, ReadOnlySpan<int> strides) => Base(r, dims, strides);
+    internal static int Offset(int r, ReadOnlySpan<int> dims, ReadOnlySpan<int> strides) => Base(r, dims, strides);
 }

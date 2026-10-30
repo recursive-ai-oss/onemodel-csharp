@@ -46,6 +46,23 @@ internal static class CoverageTable
         ScatterElementsOp.Legacy,
         CompressOp.Def,
 
+        // Data movement.
+        BlockShuffleOp.DepthToSpace,
+        BlockShuffleOp.SpaceToDepth,
+        EyeLikeOp.Def,
+        ReverseSequenceOp.Def,
+        CenterCropPadOp.Def,
+        BitCastOp.Def,
+        TensorScatterOp.Def,
+
+        // Numeric operators.
+        CumProdOp.Def,
+        LpNormalizationOp.Def,
+        MeanVarianceNormalizationOp.Def,
+        LrnOp.Def,
+        DetOp.Def,
+        EinsumOp.Def,
+
         // Losses.
         NllLossOp.Nll,
         NllLossOp.SoftmaxCrossEntropy,
