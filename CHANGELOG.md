@@ -6,6 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- int8 speed: vector packing of the B operand and of convolution patches (`Int8Pack`), patches packed on demand by the thread that multiplies them when several threads work, a one-pass epilogue for symmetric weights, a quantized addition and a byte max pooling that the QDQ pass uses in place of `DequantizeLinear, Add, QuantizeLinear` and `DequantizeLinear, MaxPool, QuantizeLinear`, and faster int8 depthwise rows (`docs/int8.md`).
 - `bench/Micro` command `mixed`: step time, peak memory, activation memory and bfloat16 conversion cost of three training steps; the findings that reduced-precision training does not pay on the current kernels, and the one case that would for memory, are in `docs/training.md` section 9.
 - Reverse-mode automatic differentiation on the tensor layer (`docs/autograd.md`): `Tensor.Backward`, leaf gradients, `Backprop.ZeroGrad`, `retainGraph`, saved-tensor version checks and `ActivationScope`, which frees a step's intermediates in one call.
 - Differentiable operators in `Ops`: `Gelu`, `Sigmoid`, `Tanh`, `Sum`, `Mean`, `Softmax`, `LogSoftmax`, `LayerNorm`, `BatchNorm2d`, `Conv2d` (groups, stride, padding, dilation, depthwise), `AvgPool2d`, `GlobalAvgPool2d`, `Concat`, `Embedding`, `NllLoss`, `CrossEntropy`, `Linear` and `Attention`, with backward for these and for the existing arithmetic, `MatMul`, `MaxPool2d` and view operators.

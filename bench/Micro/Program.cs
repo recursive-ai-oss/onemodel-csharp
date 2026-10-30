@@ -28,6 +28,11 @@ internal static class Program
             return AttentionSpike.Run(args[1..]);
         }
 
+        if (args.Length > 0 && args[0] == "convscale")
+        {
+            return ConvScale.Run(args[1..]);
+        }
+
         if (args.Length > 0 && args[0] == "mixed")
         {
             return MixedPrecision.Run(args[1..]);

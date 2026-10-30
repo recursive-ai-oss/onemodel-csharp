@@ -30,7 +30,7 @@ internal sealed class QdqPass : IGraphPass
     public bool PreservesBits => false;
 
     // What one DequantizeLinear contributes to a match: the quantized value and its parameters (value ids).
-    private readonly record struct Dq(int Source, int Scale, int Zero, int Axis);
+    internal readonly record struct Dq(int Source, int Scale, int Zero, int Axis);
 
     public void Run(PassGraph g, CancellationToken ct)
     {
@@ -57,19 +57,19 @@ internal sealed class QdqPass : IGraphPass
         {
             ct.ThrowIfCancellationRequested();
             CompiledNode n = g.Nodes[i];
-            if (n.Outputs.Length != 1 || n.Outputs[0] < 0 || isOutput.Contains(n.Outputs[0]) || n.Inputs.Length < 2)
+            if (n.Outputs.Length != 1 || n.Outputs[0] < 0 || isOutput.Contains(n.Outputs[0]) || n.Inputs.Length < (n.Kernel is MaxPoolOp ? 1 : 2))
             {
                 continue;
             }
 
-            if (n.Kernel is not (ConvOp or GemmOp) || sole[n.Outputs[0]] < 0 || g.Nodes[sole[n.Outputs[0]]].Kernel is not QuantizeLinearOp)
+            if (n.Kernel is not (ConvOp or GemmOp or AddOp or MaxPoolOp) || sole[n.Outputs[0]] < 0 || g.Nodes[sole[n.Outputs[0]]].Kernel is not QuantizeLinearOp)
             {
                 continue;
             }
 
             int qIndex = sole[n.Outputs[0]];
             CompiledNode q = g.Nodes[qIndex];
-            CompiledNode? repl = n.Kernel is ConvOp ? TryConv(g, n, q, producer) : TryGemm(g, n, q, producer);
+            CompiledNode? repl = n.Kernel is ConvOp ? TryConv(g, n, q, producer) : n.Kernel is GemmOp ? TryGemm(g, n, q, producer) : n.Kernel is AddOp ? TryAdd(g, n, q, producer) : TryMaxPool(g, n, q, producer);
             if (repl is not null)
             {
                 replaced[i] = repl;
@@ -95,7 +95,7 @@ internal sealed class QdqPass : IGraphPass
         g.Nodes.AddRange(result);
     }
 
-    private static bool TryDq(PassGraph g, int[] producer, int valueId, out Dq dq)
+    internal static bool TryDq(PassGraph g, int[] producer, int valueId, out Dq dq)
     {
         dq = default;
         if (valueId < 0 || producer[valueId] < 0)
@@ -116,7 +116,7 @@ internal sealed class QdqPass : IGraphPass
     private static bool IsEightBit(Tensor t) => t.DType is DType.U8 or DType.I8;
 
     // A per-tensor 8-bit zero point constant: its id and type.
-    private static bool ScalarZero(PassGraph g, int id, out DType type)
+    internal static bool ScalarZero(PassGraph g, int id, out DType type)
     {
         type = DType.Undefined;
         Tensor t = id >= 0 ? g.Constant(id) : default;
@@ -129,7 +129,7 @@ internal sealed class QdqPass : IGraphPass
         return true;
     }
 
-    private static bool ScalarScale(PassGraph g, int id)
+    internal static bool ScalarScale(PassGraph g, int id)
     {
         Tensor t = id >= 0 ? g.Constant(id) : default;
         return !t.IsEmpty && t.DType == DType.F32 && t.Length == 1;
@@ -200,6 +200,58 @@ internal sealed class QdqPass : IGraphPass
         }
 
         return true;
+    }
+
+    // DequantizeLinear, MaxPool, QuantizeLinear with the same single scale and zero point on both sides: quantizing what dequantizing
+    // produced gives back the 8-bit value (a scale times a small integer, divided by the scale, rounds to that integer), and a
+    // maximum commutes with a positive scale, so the pooling runs on the 8-bit values themselves.
+    private static CompiledNode? TryMaxPool(PassGraph g, CompiledNode pool, CompiledNode q, int[] producer)
+    {
+        if (pool.Inputs.Length != 1 || !TryDq(g, producer, pool.Inputs[0], out Dq x) || x.Source < 0)
+        {
+            return null;
+        }
+
+        int qScale = q.Inputs.Length > 1 ? q.Inputs[1] : -1, qZero = q.Inputs.Length > 2 ? q.Inputs[2] : -1;
+        if (!ScalarScale(g, x.Scale) || !ScalarZero(g, x.Zero, out DType zt) || !ScalarScale(g, qScale) || !ScalarZero(g, qZero, out DType qt) || zt != qt)
+        {
+            return null;
+        }
+
+        float scale = g.Constant(x.Scale).Data<float>()[0];
+        if (!(scale > 0f) || !float.IsFinite(scale) || scale != g.Constant(qScale).Data<float>()[0] ||
+            QuantParams.ZeroAt(g.Constant(x.Zero), 0) != QuantParams.ZeroAt(g.Constant(qZero), 0))
+        {
+            return null;
+        }
+
+        OpKernel kernel = g.Own(MaxPoolOp.Def.Create(pool.Info));
+        return new CompiledNode(pool.Info, kernel, [x.Source], [q.Outputs[0]]);
+    }
+
+    // DequantizeLinear, DequantizeLinear, Add, QuantizeLinear with single scales and zero points: one quantized addition, which computes
+    // the same float32 operations in the same order (so the pass is bit-neutral here), without writing the float tensors.
+    private static CompiledNode? TryAdd(PassGraph g, CompiledNode add, CompiledNode q, int[] producer)
+    {
+        if (add.Inputs.Length != 2 || !TryDq(g, producer, add.Inputs[0], out Dq a) || !TryDq(g, producer, add.Inputs[1], out Dq b))
+        {
+            return null;
+        }
+
+        if (!ScalarScale(g, a.Scale) || !ScalarZero(g, a.Zero, out _) || !ScalarScale(g, b.Scale) || !ScalarZero(g, b.Zero, out _) ||
+            !ScalarScale(g, q.Inputs.Length > 1 ? q.Inputs[1] : -1) || !ScalarZero(g, q.Inputs.Length > 2 ? q.Inputs[2] : -1, out _))
+        {
+            return null;
+        }
+
+        if (a.Source < 0 || b.Source < 0)
+        {
+            return null;
+        }
+
+        int[] inputs = [a.Source, a.Scale, a.Zero, b.Source, b.Scale, b.Zero, q.Inputs[1], q.Inputs[2]];
+        OpKernel kernel = g.Own(QLinearAddOp.Def.Create(add.Info));
+        return new CompiledNode(add.Info, kernel, inputs, [q.Outputs[0]]);
     }
 
     private static CompiledNode? TryConv(PassGraph g, CompiledNode conv, CompiledNode q, int[] producer)

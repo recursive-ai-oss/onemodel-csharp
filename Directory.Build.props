@@ -1,7 +1,7 @@
 <Project>
 
   <!-- Properties other files rely on:
-       LibName         the library name, used for assembly, namespace and project names. The provisional name changes here.
+       LibName         the library name, used for assembly, namespace and project names.
        PackagePrefix   publisher prefix; the package ID is $(PackagePrefix).$(LibName).
        Version         the one package version.
        ONEMODEL_ARTIFACTS (environment) where all bin/obj/package output goes.
@@ -69,8 +69,8 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <!-- Breaking-change check on pack. There is no published version to compare with yet; set PackageValidationBaselineVersion
-         to the last published version after each release. -->
+    <!-- Breaking-change check on pack. Each package project sets PackageValidationBaselineVersion to its last published
+         version (a package with no published version yet sets none). -->
     <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 

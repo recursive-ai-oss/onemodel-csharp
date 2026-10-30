@@ -46,7 +46,7 @@ Write `Graph/Operators/<Name>.cs`: a class deriving `OpKernel` (or a family base
 
 ### Subgraph operators (If, Loop, Scan)
 
-The contract already has what they need; none is implemented yet. A factory receives the `IrNode` (`NodeInfo.Ir`) and can read its graph attributes. It compiles each subgraph once with `CompiledGraph.Create` (outer-scope values it captures become extra inputs), and keeps the compiled graphs as kernel state. `Run` makes or reuses an `ExecutionPlan` for the subgraph's input shapes and runs it with a `RunState` taken from that plan. Because the subgraph's shapes may differ per iteration, the node is declared `OutputsDataDependent` unless its output shapes follow from its inputs. The plan cache and per-plan state pools are what make repeated iterations allocation-free.
+These operators are implemented: each body is compiled once into a nested session and kept as kernel state. Section 8 describes how bodies are compiled, how outer-scope values reach them and how they run.
 
 ## 3. Plans
 
