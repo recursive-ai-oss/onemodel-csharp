@@ -82,22 +82,22 @@ for _ in range(a.trials):
 # Noise on the float tensor feeding the first DynamicQuantizeLinear. A float input "noise_tap" is added to that tensor (adding
 # exact zeros leaves the unperturbed result unchanged); the tensor's shape is learned from a run that exposes it.
 tap_outs = []
-m0 = onnx.load(a.model)
-graph_inputs = {i.name for i in m0.graph.input}
-tap = next((n.input[0] for n in m0.graph.node if n.op_type == "DynamicQuantizeLinear"), None)
+tapped = onnx.load(a.model)
+graph_inputs = {i.name for i in tapped.graph.input}
+tap = next((n.input[0] for n in tapped.graph.node if n.op_type == "DynamicQuantizeLinear"), None)
 if tap is not None and tap not in graph_inputs:
     probe = onnx.load(a.model)
     probe.graph.output.append(h.make_tensor_value_info(tap, onnx.TensorProto.FLOAT, None))
     base = ort.InferenceSession(probe.SerializeToString(), full_opts, providers=["CPUExecutionProvider"]).run([tap], feeds)[0]
-    for node in m0.graph.node:
+    for node in tapped.graph.node:
         for k, x in enumerate(node.input):
             if x == tap:
                 node.input[k] = tap + "_noisy"
-    m0.graph.input.append(h.make_tensor_value_info("noise_tap", onnx.TensorProto.FLOAT, None))
+    tapped.graph.input.append(h.make_tensor_value_info("noise_tap", onnx.TensorProto.FLOAT, None))
     # the Add goes right after the node that produces the tap, which keeps the node list topologically sorted
-    at = max(i for i, node in enumerate(m0.graph.node) if tap in node.output) + 1
-    m0.graph.node.insert(at, h.make_node("Add", [tap, "noise_tap"], [tap + "_noisy"]))
-    noisy = ort.InferenceSession(m0.SerializeToString(), full_opts, providers=["CPUExecutionProvider"])
+    at = max(i for i, node in enumerate(tapped.graph.node) if tap in node.output) + 1
+    tapped.graph.node.insert(at, h.make_node("Add", [tap, "noise_tap"], [tap + "_noisy"]))
+    noisy = ort.InferenceSession(tapped.SerializeToString(), full_opts, providers=["CPUExecutionProvider"])
     rng = np.random.default_rng(2)
     for _ in range(a.trials):
         d = (base * 1e-7 * rng.standard_normal(base.shape)).astype(np.float32)
