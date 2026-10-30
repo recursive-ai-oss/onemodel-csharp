@@ -7,7 +7,7 @@ using RecursiveAI.OneModel.Tensors;
 using RecursiveAI.OneModel.Training;
 
 // crnn-finetune train --weights DIR --sets DIR --batches DIR --out DIR [--steps N] [--lr 6e-5] [--warmup 200] [--wd 0.01]
-//                     [--schedule-steps N] [--until N] [--threads N] [--exact] [--eval-every N] [--skip-eval]
+//                     [--schedule-steps N] [--until N] [--threads N] [--exact] [--eval-every N] [--skip-eval] [--follow]
 // crnn-finetune export --weights DIR --template MODEL.onm --out FILE [--format-version 0|1] [--provenance TEXT]
 // crnn-finetune eval  --weights DIR --sets DIR [--threads N] [--exact]
 //
@@ -65,6 +65,28 @@ Directory.CreateDirectory(outDir);
 model.Train();
 var opt = new AdamW(model.Parameters(), Flt("lr", 6e-5f), weightDecay: Flt("wd", 0.01f));
 var sched = new WarmupCosineLr(Flt("lr", 6e-5f), Int("warmup", 200), Int("schedule-steps", steps), 0.02f);
+// With --follow the batch stream may still be written by a trainer running beside this one: step k is complete once the stream's
+// steps.jsonl (appended after the step's gradient update) lists it.
+static void WaitForBatch(string dir, int step)
+{
+    string steps = Path.Combine(dir, "steps.jsonl");
+    for (int waited = 0; waited < 4 * 3600 * 2; waited++)
+    {
+        if (File.Exists(steps))
+        {
+            using var f = new FileStream(steps, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var r = new StreamReader(f);
+            int n = 0;
+            while (r.ReadLine() is not null) n++;
+            if (n > step) return;
+        }
+
+        Thread.Sleep(500);
+    }
+
+    throw new TimeoutException($"batch {step} did not appear in {dir}");
+}
+
 string ckpt = Path.Combine(outDir, "state.onemckpt");
 int first = 0;
 if (File.Exists(ckpt)) first = (int)Checkpoint.Load(ckpt, model, opt).Extra["step"];
@@ -81,6 +103,7 @@ for (int step = first; step < until; step++)
     double fwdMs;
     {
         using var scope = new ActivationScope();
+        if (o.ContainsKey("follow")) WaitForBatch(batches, step);
         Batch b = Batch.Read(Path.Combine(batches, $"batch-{step:D5}.bin"));
         Tensor x = b.ToInput();
         model.Train();
