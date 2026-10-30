@@ -22,7 +22,7 @@ internal static unsafe class ConvPacked
     private const int TargetChunks = 48;
 
     // Multiply-adds per nanosecond assumed when telling the pool how much work a call holds. A core sustains about 40, but the pool's
-    // rule (one thread per 80 microseconds of work) is conservative for a spinning pool: measured on MobileNetV3's small layers, the
+    // rule (one thread per 20 microseconds of work) is conservative for a spinning pool: measured on MobileNetV3's small layers, the
     // convolutions ran 2x faster on 8 threads with the estimate set to 8 than with 40, and ResNet-50's large layers did not change.
     private const long MacsPerNs = 8;
 
@@ -164,7 +164,10 @@ internal static unsafe class ConvPacked
                     {
                         job.Img = img;
                         job.Group = g;
-                        ParallelFor.Run(pack, kBlocks * stripGroups, threads, (long)k * n / 8);
+                        // Gathering costs about a nanosecond per element it writes (k * n of them). Estimated at an eighth of that, the pool kept
+                        // the gather on one thread for every layer under ~600k elements, which serialised the strip packing of ResNet-50's
+                        // 28x28 and 56x56 layers (8 threads: conv chain 26 -> 18.6 ms).
+                        ParallelFor.Run(pack, kBlocks * stripGroups, threads, (long)k * n);
                         ParallelFor.Run(job, checked((int)tileWork), threads, groupMacs / MacsPerNs);
                     }
                 }
