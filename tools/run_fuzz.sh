@@ -15,7 +15,7 @@ rm -rf "$out"; mkdir -p "$out/corpus" "$out/findings"
 dotnet publish fuzz/OneModel.Fuzz -c Checked -o "$out/pub" -v quiet -clp:NoSummary >/dev/null || exit 1
 if [ "$target" = checkpoint ]; then
   # The seed is written before instrumentation: instrumented code only runs under the fuzzer.
-  dotnet "$out/pub/RecursiveAI.OneModel.Fuzz.dll" seed-checkpoint "$out/seed.ckpt" || exit 1
+  dotnet "$out/pub/RecursiveAI.OneModel.Fuzz.dll" seed-checkpoint "$out/seeds" || exit 1
   DOTNET_ROLL_FORWARD=Major "$work/tools/sharpfuzz" "$out/pub/RecursiveAI.OneModel.Training.dll" >/dev/null || exit 1
 fi
 DOTNET_ROLL_FORWARD=Major "$work/tools/sharpfuzz" "$out/pub/RecursiveAI.OneModel.dll" >/dev/null || exit 1
@@ -26,7 +26,9 @@ for d in "$@"; do
     i=$((i+1)); cp "$f" "$out/corpus/seed-$i"
   done < <(find "$d" -type f \( -name '*.onnx' -o -name '*.pb' -o -name '*.onemodel' -o -name '*.ckpt' \) -size -256k)
 done
-[ -f "$out/seed.ckpt" ] && cp "$out/seed.ckpt" "$out/corpus/seed-ckpt" && i=$((i+1))
+if [ -d "$out/seeds" ]; then
+  for f in "$out"/seeds/*; do i=$((i+1)); cp "$f" "$out/corpus/gen-$i"; done
+fi
 echo "seeds: $i"
 
 export ONEMODEL_FUZZ_EXTDIR="$repo/testdata/onnx/external"
