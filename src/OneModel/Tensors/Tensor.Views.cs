@@ -251,7 +251,7 @@ public readonly partial struct Tensor
         // Backward of "copy then view" is a plain reshape of the gradient to the input shape, which is what a Reshape record says.
         bool track = GradMode.ShouldRecord(this);
         Tensor copy;
-        using (GradMode.NoGrad())
+        using (GradMode.NoGradInternal())
         {
             copy = Contiguous();
         }

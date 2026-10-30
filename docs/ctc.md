@@ -62,6 +62,17 @@ Only `+ - * /`, comparisons and exact `floor`, in the order written; no fused mu
   `ln 0 = -inf`.
 - `logadd(a, b)`: with `a >= b`, `a` if `b` is minus infinity or `b - a < -40`, else `a + ln(1 + exp(b - a))`.
 
+## Loss (training)
+
+`Ops.CtcLoss` is the negative log of the total probability of all alignments of the target (Graves et al. 2006). With extended labels
+`l'` of length `2L+1` (blank at even positions, target label `s/2` at odd positions), `alpha[0][0] = lp[0][blank]`, `alpha[0][1] = lp[0][l'_1]`
+and for `t > 0`: `alpha[t][s] = logadd(alpha[t-1][s], alpha[t-1][s-1], alpha[t-1][s-2]) + lp[t][l'_s]` (sums in log space, the `s-2` term only
+onto a non-blank that differs from the label two positions back). The loss is `-logadd(alpha[T-1][2L], alpha[T-1][2L-1])` over the `T` valid
+frames of the sequence; no alignment gives +infinity. All arithmetic is `double` with the `logadd`, `exp` and `ln` above in the written order.
+`beta` is the same recursion from the end (including the emission at its own frame). The gradient of the loss with respect to `lp[t][c]` is
+`-exp(logsum_{s: l'_s = c}(alpha[t][s] + beta[t][s]) - lp[t][c] + loss)` (0 if the sum is empty), 0 for frames at or beyond the input length.
+`Mean` reduction divides each loss by `max(1, L)` and averages over the batch. See `autograd.md` section 8 for the PyTorch comparison.
+
 ## Checks
 
 `tools/ctc_reference.py` is a straightforward double-precision Python implementation (numpy only): greedy, a dictionary-based prefix beam search, and for

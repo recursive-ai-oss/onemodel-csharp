@@ -123,7 +123,7 @@ jobs:
         run: tools/golden_ci.sh wasm "$RUNNER_TEMP/wasm/wwwroot"
 
   pack:
-    # Builds the package as an artifact only; nothing is pushed anywhere.
+    # Builds the packages as an artifact only; nothing is pushed anywhere.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -135,7 +135,9 @@ jobs:
         with:
           global-json-file: global.json
       - name: Pack
-        run: dotnet pack src/OneModel -c Release -o "$RUNNER_TEMP/packages"
+        run: |
+          dotnet pack src/OneModel -c Release -o "$RUNNER_TEMP/packages"
+          dotnet pack src/OneModel.Training -c Release -o "$RUNNER_TEMP/packages"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages

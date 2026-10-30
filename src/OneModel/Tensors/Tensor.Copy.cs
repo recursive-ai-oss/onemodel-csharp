@@ -24,6 +24,7 @@ public readonly partial struct Tensor
         }
 
         Tensor dst = Create(_dtype, _shape, pool);
+        ActivationScope.Track(dst);
         CopyStrided(this, dst);
         return GradMode.ShouldRecord(this) ? Rerecord(dst) : dst;
     }
@@ -34,7 +35,7 @@ public readonly partial struct Tensor
         ThrowIfEmptyOrBlocked();
         Tensor dst = Create(_dtype, _shape, pool);
         CopyStrided(this, dst);
-        return dst;
+        return IsTraced ? Rerecord(dst) : dst;
     }
 
     /// <summary>
@@ -45,6 +46,13 @@ public readonly partial struct Tensor
     /// <exception cref="ArgumentException">Element types differ.</exception>
     /// <exception cref="InvalidOperationException">Either tensor is tracked by autograd while recording is on (in-place updates of tracked tensors are not supported; use <see cref="Detach"/> or <see cref="GradMode.NoGrad"/>).</exception>
     public void CopyFrom(in Tensor src)
+    {
+        RejectIfTraced(TraceErrorKind.InPlaceMutation, "CopyFrom() into it");
+        src.RejectIfTraced(TraceErrorKind.DataDependent, "CopyFrom() from it");
+        CopyFromCore(src);
+    }
+
+    internal void CopyFromCore(in Tensor src)
     {
         ThrowIfEmptyOrBlocked();
         src.ThrowIfEmptyOrBlocked();
@@ -70,6 +78,7 @@ public readonly partial struct Tensor
     /// <summary>Sets every element to <paramref name="value"/>; bumps the storage version.</summary>
     public void Fill<T>(T value) where T : unmanaged
     {
+        RejectIfTraced(TraceErrorKind.InPlaceMutation, "Fill()");
         CheckType<T>();
         ThrowIfBlocked();
         if (IsContiguous)
@@ -79,21 +88,22 @@ public readonly partial struct Tensor
         }
 
         using Tensor one = Scalar(value);
-        CopyFrom(one.Expand(_shape));
+        CopyFromCore(one.Expand(_shape));
     }
 
     /// <summary>The elements in row-major logical order as a new array.</summary>
     public T[] ToArray<T>() where T : unmanaged
     {
+        RejectIfTraced(TraceErrorKind.DataDependent, "ToArray<T>()");
         CheckType<T>();
         ThrowIfBlocked();
         if (IsContiguous)
         {
-            return Data<T>().ToArray();
+            return InternalData<T>().ToArray();
         }
 
         using Tensor c = Clone();
-        return c.Data<T>().ToArray();
+        return c.InternalData<T>().ToArray();
     }
 
     private static void CopyStrided(in Tensor src, in Tensor dst)
@@ -189,7 +199,7 @@ public readonly partial struct Tensor
             WriteNum(target, v, d.Slice(i * de, de));
         }
 
-        if (GradMode.ShouldRecord(this) && DTypes.IsFloatingPoint(target))
+        if (GradMode.ShouldRecord(this) && (DTypes.IsFloatingPoint(target) || IsTraced))
         {
             // Backward casts the gradient back to InputDType(0).
             return BackwardRecord.Create(OpKind.Cast, 0, this).Attach(dst);
@@ -327,7 +337,7 @@ public readonly partial struct Tensor
                 Tensor storage = Create(_dtype, Shape.Create(n, h, w, c), pool);
                 bool track = GradMode.ShouldRecord(this);
                 Tensor view;
-                using (GradMode.NoGrad())
+                using (GradMode.NoGradInternal())
                 {
                     view = storage.Permute(0, 3, 1, 2);
                 }

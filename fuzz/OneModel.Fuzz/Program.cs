@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using RecursiveAI.OneModel.Format;
 using RecursiveAI.OneModel.Graph;
 using RecursiveAI.OneModel.Onnx;
 using RecursiveAI.OneModel.Tensors;
+using RecursiveAI.OneModel.Training;
 using SharpFuzz;
 
 namespace RecursiveAI.OneModel.Fuzz;
@@ -35,8 +37,20 @@ internal static class Program
             case "format":
                 Fuzzer.LibFuzzer.Run(static input => FuzzFormat(input));
                 break;
+            case "checkpoint":
+                Fuzzer.LibFuzzer.Run(static input => FuzzCheckpoint(input));
+                break;
+            case "seed-checkpoint":
+                // Writes a valid checkpoint of the fuzz target's model to args[1], as a seed for the corpus.
+                using (Sequential m = CheckpointModel())
+                using (var o = new Adam(m.Parameters()))
+                {
+                    Checkpoint.Save(args[1], m, o, new Dictionary<string, long> { ["step"] = 3 });
+                }
+
+                break;
             default:
-                Console.Error.WriteLine("unknown target '" + target + "'; use onnx, tensor or format");
+                Console.Error.WriteLine("unknown target '" + target + "'; use onnx, tensor, format or checkpoint");
                 Environment.ExitCode = 2;
                 break;
         }
@@ -58,6 +72,32 @@ internal static class Program
             }
         }
         catch (OnnxImportException)
+        {
+            // Rejecting bad input is the expected outcome.
+        }
+    }
+
+    private static Sequential CheckpointModel()
+    {
+        var g = new Generator(1);
+        return new Sequential(new Linear(3, 2, g), new BatchNorm2d(2), new Dropout(0.1f, 5));
+    }
+
+    private static void FuzzCheckpoint(ReadOnlySpan<byte> input)
+    {
+        using Sequential model = CheckpointModel();
+        using var opt = new Adam(model.Parameters());
+        try
+        {
+            Checkpoint.Load(new System.IO.MemoryStream(input.ToArray()), model, opt);
+            // Whatever loads must save, and what it saves must load into a fresh pair.
+            using var ms = new System.IO.MemoryStream();
+            Checkpoint.Save(ms, model, opt);
+            using Sequential again = CheckpointModel();
+            using var opt2 = new Adam(again.Parameters());
+            Checkpoint.Load(new System.IO.MemoryStream(ms.ToArray()), again, opt2);
+        }
+        catch (CheckpointException)
         {
             // Rejecting bad input is the expected outcome.
         }

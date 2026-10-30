@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+    <ProjectReference Include="../../src/OneModel.Training/OneModel.Training.csproj" />
   </ItemGroup>
 
 </Project>

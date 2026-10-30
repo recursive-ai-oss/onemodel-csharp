@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>$(PackagePrefix).$(LibName).Training</AssemblyName>
+    <RootNamespace>$(PackagePrefix).$(LibName).Training</RootNamespace>
+    <PackageId>$(PackagePrefix).$(LibName).Training</PackageId>
+    <Description>Training for the OneModel runtime, on the tensor layer's reverse-mode autodiff: modules (linear, convolution, batch and layer norm, embedding, dropout, multi-head attention, transformer encoder layer), losses, SGD, Adam and AdamW with gradient clipping and learning-rate schedules, bit-exact checkpoints, and gradient checking.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageReadmeFile>PACKAGE.md</PackageReadmeFile>
+    <PackageTags>onnx;neural-network;training;autograd;machine-learning;nativeaot;trimmable</PackageTags>
+    <PackageReleaseNotes>See CHANGELOG.md in the repository.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../PACKAGE.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE-MIT" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE-APACHE" Pack="true" PackagePath="/" />
+    <None Include="../../THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../OneModel/OneModel.csproj" />
+  </ItemGroup>
+
+</Project>
