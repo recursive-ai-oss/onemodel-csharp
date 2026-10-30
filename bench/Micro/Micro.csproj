@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+    <ProjectReference Include="../../src/OneModel.Training/OneModel.Training.csproj" />
     <Compile Include="../../tests/OneModel.Tests/Kernels/KernelTestData.cs" Link="KernelTestData.cs" />
   </ItemGroup>
 

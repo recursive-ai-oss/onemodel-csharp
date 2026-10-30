@@ -171,3 +171,35 @@ implementations (2e-2 and 4e-3 scaled here); they are excluded from the paramete
 absorbs the first one is not gated (the running variance is). Single-step checks (5 steps, given gradients; scaled error against PyTorch): SGD
 variants ≤ 8.1e-8, Adam/AdamW variants (L2, AMSGrad, other betas) ≤ 3.4e-8; clipping ≤ 1.7e-7 with equal norms; learning-rate schedules
 (100 steps) ≤ 1.2e-7 relative.
+
+## 9. Reduced precision: measured, not built
+
+Question: does bfloat16, float16 or loss-scaled training pay on a CPU, on the kernels we have? Method (Micikevicius et al. 2018 describe the
+schemes): `bench/Micro` command `mixed [threads] [steps]` runs the float32 AdamW step of three models, reports the median step time
+(steps 3 on), the peak pool bytes sampled during the step, the activation bytes held at the end of the forward pass, and the time of
+one float32 → bfloat16 → float32 pass over all activations and parameters (a lower bound on what any reduced-precision scheme adds
+per step). Indicative numbers, loaded hosts, not a benchmark.
+
+| Model | Step ms: Zen 4 1t / 8t | Step ms: M2 1t / 8t | Peak MB | Activations MB | Conversion floor, % of step (Zen 4 / M2) |
+|---|---|---|---|---|---|
+| Transformer classifier, batch 32 × 128, width 256, 4 layers | 1173 / 692 | 1603 / 824 | 595 | 500 | 5–9 / 2–5 |
+| Conv net, batch 16, 3×64×64 | 93 / 105 | 114 / 93 | 117 | 49 | 5 / 4 |
+| CRNN-like (conv, 2-layer BiLSTM, linear, CTC), batch 16, 1×32×128 | 87 / 97 | 96 / 83 | 114 | 47 | 5–6 / 4 |
+
+Findings.
+
+- **Time does not pay.** The .NET 10 intrinsics expose no bfloat16 dot product on x86 (`Avx512Bf16` is absent; the listed classes end at
+  `Avx10v2`, `AvxVnni*`) or on Arm (no `Bf16`), although the worker's CPU has AVX512_BF16 and the M2 has FEAT_BF16. Without it,
+  low-precision operands are widened to float32 before the multiply, so a reduced-precision matrix product does the same arithmetic plus
+  the conversion; the products are compute-bound at these sizes, so halving operand bytes buys nothing. The best case is therefore a
+  step time ≥ 1.0× float32's, never the 1.2× gain required.
+- **Memory pays only for the transformer.** Saved activations are 84% of its peak, so holding every activation as bfloat16 would cut
+  peak memory by up to about 42% (above the 30% bar); in the conv net and CRNN they are 41–42% of the peak and gradients of the same
+  size follow in backward, so the saving is about 20% (below the bar). Parameters, gradients and optimizer state are 0.8–26 MB:
+  irrelevant.
+- **Not built.** The saving needs bfloat16 *tensors* flowing between operators (each operator widens its inputs into scratch, narrows its
+  output, and its record saves the narrow tensor and widens it again in backward). Holding a bfloat16 copy beside the float32 original
+  saves nothing, because activations are released together at the end of the step and a caller may still hold the float32 tensor. That
+  change touches every operator's entry point and saved-slot handling, and is a separate piece of work worth doing only if
+  long-sequence transformer training on a CPU becomes a real use. Loss scaling is a float16 remedy and has nothing to scale while
+  gradients stay float32, so it waits for the same work.
