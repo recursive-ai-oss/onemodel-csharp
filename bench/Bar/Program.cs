@@ -41,6 +41,8 @@ internal static class Program
                 "run" => Run(o),
                 "emit" => Emit(o),
                 "check" => Check(o),
+                "convert" => ConvertModel(o),
+                "load" => LoadTime(o),
                 _ => Usage(),
             };
         }
@@ -57,6 +59,8 @@ internal static class Program
             "usage: Bar run --model FILE --ref DIR --model-name N --variant V --batch B --threads T [--side ort|ours] [--mode fast|exact] [--opt none|basic|all]\n" +
             "               [--reps 3] [--warmup 3] [--target-ms 1000] --row-out FILE [--sdk X] [--lock-label L]\n" +
             "       Bar emit --row FILE --rss-mb X [--csv FILE] [--md FILE]\n" +
+            "       Bar convert --model FILE.onnx --out FILE.onemodel   (ONNX to the OneModel format)\n" +
+            "       Bar load --model FILE --threads T [--reps 5]   (load time of ours: first load, then the median of the later ones)\n" +
             "       Bar check --model FILE --ref DIR --threads T [--mode fast|exact] [--weights original|fp16|bf16] [--tol 1e-4] [--dump DIR]   (ours vs the stored ONNX Runtime outputs)");
         return 2;
     }
@@ -76,6 +80,34 @@ internal static class Program
         }
 
         return d;
+    }
+
+    private static int ConvertModel(Dictionary<string, string> o)
+    {
+        var sw = Stopwatch.StartNew();
+        RecursiveAI.OneModel.Format.ModelFormat.Convert(o["model"], o["out"]);
+        Console.WriteLine($"converted {o["model"]} -> {o["out"]}: {new FileInfo(o["out"]).Length} bytes in {sw.Elapsed.TotalMilliseconds:F0} ms");
+        return 0;
+    }
+
+    private static int LoadTime(Dictionary<string, string> o)
+    {
+        int threads = int.Parse(o["threads"], CultureInfo.InvariantCulture);
+        int reps = int.Parse(o.GetValueOrDefault("reps", "5"), CultureInfo.InvariantCulture);
+        var times = new List<double>();
+        for (int i = 0; i <= reps; i++)
+        {
+            using var side = new OursSide("fast", "original", "all");
+            long t0 = Stopwatch.GetTimestamp();
+            side.Load(o["model"], threads);
+            times.Add(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+        }
+
+        double first = times[0];
+        times.RemoveAt(0);
+        times.Sort();
+        Console.WriteLine($"load first {first:F1} ms, median of {reps} later {times[times.Count / 2]:F1} ms");
+        return 0;
     }
 
     private static int Run(Dictionary<string, string> o)
