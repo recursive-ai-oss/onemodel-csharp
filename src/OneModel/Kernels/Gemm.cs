@@ -268,9 +268,6 @@ internal static unsafe class Gemm
             return;
         }
 
-        blk = ChooseTiles(blk, m, n, k);
-        tilesM = (m + blk.Mc - 1) / blk.Mc;
-        tilesN = (n + blk.Nc - 1) / blk.Nc;
         TileJob job = t_tileJob ??= new TileJob();
         job.Mode = mode;
         job.Path = path;
@@ -290,53 +287,6 @@ internal static unsafe class Gemm
         // About 40 multiply-adds per nanosecond per thread (a good core on 256-bit FMA): a guess that only decides how many threads are worth waking.
         ParallelFor.Run(job, tilesM * tilesN, threads, (long)m * n * k / 40);
         job.Epilogue = null;
-    }
-
-    // Chunks the tile choice aims for, and the least work (multiply-adds) a tile is worth: about 15 microseconds on one core.
-    private const int TargetTiles = 48;
-    private const long MinTileMacs = 500_000;
-
-    // Tile sizes from the shape alone, never from the thread count: the path's cache blocks (Mc x Nc) when they already give enough
-    // tiles, otherwise halved and quartered (whole register tiles, so a row of C is cut at the same columns' lane boundaries) while each
-    // tile keeps enough work, and then made equal in size so no tile is a sliver. A small-M product (a transformer layer at batch 1) has
-    // two or three tiles at the full size, which leaves most cores idle. Every output still sums k in the same order whatever the tile
-    // shape, so the results are the same.
-    private static Blocking ChooseTiles(Blocking blk, int m, int n, int k)
-    {
-        int mc = blk.Mc, nc = blk.Nc;
-        for (int step = 1; step <= 4; step++)
-        {
-            long tiles = (long)((m + mc - 1) / mc) * ((n + nc - 1) / nc);
-            if (tiles >= TargetTiles)
-            {
-                break;
-            }
-
-            // Alternate: narrow the columns first (cheapest to re-pack), then the rows; at most a quarter of each.
-            int nextNc = nc, nextMc = mc;
-            if ((step & 1) == 1 && nc > blk.Nc / 4)
-            {
-                nextNc = Math.Max(1, (nc / 2) / blk.Nr) * blk.Nr;
-            }
-            else if (mc > blk.Mc / 4)
-            {
-                nextMc = Math.Max(1, (mc / 2) / blk.Mr) * blk.Mr;
-            }
-
-            if ((nextNc == nc && nextMc == mc) || (long)nextMc * nextNc * k < MinTileMacs)
-            {
-                break;
-            }
-
-            mc = nextMc;
-            nc = nextNc;
-        }
-
-        int tm = (m + mc - 1) / mc;
-        int tn = (n + nc - 1) / nc;
-        mc = Math.Min(blk.Mc, ((((m + tm - 1) / tm) + blk.Mr - 1) / blk.Mr) * blk.Mr);
-        nc = Math.Min(blk.Nc, ((((n + tn - 1) / tn) + blk.Nr - 1) / blk.Nr) * blk.Nr);
-        return blk with { Mc = mc, Nc = nc };
     }
 
     /// <summary>The register tile and cache blocks of a path.</summary>

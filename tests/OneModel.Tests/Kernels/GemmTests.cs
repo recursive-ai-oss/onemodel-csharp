@@ -135,42 +135,4 @@ public class GemmTests
             }
         }
     }
-
-    [Fact]
-    public void SmallTilesForSmallMGiveTheSameBitsAsRowByRowProducts()
-    {
-        // m = 130 and n = 520 would be a handful of 96 x 128 tiles; the tile choice splits them finer. Exact mode must equal the
-        // canonical order, and fast mode a product of one row at a time (the matrix-vector kernels), at any thread count.
-        var rng = new KernelTestData.Rng(99);
-        const int m = 130, n = 520, k = 600;
-        var a = new float[m * k];
-        var b = new float[k * n];
-        KernelTestData.Fill(ref rng, a, false);
-        KernelTestData.Fill(ref rng, b, false);
-        var expected = new float[m * n];
-        KernelTestData.ReferenceExact(m, n, k, a, k, b, n, expected, n);
-        foreach (KernelPath path in Paths())
-        {
-            foreach (int threads in new[] { 1, 8 })
-            {
-                var exact = new float[m * n];
-                Gemm.Run(KernelMode.Exact, path, m, n, k, a, k, b, n, exact, n, threads);
-                Assert.True(KernelTestData.SameBits(expected, exact), $"{path} exact threads={threads}");
-                if (path is not (KernelPath.Avx2 or KernelPath.Avx512))
-                {
-                    continue;
-                }
-
-                var fast = new float[m * n];
-                Gemm.Run(KernelMode.Fast, path, m, n, k, a, k, b, n, fast, n, threads);
-                var rows = new float[m * n];
-                for (int i = 0; i < m; i++)
-                {
-                    Gemm.Run(KernelMode.Fast, path, 1, n, k, a.AsSpan(i * k, k), k, b, n, rows.AsSpan(i * n, n), n, 1);
-                }
-
-                Assert.True(KernelTestData.SameBits(rows, fast), $"{path} fast threads={threads}");
-            }
-        }
-    }
 }
