@@ -100,7 +100,7 @@ internal sealed class SqueezeOp : OpKernel
         Span<bool> drop = stackalloc bool[Shape.MaxRank];
         if (_axesAreInput && ctx.HasInput(1))
         {
-            OpUtil.RequireIntegers(ctx, 1, "axes");
+            OpUtil.RequireIntegers(ctx, 1, "axes", allowScalar: true);
             if (!ctx.TryGetInputValue(1, out Tensor v))
             {
                 ctx.RequireRunTimeValues();
@@ -194,7 +194,7 @@ internal sealed class UnsqueezeOp : OpKernel
         int count;
         if (_axesAreInput)
         {
-            OpUtil.RequireIntegers(ctx, 1, "axes");
+            OpUtil.RequireIntegers(ctx, 1, "axes", allowScalar: true);
             if (!ctx.TryGetInputValue(1, out Tensor v))
             {
                 ctx.RequireRunTimeValues();

@@ -259,18 +259,35 @@ public static class ConformanceRunner
                 continue;
             }
 
-            if (t.Kind != IrTypeKind.Tensor)
+            if (!TypeKnown(t, out string what))
             {
-                return $"value '{v.Name}' is a {t.Kind.ToString().ToLowerInvariant()}";
-            }
-
-            if (!KnownElem.Contains(t.ElemType))
-            {
-                return $"value '{v.Name}' has element type {ElemName(t.ElemType)}";
+                return $"value '{v.Name}' {what}";
             }
         }
 
         return null;
+    }
+
+    // Tensors of known element types, and sequences and optionals of them.
+    private static bool TypeKnown(IrType t, out string what)
+    {
+        what = "";
+        switch (t.Kind)
+        {
+            case IrTypeKind.Tensor:
+                if (!KnownElem.Contains(t.ElemType))
+                {
+                    what = $"has element type {ElemName(t.ElemType)}";
+                    return false;
+                }
+
+                return true;
+            case IrTypeKind.Sequence or IrTypeKind.Optional when t.Inner is { } inner && inner.Kind != IrTypeKind.Optional:
+                return TypeKnown(inner, out what);
+            default:
+                what = $"is a {t.Kind.ToString().ToLowerInvariant()}";
+                return false;
+        }
     }
 
     private static string ElemName(int code) => code switch
@@ -306,7 +323,7 @@ public static class ConformanceRunner
                 for (int i = 0; i < inputs.Length; i++)
                 {
                     names[i] = session.Inputs[i].Name;
-                    inputs[i] = OnnxImporter.LoadTensor(File.ReadAllBytes(Path.Combine(setDir, $"input_{i}.pb"))).ToTensor();
+                    inputs[i] = LoadValue(File.ReadAllBytes(Path.Combine(setDir, $"input_{i}.pb")), session.Inputs[i].Kind);
                 }
 
                 for (int i = 0; i < outNames.Length; i++)
@@ -317,8 +334,8 @@ public static class ConformanceRunner
                 session.Run(names, inputs, outNames, outs);
                 for (int i = 0; i < outs.Length; i++)
                 {
-                    using Tensor expected = OnnxImporter.LoadTensor(File.ReadAllBytes(Path.Combine(setDir, $"output_{i}.pb"))).ToTensor();
-                    if (!Same(outs[i], expected, out string why))
+                    using Tensor expected = LoadValue(File.ReadAllBytes(Path.Combine(setDir, $"output_{i}.pb")), session.Outputs[i].Kind);
+                    if (!SameValue(outs[i], expected, out string why))
                     {
                         return (CaseStatus.Fail, OneLine($"output {i} ({outNames[i]}): {why}"));
                     }
@@ -345,6 +362,193 @@ public static class ConformanceRunner
         }
 
         return sets == 0 ? (CaseStatus.Fail, "no test data sets") : (CaseStatus.Pass, "");
+    }
+
+    // A sequence or optional is compared by kind, then element by element.
+    private static bool SameValue(Tensor got, Tensor want, out string why)
+    {
+        why = "";
+        bool gp = PackedValue.IsPacked(got), wp = PackedValue.IsPacked(want);
+        if (!gp && !wp)
+        {
+            return Same(got, want, out why);
+        }
+
+        if (gp != wp || PackedValue.Kind(got) != PackedValue.Kind(want))
+        {
+            why = "a sequence or optional of another kind";
+            return false;
+        }
+
+        Tensor[] a = PackedValue.Items(got), b = PackedValue.Items(want);
+        try
+        {
+            if (a.Length != b.Length)
+            {
+                why = $"sequence length {a.Length} vs {b.Length}";
+                return false;
+            }
+
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (!Same(a[i], b[i], out string w))
+                {
+                    why = $"element {i}: {w}";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        finally
+        {
+            foreach (Tensor t in a.Concat(b))
+            {
+                t.Dispose();
+            }
+        }
+    }
+
+    // ---- sequence and optional values in the test data (SequenceProto, OptionalProto) ----
+    // Read here with a few lines of wire parsing, so the library's own reader stays tensor-only.
+
+    private static Tensor LoadValue(byte[] data, TensorInfoKind kind)
+    {
+        switch (kind)
+        {
+            case TensorInfoKind.Sequence:
+            {
+                Tensor[] items = LoadSequence(data);
+                try
+                {
+                    return PackedValue.Sequence(items);
+                }
+                finally
+                {
+                    foreach (Tensor t in items)
+                    {
+                        t.Dispose();
+                    }
+                }
+            }
+
+            case TensorInfoKind.Optional:
+                return LoadOptional(data);
+            default:
+                return OnnxImporter.LoadTensor(data).ToTensor();
+        }
+    }
+
+    private static Tensor[] LoadSequence(byte[] data)
+    {
+        var items = new List<Tensor>();
+        try
+        {
+            foreach ((int field, ulong v, byte[]? bytes) in Fields(data))
+            {
+                if (field == 3 && bytes is not null)
+                {
+                    items.Add(OnnxImporter.LoadTensor(bytes).ToTensor());
+                }
+                else if (field == 2 && v != 1)
+                {
+                    throw new SessionException(SessionErrorKind.Unsupported, "a sequence of a non-tensor element type is not supported");
+                }
+                else if (field is 4 or 5 or 6 or 7)
+                {
+                    throw new SessionException(SessionErrorKind.Unsupported, "a sequence of a non-tensor element type is not supported");
+                }
+            }
+
+            return [.. items];
+        }
+        catch
+        {
+            foreach (Tensor t in items)
+            {
+                t.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    private static Tensor LoadOptional(byte[] data)
+    {
+        foreach ((int field, _, byte[]? bytes) in Fields(data))
+        {
+            if (field == 3 && bytes is not null)
+            {
+                using Tensor t = OnnxImporter.LoadTensor(bytes).ToTensor();
+                return PackedValue.Optional(t);
+            }
+
+            if (field == 5 && bytes is not null)
+            {
+                Tensor[] items = LoadSequence(bytes);
+                try
+                {
+                    return PackedValue.OptionalSequence(items);
+                }
+                finally
+                {
+                    foreach (Tensor t in items)
+                    {
+                        t.Dispose();
+                    }
+                }
+            }
+
+            if (field is 4 or 6 or 7)
+            {
+                throw new SessionException(SessionErrorKind.Unsupported, "an optional of this element type is not supported");
+            }
+        }
+
+        return PackedValue.EmptyOptional();
+    }
+
+    private static IEnumerable<(int Field, ulong Varint, byte[]? Bytes)> Fields(byte[] data)
+    {
+        int at = 0;
+        while (at < data.Length)
+        {
+            ulong tag = Varint(data, ref at);
+            int field = (int)(tag >> 3);
+            switch ((int)(tag & 7))
+            {
+                case 0:
+                    yield return (field, Varint(data, ref at), null);
+                    break;
+                case 2:
+                    int len = checked((int)Varint(data, ref at));
+                    yield return (field, 0, data.AsSpan(at, len).ToArray());
+                    at += len;
+                    break;
+                case 1:
+                    at += 8;
+                    break;
+                case 5:
+                    at += 4;
+                    break;
+                default:
+                    throw new FormatException("unsupported wire type in a test value");
+            }
+        }
+    }
+
+    private static ulong Varint(byte[] d, ref int at)
+    {
+        ulong v = 0;
+        for (int shift = 0; ; shift += 7)
+        {
+            byte b = d[at++];
+            v |= (ulong)(b & 0x7f) << shift;
+            if ((b & 0x80) == 0)
+            {
+                return v;
+            }
+        }
     }
 
     private static bool Same(Tensor got, Tensor want, out string why)

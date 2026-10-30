@@ -1,5 +1,6 @@
 using RecursiveAI.OneModel.Graph.Operators.Activation;
 using RecursiveAI.OneModel.Graph.Operators.Bitwise;
+using RecursiveAI.OneModel.Graph.Operators.Flow;
 using RecursiveAI.OneModel.Graph.Operators.Loss;
 using RecursiveAI.OneModel.Graph.Operators.Scatter;
 using RecursiveAI.OneModel.Graph.Operators.Signal;
@@ -88,6 +89,23 @@ internal static class CoverageTable
         NonMaxSuppressionOp.Def,
         RoiAlignOp.Def,
         UniqueOp.Def,
+
+        // Control flow, sequences and optionals.
+        IfOp.Def,
+        LoopOp.Def,
+        ScanOp.Def,
+        SequenceEmptyOp.Def,
+        SequenceConstructOp.Def,
+        SequenceLengthOp.Def,
+        SequenceAtOp.Def,
+        SequenceInsertOp.Def,
+        SequenceEraseOp.Def,
+        SplitToSequenceOp.Def,
+        ConcatFromSequenceOp.Def,
+        SequenceMapOp.Def,
+        OptionalOp.Def,
+        OptionalHasElementOp.Def,
+        OptionalGetElementOp.Def,
 
         // Losses.
         NllLossOp.Nll,
