@@ -395,3 +395,101 @@ internal sealed class WindowOp : OpKernel
         }
     }
 }
+
+/// <summary>
+/// MelWeightMatrix: the (dft_length / 2 + 1) x num_mel_bins matrix of triangular mel filters with peak 1. The band edges are
+/// num_mel_bins + 2 points evenly spaced on the mel scale mel(f) = 2595 log10(1 + f / 700) between the two edge frequencies,
+/// mapped back to hertz and then to a spectrum bin, floor((dft_length + 1) f / sample_rate); each filter rises linearly from its first
+/// bin to its second and falls to its third. The bins and the edges are computed in double precision.
+/// </summary>
+internal sealed class MelWeightMatrixOp : OpKernel
+{
+    public static readonly OpDef Def = new("MelWeightMatrix", 17, int.MaxValue, static n => new MelWeightMatrixOp(n));
+
+    private readonly DType _type;
+
+    private MelWeightMatrixOp(NodeInfo n)
+    {
+        long code = n.GetInt("output_datatype", 1);
+        if (code < 0 || code > int.MaxValue || !DTypes.TryFromOnnx((int)code, out _type) || _type is not (DType.F32 or DType.F64))
+        {
+            throw n.Unsupported("output_datatype must be float or double");
+        }
+    }
+
+    public override void Infer(InferContext ctx)
+    {
+        if (ctx.InputCount < 5 || !ctx.HasInput(0) || !ctx.HasInput(1) || !ctx.HasInput(2) || !ctx.HasInput(3) || !ctx.HasInput(4))
+        {
+            throw ctx.Fail("expects num_mel_bins, dft_length, sample_rate, lower_edge_hertz and upper_edge_hertz");
+        }
+
+        for (int i = 0; i < 3; i++)
+        {
+            OpUtil.RequireIntegers(ctx, i, "an integer parameter", allowScalar: true);
+        }
+
+        if (!ctx.TryGetInputValue(0, out Tensor bins) || !ctx.TryGetInputValue(1, out Tensor dft))
+        {
+            ctx.RequireRunTimeValues();
+            return;
+        }
+
+        long mel = OpUtil.First(bins), length = OpUtil.First(dft);
+        if (mel < 1 || length < 1)
+        {
+            throw ctx.Fail("num_mel_bins and dft_length must be at least 1");
+        }
+
+        ctx.SetOutput(0, _type, OpUtil.MakeGrownShape(ctx, [(length / 2) + 1, mel], _type));
+    }
+
+    public override void Run(in OpRun run)
+    {
+        Tensor y = run.Outputs[0];
+        int mel = (int)OpUtil.First(run.Inputs[0]), length = (int)OpUtil.First(run.Inputs[1]);
+        double rate = OpUtil.First(run.Inputs[2]), lower = Value(run.Inputs[3]), upper = Value(run.Inputs[4]);
+        int spectrum = (length / 2) + 1;
+        static double ToMel(double f) => 2595.0 * Math.Log10(1.0 + (f / 700.0));
+        static double ToHertz(double m) => 700.0 * (Math.Pow(10.0, m / 2595.0) - 1.0);
+        double low = ToMel(lower), step = (ToMel(upper) - low) / (mel + 2);
+        var edge = new int[mel + 2];
+        for (int i = 0; i < edge.Length; i++)
+        {
+            double bin = Math.Floor((length + 1) * ToHertz(low + (step * i)) / rate);
+            edge[i] = (int)Math.Clamp(bin, 0, spectrum - 1);
+        }
+
+        if (y.DType == DType.F32)
+        {
+            y.MutableData<float>().Clear();
+        }
+        else
+        {
+            y.MutableData<double>().Clear();
+        }
+
+        for (int i = 0; i < mel; i++)
+        {
+            int a = edge[i], b = edge[i + 1], c = edge[i + 2];
+            if (b == a)
+            {
+                DftOp.Write(y, ((long)b * mel) + i, 1.0);
+            }
+            else
+            {
+                for (int j = a; j <= b; j++)
+                {
+                    DftOp.Write(y, ((long)j * mel) + i, (double)(j - a) / (b - a));
+                }
+            }
+
+            for (int j = b; j < c; j++)
+            {
+                DftOp.Write(y, ((long)j * mel) + i, (double)(c - j) / (c - b));
+            }
+        }
+    }
+
+    private static double Value(Tensor t) => t.DType == DType.F64 ? t.Data<double>()[0] : t.DType == DType.F16 ? (double)t.Data<Half>()[0] : t.DType == DType.BF16 ? (double)(float)t.Data<BFloat16>()[0] : t.Data<float>()[0];
+}

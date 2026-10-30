@@ -204,6 +204,23 @@ x = f(1, 1, 2, 2)
 idx = np.array([[[[0, 3], [8, 15]]]], np.int64)
 add("MaxUnpool", "MaxUnpool", 11, [x, idx], {"kernel_shape": [2, 2], "strides": [2, 2]}, tol=0)
 # (ORT reads indices as flat positions in an explicit output_shape; ONNX's test case reads them in the pooling-implied shape and we follow ONNX, so no oracle case.)
+for k, (nb, dl, sr, lo, hi) in enumerate([(8, 16, 8192, 0.0, 4096.0), (10, 64, 16000, 100.0, 7600.0), (40, 512, 16000, 20.0, 8000.0), (5, 32, 8000, 200.0, 3500.0)]):
+    add(f"MelWeightMatrix_{k}", "MelWeightMatrix", 17,
+        [np.array(nb, np.int64), np.array(dl, np.int64), np.array(sr, np.int64), np.array(lo, np.float32), np.array(hi, np.float32)], tol=0)
+add("ConvTranspose_3d", "ConvTranspose", 11, [f(1, 4, 3, 4, 3), f(4, 2, 2, 3, 2)], {"strides": [2, 1, 2], "pads": [1, 0, 0, 0, 1, 1], "group": 2}, tol=1e-5)
+add("ConvTranspose_3d_bias", "ConvTranspose", 11, [f(2, 2, 3, 3, 3), f(2, 3, 3, 3, 3), f(3)], {"dilations": [1, 2, 1], "output_padding": [0, 0, 1], "strides": [1, 1, 2]}, tol=1e-5)
+# Resize with antialias: a shrinking axis filters over a window 1/scale times wider (linear and cubic only).
+for mode in ["linear", "cubic"]:
+    for ct in ["half_pixel", "asymmetric", "pytorch_half_pixel"]:
+        extra = {"cubic_coeff_a": -0.5} if mode == "cubic" and ct == "asymmetric" else {}
+        add(f"ResizeAA_{mode}_{ct}_sizes", "Resize", 18, [f(1, 2, 9, 11), None, None, np.array([1, 2, 4, 5], np.int64)],
+            {"mode": mode, "antialias": 1, "coordinate_transformation_mode": ct, **extra})
+        add(f"ResizeAA_{mode}_{ct}_scales", "Resize", 18, [f(2, 1, 12, 7), None, np.array([1, 1, 0.3, 0.6], np.float32)],
+            {"mode": mode, "antialias": 1, "coordinate_transformation_mode": ct, **extra})
+    add(f"ResizeAA_{mode}_mixed", "Resize", 18, [f(1, 1, 10, 6), None, None, np.array([1, 1, 3, 9], np.int64)],
+        {"mode": mode, "antialias": 1})
+    add(f"ResizeAA_{mode}_exclude", "Resize", 18, [f(1, 1, 8, 8), None, np.array([1, 1, 0.4, 0.4], np.float32)],
+        {"mode": mode, "antialias": 1, "exclude_outside": 1})
 add("Col2Im", "Col2Im", 18, [f(1, 4 * 2, 9), np.array([4, 4], np.int64), np.array([2, 2], np.int64)])
 add("Col2Im_strides_pads", "Col2Im", 18, [f(2, 9, 8), np.array([5, 4], np.int64), np.array([3, 3], np.int64)], {"strides": [2, 1], "pads": [1, 1, 1, 1]})
 add("Col2Im_dilations", "Col2Im", 18, [f(1, 4, 4), np.array([5, 5], np.int64), np.array([2, 2], np.int64)], {"dilations": [2, 2]})

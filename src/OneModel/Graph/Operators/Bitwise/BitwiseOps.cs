@@ -217,6 +217,82 @@ internal sealed class IsInfOp : OpKernel
     }
 }
 
+/// <summary>IsNaN: true where the input is not a number (float32, float64, float16 or bfloat16).</summary>
+internal sealed class IsNaNOp : OpKernel
+{
+    public static readonly OpDef Def = new("IsNaN", 9, int.MaxValue, static _ => new IsNaNOp());
+
+    public override bool SupportsExact => true;
+
+    public override void Infer(InferContext ctx)
+    {
+        if (!ctx.HasInput(0))
+        {
+            throw ctx.Fail("expects one input");
+        }
+
+        if (ctx.InputType(0) is not (DType.F32 or DType.F64 or DType.F16 or DType.BF16))
+        {
+            throw ctx.Unsupported($"element type {ctx.InputType(0)} is not supported yet");
+        }
+
+        ctx.SetOutput(0, DType.Bool, ctx.InputShape(0));
+    }
+
+    public override void Run(in OpRun run)
+    {
+        Span<bool> y = run.Outputs[0].MutableData<bool>();
+        Tensor t = run.Inputs[0];
+        switch (t.DType)
+        {
+            case DType.F32:
+                Fill(t.Data<float>(), y);
+                break;
+            case DType.F64:
+                Fill(t.Data<double>(), y);
+                break;
+            case DType.F16:
+                Fill(t.Data<Half>(), y);
+                break;
+            default:
+                Fill(t.Data<BFloat16>(), y);
+                break;
+        }
+    }
+
+    private static void Fill(ReadOnlySpan<float> x, Span<bool> y)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            y[i] = float.IsNaN(x[i]);
+        }
+    }
+
+    private static void Fill(ReadOnlySpan<double> x, Span<bool> y)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            y[i] = double.IsNaN(x[i]);
+        }
+    }
+
+    private static void Fill(ReadOnlySpan<Half> x, Span<bool> y)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            y[i] = Half.IsNaN(x[i]);
+        }
+    }
+
+    private static void Fill(ReadOnlySpan<BFloat16> x, Span<bool> y)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            y[i] = float.IsNaN((float)x[i]);
+        }
+    }
+}
+
 /// <summary>The OpDefs of the bitwise operators.</summary>
 internal static class BitwiseOps
 {

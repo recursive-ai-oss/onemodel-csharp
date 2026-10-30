@@ -23,7 +23,7 @@ public class CoverageOracleTests
     private static readonly HashSet<string> NotExact =
     [
         "Sin", "Cos", "Tan", "Asin", "Acos", "Atan", "Sinh", "Cosh", "Asinh", "Acosh", "Atanh", "SoftmaxCrossEntropyLoss", "LRN", "LpPool", "Attention",
-        "DFT", "STFT", "HannWindow", "HammingWindow", "BlackmanWindow", "GridSample", "RoiAlign",
+        "DFT", "STFT", "HannWindow", "HammingWindow", "BlackmanWindow", "MelWeightMatrix", "GridSample", "RoiAlign",
     ];
 
     private sealed record Tens(DType Type, int[] Shape, byte[] Data);

@@ -44,6 +44,7 @@ internal static class CoverageTable
         BitwiseOps.BitShift,
         BitwiseNotOp.Def,
         IsInfOp.Def,
+        IsNaNOp.Def,
 
         // Scatter and compress.
         ScatterElementsOp.Def,
@@ -82,6 +83,7 @@ internal static class CoverageTable
         WindowOp.Hann,
         WindowOp.Hamming,
         WindowOp.Blackman,
+        MelWeightMatrixOp.Def,
 
         // Sampling, detection and sets.
         AffineGridOp.Def,
@@ -106,6 +108,7 @@ internal static class CoverageTable
         OptionalOp.Def,
         OptionalHasElementOp.Def,
         OptionalGetElementOp.Def,
+
 
         // Losses.
         NllLossOp.Nll,
