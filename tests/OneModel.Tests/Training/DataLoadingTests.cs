@@ -262,9 +262,15 @@ public class DataLoadingTests
             new DataLoaderOptions { Workers = 0 });
         using BatchSequence<ImageBatch> s = loader.Start();
         for (int i = 0; i < 400; i++) { s.TryNext(out ImageBatch? w); w.Dispose(); }
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++) { s.TryNext(out ImageBatch? b); b.Dispose(); }
-        long per = (GC.GetAllocatedBytesForCurrentThread() - before) / 100;
+        // The minimum over three windows: a late tier-up of a method by the JIT can allocate once on this thread while other
+        // tests load the machine, which is not the loader allocating per batch.
+        long per = long.MaxValue;
+        for (int window = 0; window < 3 && per != 0; window++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 100; i++) { s.TryNext(out ImageBatch? b); b.Dispose(); }
+            per = Math.Min(per, (GC.GetAllocatedBytesForCurrentThread() - before) / 100);
+        }
         Assert.Equal(0, per);
     }
 

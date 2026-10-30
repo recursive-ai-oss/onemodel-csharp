@@ -320,7 +320,7 @@ foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
     Console.WriteLine($"data loader: 18 batches, hash {lh0[..16]}, workers 0 and 2 {(lh0 == lh2 ? "equal" : "DIFFER")}");
     if (lh0 != lh2)
     {
-        return 11;
+        return 12;
     }
 }
 
