@@ -30,7 +30,7 @@ internal sealed class QdqPass : IGraphPass
     public bool PreservesBits => false;
 
     // What one DequantizeLinear contributes to a match: the quantized value and its parameters (value ids).
-    private readonly record struct Dq(int Source, int Scale, int Zero, int Axis);
+    internal readonly record struct Dq(int Source, int Scale, int Zero, int Axis);
 
     public void Run(PassGraph g, CancellationToken ct)
     {
@@ -95,7 +95,7 @@ internal sealed class QdqPass : IGraphPass
         g.Nodes.AddRange(result);
     }
 
-    private static bool TryDq(PassGraph g, int[] producer, int valueId, out Dq dq)
+    internal static bool TryDq(PassGraph g, int[] producer, int valueId, out Dq dq)
     {
         dq = default;
         if (valueId < 0 || producer[valueId] < 0)
@@ -116,7 +116,7 @@ internal sealed class QdqPass : IGraphPass
     private static bool IsEightBit(Tensor t) => t.DType is DType.U8 or DType.I8;
 
     // A per-tensor 8-bit zero point constant: its id and type.
-    private static bool ScalarZero(PassGraph g, int id, out DType type)
+    internal static bool ScalarZero(PassGraph g, int id, out DType type)
     {
         type = DType.Undefined;
         Tensor t = id >= 0 ? g.Constant(id) : default;
@@ -129,7 +129,7 @@ internal sealed class QdqPass : IGraphPass
         return true;
     }
 
-    private static bool ScalarScale(PassGraph g, int id)
+    internal static bool ScalarScale(PassGraph g, int id)
     {
         Tensor t = id >= 0 ? g.Constant(id) : default;
         return !t.IsEmpty && t.DType == DType.F32 && t.Length == 1;

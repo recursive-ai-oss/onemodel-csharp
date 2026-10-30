@@ -140,7 +140,7 @@ internal static unsafe class Int8Conv
         // otherwise the whole matrix is packed first.
         bool pointwiseVector = pointwise && Int8Pack.Supported(in f);
         // Only worth it when more than one thread will work on the product: one thread packs the whole matrix once, with no repeats.
-        long work = (long)coutG * nCols * k / 50;
+        long work = ((long)coutG * nCols * k / 50) + ((long)coutG * nCols / 2);
         bool onDemand = (pointwiseVector || vectorGather) && c.Threads > 1 && work / ParallelFor.MinWorkPerThread > 1;
         byte* packed = null;
         int* sums = null;
@@ -477,6 +477,12 @@ internal static unsafe class Int8Conv
             int p1 = Math.Min(planes, p0 + PlanesPerChunk);
             int outH = S.OutH, outW = S.OutW, taps = S.KH * S.KW;
             int* wv = stackalloc int[MaxDirectTaps];
+            int* offsets = stackalloc int[MaxDirectTaps];
+            if (Int8Depthwise.Supports(in S))
+            {
+                Int8Depthwise.TapOffsets(in S, offsets);
+            }
+
             int lo = QuantUnsigned ? 0 : -128, hi = QuantUnsigned ? 255 : 127;
             for (int p = p0; p < p1; p++)
             {
@@ -493,7 +499,7 @@ internal static unsafe class Int8Conv
                 float mult = MultVec != null ? MultVec[ch] : Mult;
                 if (Int8Depthwise.Supports(in S))
                 {
-                    Int8Depthwise.Plane(in S, plane, XU8, XZero, wv, bias, mult, OutInt32 != null ? OutInt32 + outBase : null,
+                    Int8Depthwise.Plane(in S, plane, XU8, XZero, wv, offsets, bias, mult, OutInt32 != null ? OutInt32 + outBase : null,
                         OutQuant != null ? OutQuant + outBase : null, QuantUnsigned, QuantZero);
                     continue;
                 }

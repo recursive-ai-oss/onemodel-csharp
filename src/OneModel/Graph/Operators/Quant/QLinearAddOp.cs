@@ -15,7 +15,10 @@ internal sealed class QLinearAddOp : OpKernel
 {
     public static readonly OpDef Def = new("QLinearAdd", 1, int.MaxValue, static _ => new QLinearAddOp());
 
-    public override void Infer(InferContext ctx)
+    public override void Infer(InferContext ctx) => InferBinary(ctx);
+
+    /// <summary>The input rules and the broadcast output shape shared with <see cref="QLinearMulOp"/>.</summary>
+    internal static void InferBinary(InferContext ctx)
     {
         if (ctx.InputCount < 8)
         {
@@ -84,7 +87,7 @@ internal sealed class QLinearAddOp : OpKernel
     }
 
     // Different shapes (one side broadcast): a plain element loop with strides; not the case in the models this exists for.
-    private static void Broadcast(Shape sa, Shape sb, Shape sy, ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, Span<byte> y, in Int8AddParams p)
+    internal static void Broadcast(Shape sa, Shape sb, Shape sy, ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, Span<byte> y, in Int8AddParams p, bool multiply = false)
     {
         int rank = sy.Rank;
         Span<long> strideA = stackalloc long[Shape.MaxRank];
@@ -104,7 +107,7 @@ internal sealed class QLinearAddOp : OpKernel
         long oa = 0, ob = 0;
         for (int i = 0; i < y.Length; i++)
         {
-            y[i] = (byte)Int8Elementwise.AddOne(a[(int)oa], b[(int)ob], in p, lo, hi);
+            y[i] = (byte)(multiply ? Int8Elementwise.MulOne(a[(int)oa], b[(int)ob], in p, lo, hi) : Int8Elementwise.AddOne(a[(int)oa], b[(int)ob], in p, lo, hi));
             for (int d = rank - 1; d >= 0; d--)
             {
                 oa += strideA[d];
