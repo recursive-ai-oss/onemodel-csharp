@@ -1,6 +1,7 @@
 using System;
 using RecursiveAI.OneModel.Graph.Runtime;
 using RecursiveAI.OneModel.Kernels;
+using RecursiveAI.OneModel.Kernels.Exact;
 using RecursiveAI.OneModel.Tensors;
 
 namespace RecursiveAI.OneModel.Graph.Operators;
@@ -24,8 +25,23 @@ internal sealed class ConvOp : OpKernel
     private readonly Shape _packedShape;
     private readonly KernelPath _packedPath;
 
+    // Set by ConvResidualFusionPass: input 3 is a tensor added to the convolution (after the bias, before the activation).
+    private readonly bool _residual;
+
+    private ConvOp(ConvOp source, bool residual)
+    {
+        _attrs = source._attrs;
+        _group = source._group;
+        _activation = source._activation;
+        _packed = source._packed;
+        _packedShape = source._packedShape;
+        _packedPath = source._packedPath;
+        _residual = residual;
+    }
+
     private ConvOp(ConvOp source, FusedActivation activation)
     {
+        _residual = source._residual;
         _attrs = source._attrs;
         _group = source._group;
         _activation = activation;
@@ -36,6 +52,7 @@ internal sealed class ConvOp : OpKernel
 
     private ConvOp(ConvOp source, Tensor packed, Shape weightsShape, KernelPath path)
     {
+        _residual = source._residual;
         _attrs = source._attrs;
         _group = source._group;
         _activation = source._activation;
@@ -46,6 +63,12 @@ internal sealed class ConvOp : OpKernel
 
     /// <summary>The same convolution reading its weights from <paramref name="packed"/> (see ConvPackPass); input 1 is then absent.</summary>
     internal ConvOp WithPackedWeights(Tensor packed, Shape weightsShape, KernelPath path) => new(this, packed, weightsShape, path);
+
+    /// <summary>The same convolution adding input 3 to its result (see ConvResidualFusionPass).</summary>
+    internal ConvOp WithResidual() => new(this, true);
+
+    /// <summary>True when input 3 is a residual that is added to the result.</summary>
+    internal bool HasResidual => _residual;
 
     /// <summary>The group count.</summary>
     internal int Group => _group;
@@ -123,7 +146,16 @@ internal sealed class ConvOp : OpKernel
         }
 
         Geometry(x, w, ctx, out ConvShape s);
-        ctx.SetOutput(0, DType.F32, x.Rank == 3 ? Shape.Create(s.N, s.Cout, s.OutW) : Shape.Create(s.N, s.Cout, s.OutH, s.OutW));
+        Shape os = OutShape(x.Rank, in s);
+        if (_residual)
+        {
+            if (!ctx.HasInput(3) || ctx.InputType(3) != DType.F32 || !Shape.TryBroadcast(os, ctx.InputShape(3), out os))
+            {
+                throw ctx.Fail("the residual must be float32 and broadcast with the convolution output");
+            }
+        }
+
+        ctx.SetOutput(0, DType.F32, os);
     }
 
     // Lifts one-dimensional convolutions to height 1 and resolves strides, dilations, pads and output size.
@@ -168,7 +200,23 @@ internal sealed class ConvOp : OpKernel
             }
 
             Geometry(x.Shape, _packedShape, null, out ConvShape ps);
-            Conv.RunPacked(run.Path, in ps, x.Data<float>(), _packed.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
+            if (!_residual)
+            {
+                Conv.RunPacked(run.Path, in ps, x.Data<float>(), _packed.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
+                return;
+            }
+
+            Tensor res = run.Inputs[3];
+            if (res.Shape.Equals(y.Shape))
+            {
+                Conv.RunPacked(run.Path, in ps, x.Data<float>(), _packed.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation, res.Data<float>());
+                return;
+            }
+
+            // The residual broadcasts the output to a larger shape: convolve into scratch, then add with broadcasting.
+            Tensor tmp = run.Scratch(DType.F32, OutShape(x.Rank, in ps));
+            Conv.RunPacked(run.Path, in ps, x.Data<float>(), _packed.Data<float>(), tmp.MutableData<float>(), run.Threads, bias, null);
+            AddResidual(in run, tmp, res, y);
             return;
         }
 
@@ -180,6 +228,24 @@ internal sealed class ConvOp : OpKernel
         }
 
         Geometry(x.Shape, w.Shape, null, out ConvShape s);
-        Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
+        if (!_residual)
+        {
+            Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
+            return;
+        }
+
+        Tensor conv = run.Scratch(DType.F32, OutShape(x.Rank, in s));
+        Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), conv.MutableData<float>(), run.Threads, bias, null);
+        AddResidual(in run, conv, run.Inputs[3], y);
+    }
+
+    private static Shape OutShape(int rank, in ConvShape s) =>
+        rank == 3 ? Shape.Create(s.N, s.Cout, s.OutW) : Shape.Create(s.N, s.Cout, s.OutH, s.OutW);
+
+    // The unfused path of a convolution that carries a residual: y = activation(conv + residual) with the stand-alone kernels.
+    private void AddResidual(in OpRun run, Tensor conv, Tensor res, Tensor y)
+    {
+        Broadcast.Binary<float, FloatRows<AddArith>>(run.Path, run.Exact, y.Shape, conv.Shape, res.Shape, conv.Data<float>(), res.Data<float>(), y.MutableData<float>(), run.Threads);
+        _activation?.Apply(run.Path, run.Exact, y.MutableData<float>());
     }
 }
