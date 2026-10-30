@@ -260,21 +260,23 @@ public class DataLoadingTests
     [Fact]
     public void SteadyStateLoadingAllocatesNothing()
     {
-        var ds = new ListDataset<ImageExample>(MakeImages(64));
-        var loader = new DataLoader<ImageExample, ImageBatch>(ds, EpochSampler.Shuffled(64, 8, 1), new ImageBatchCollator(4, 0f, Jitter),
+        // Two things made this flaky, neither a per-batch allocation. (1) Tensor sizes: with random widths a batch whose padded width
+        // lands in a size class the pool has not seen yet makes the pool allocate one new buffer, and over many shuffled epochs such
+        // classes keep turning up rarely. Fixed-width images give every batch the same sizes, so a warm pool is exact. (2) The test
+        // classes run in parallel and share BufferPool.Shared, so another test taking or trimming the same classes had the same
+        // effect; a private pool removes that.
+        using var pool = new BufferPool();
+        var ds = new ListDataset<ImageExample>(MakeImages(64, minW: 24, maxW: 24));
+        var loader = new DataLoader<ImageExample, ImageBatch>(ds, EpochSampler.Shuffled(64, 8, 1), new ImageBatchCollator(4, 0f, Jitter, pool),
             new DataLoaderOptions { Workers = 0 });
         using BatchSequence<ImageBatch> s = loader.Start();
         for (int i = 0; i < 400; i++) { s.TryNext(out ImageBatch? w); w.Dispose(); }
-        // The minimum over three windows: a late tier-up of a method by the JIT can allocate once on this thread while other
-        // tests load the machine, which is not the loader allocating per batch.
-        long per = long.MaxValue;
-        for (int window = 0; window < 3 && per != 0; window++)
-        {
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 100; i++) { s.TryNext(out ImageBatch? b); b.Dispose(); }
-            per = Math.Min(per, (GC.GetAllocatedBytesForCurrentThread() - before) / 100);
-        }
-        Assert.Equal(0, per);
+        long nativeBefore = pool.GetStats().NativeAllocations;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 200; i++) { s.TryNext(out ImageBatch? b); b.Dispose(); }
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(nativeBefore, pool.GetStats().NativeAllocations);
+        Assert.Equal(0, bytes / 200);
     }
 
     [Fact]
