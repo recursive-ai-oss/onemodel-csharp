@@ -6,6 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- `bench/Micro` command `mixed`: step time, peak memory, activation memory and bfloat16 conversion cost of three training steps; the findings that reduced-precision training does not pay on the current kernels, and the one case that would for memory, are in `docs/training.md` section 9.
 - Reverse-mode automatic differentiation on the tensor layer (`docs/autograd.md`): `Tensor.Backward`, leaf gradients, `Backprop.ZeroGrad`, `retainGraph`, saved-tensor version checks and `ActivationScope`, which frees a step's intermediates in one call.
 - Differentiable operators in `Ops`: `Gelu`, `Sigmoid`, `Tanh`, `Sum`, `Mean`, `Softmax`, `LogSoftmax`, `LayerNorm`, `BatchNorm2d`, `Conv2d` (groups, stride, padding, dilation, depthwise), `AvgPool2d`, `GlobalAvgPool2d`, `Concat`, `Embedding`, `NllLoss`, `CrossEntropy`, `Linear` and `Attention`, with backward for these and for the existing arithmetic, `MatMul`, `MaxPool2d` and view operators.
 - `TensorCompute` selects fast or exact arithmetic and the thread count for the differentiable operators. Exact-mode gradients are bit-identical across ISA paths and thread counts.
