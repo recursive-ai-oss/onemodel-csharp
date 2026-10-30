@@ -11,6 +11,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The golden-hash runner's code runs here too, so the browser rows hash what the desktop rows hash. -->
+    <Compile Include="../../tools/GoldenModels/Golden.cs" Link="Golden.cs" />
+    <Compile Include="../../bench/Bar/Npy.cs" Link="Npy.cs" />
     <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
   </ItemGroup>
 

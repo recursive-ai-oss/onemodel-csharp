@@ -6,6 +6,7 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 |---|---|
 | Tensors, memory, layouts, fp16/bf16 rounding, gradient records | [tensors.md](tensors.md) |
 | Exact mode: definition and accumulation order | [exact-mode.md](exact-mode.md) |
+| Exact mode golden hashes: rows, results, cost of exactness | [golden-hashes.md](golden-hashes.md) |
 | Matrix product and convolution kernels | [kernels-gemm.md](kernels-gemm.md) |
 | Attention and softmax kernels | [kernels-attention.md](kernels-attention.md) |
 | exp, log, tanh, erf, sigmoid, GELU: polynomials and error | [exact-transcendentals.md](exact-transcendentals.md) |
@@ -25,3 +26,6 @@ Normative, language-neutral notes live here, one file per topic, so a port can f
 | CTC decoding: greedy and prefix beam search, confidences | [ctc.md](ctc.md) |
 | Element-wise operators, activations, comparisons, Where, Cast | [ops-elementwise.md](ops-elementwise.md) |
 | int8: operators, product kernel, requantization, QDQ rewrite | [int8.md](int8.md) |
+| The OneModel model file: header, JSON manifest, aligned tensors, reading and writing rules (version 1, unstable until 1.0) | [format.md](format.md) |
+| Conformance: onnx/backend/test results per operator, method, gaps | [conformance.md](conformance.md) |
+| Operators added for coverage: settled semantics, exactness | [ops-coverage.md](ops-coverage.md) |

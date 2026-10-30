@@ -9,7 +9,7 @@ namespace RecursiveAI.OneModel.Graph.Operators;
 /// <summary>
 /// Resize (and the deprecated Upsample, which is Resize with asymmetric coordinates and floor rounding): nearest, linear and cubic
 /// interpolation over any rank, with every coordinate transformation and nearest mode, <c>axes</c> and
-/// <c>keep_aspect_ratio_policy</c> (opset 18). <c>antialias</c> is not supported. The output size comes from <c>scales</c>
+/// <c>keep_aspect_ratio_policy</c> (opset 18). <c>antialias</c> (linear and cubic) widens the filter by the shrink factor on axes that shrink. The output size comes from <c>scales</c>
 /// (floor(input * scale)) or from <c>sizes</c>; both are read as values, so a model that computes them at run time is shaped when it runs.
 /// </summary>
 internal sealed class ResizeOp : OpKernel
@@ -78,13 +78,15 @@ internal sealed class ResizeOp : OpKernel
                 "ceil" => ResizeNearest.Ceil,
                 var other => throw node.Error($"nearest_mode '{other}' is not supported"),
             };
-            if (node.GetInt("antialias", 0) != 0)
+            bool antialias = node.GetInt("antialias", 0) != 0;
+            if (antialias && m == ResizeMode.Nearest)
             {
-                throw node.Unsupported("antialias = 1 is not supported");
+                // The filter has no width for nearest; the attribute only applies to linear and cubic.
+                antialias = false;
             }
 
             _options = new ResizeOptions(m, coord, nearest, node.GetFloat("cubic_coeff_a", -0.75f),
-                node.GetInt("exclude_outside", 0) != 0, node.GetFloat("extrapolation_value", 0f));
+                node.GetInt("exclude_outside", 0) != 0, node.GetFloat("extrapolation_value", 0f), antialias);
             _roiInput = 1;
             _scalesInput = 2;
             _sizesInput = 3;
@@ -310,7 +312,7 @@ internal sealed class ResizeOp : OpKernel
             maxOut = Math.Max(maxOut, outDims[i]);
         }
 
-        int taps = Resize.TapsPer(_options.Mode);
+        int taps = Resize.MaxTaps(_options, sc.Slice(0, rank));
         Tensor a1 = run.Scratch(DType.F32, Shape.Create((int)maxLen));
         Tensor b1 = run.Scratch(DType.F32, Shape.Create((int)maxLen));
         Tensor ti = run.Scratch(DType.I32, Shape.Create(taps * maxOut));

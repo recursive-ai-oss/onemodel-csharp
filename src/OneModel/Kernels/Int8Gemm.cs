@@ -681,10 +681,7 @@ internal static unsafe class Int8Gemm
                     Vector128<int> q1 = Quant4(row + j + 4, perCol ? Vector128.Load(ep.MultVec + j0 + j + 4) : vm, vz, vlo, vhi);
                     Vector128<int> q2 = Quant4(row + j + 8, perCol ? Vector128.Load(ep.MultVec + j0 + j + 8) : vm, vz, vlo, vhi);
                     Vector128<int> q3 = Quant4(row + j + 12, perCol ? Vector128.Load(ep.MultVec + j0 + j + 12) : vm, vz, vlo, vhi);
-                    // Inside [lo, hi] already, so truncating narrowing keeps the low byte, right for both signednesses.
-                    Vector128<ushort> s0 = Vector128.Narrow(q0.AsUInt32(), q1.AsUInt32());
-                    Vector128<ushort> s1 = Vector128.Narrow(q2.AsUInt32(), q3.AsUInt32());
-                    Vector128.Narrow(s0, s1).Store(q + j);
+                    Int8Quantize.Pack16(q0, q1, q2, q3, ep.QuantUnsigned).Store(q + j);
                 }
             }
 

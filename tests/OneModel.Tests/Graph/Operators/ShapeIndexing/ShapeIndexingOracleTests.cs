@@ -51,7 +51,8 @@ public class ShapeIndexingOracleTests
             {
                 try
                 {
-                    outcome = BackendNodeTests.RunCase(dir, mode, out _);
+                    var r = RecursiveAI.OneModel.Conformance.ConformanceRunner.RunCase("oracle", dir, mode);
+                    outcome = r.Status == RecursiveAI.OneModel.Conformance.CaseStatus.Pass ? "PASS" : "FAIL " + r.Reason;
                 }
                 catch (Exception ex)
                 {

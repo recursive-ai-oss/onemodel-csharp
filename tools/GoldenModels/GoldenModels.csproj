@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Prints SHA-256 hashes of exact-mode outputs for the reference models and the backend node cases (see tools/golden_hash.py).
+       Runs under the JIT, or published with -p:PublishAot=true. Not shipped. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>$(PackagePrefix).$(LibName).GoldenModels</RootNamespace>
+    <AssemblyName>GoldenModels</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(PublishAot)' == 'true' and '$(IlcInstructionSet)' == '' and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">
+    <!-- Without this a NativeAOT binary targets the x86-64 baseline and runs the 4-lane kernels. -->
+    <IlcInstructionSet>x86-64-v3</IlcInstructionSet>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../bench/Bar/Npy.cs" Link="Npy.cs" />
+    <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -122,7 +122,8 @@ internal sealed class ReduceKernel : OpKernel
         bool ok = t switch
         {
             DType.F32 => true,
-            DType.F64 => _op is not (ReduceOp.LogSum or ReduceOp.LogSumExp),
+            DType.F64 => true,
+            DType.Bool => _op is ReduceOp.Max or ReduceOp.Min,
             DType.I32 or DType.I64 or DType.U32 or DType.U64 or DType.I8 or DType.U8 => !floatOnly,
             _ => false,
         };
@@ -198,6 +199,17 @@ internal sealed class ReduceKernel : OpKernel
         return null;
     }
 
+    // float64 ReduceLogSum and ReduceLogSumExp use the platform's math library (ReduceExtra), which exact mode may not.
+    public override object? Prepare(PrepareContext ctx)
+    {
+        if (ctx.Mode == ExecutionMode.Exact && _op is ReduceOp.LogSum or ReduceOp.LogSumExp && ctx.InputTypes.Length > 0 && ctx.InputTypes[0] == DType.F64)
+        {
+            throw new SessionException(SessionErrorKind.ExactModeUnavailable, "Exact mode is not available: float64 ReduceLogSum and ReduceLogSumExp have no exact kernel.");
+        }
+
+        return null;
+    }
+
     public override void Run(in OpRun run)
     {
         Tensor x = run.Inputs[0], y = run.Outputs[0];
@@ -216,6 +228,24 @@ internal sealed class ReduceKernel : OpKernel
 
         if (y.Length == 0)
         {
+            return;
+        }
+
+        if (x.DType == DType.Bool)
+        {
+            ReduceExtra.BoolMaxMin(x.RawData<byte>(), y.RawMutableData<byte>(), x.Shape.Dimensions, mask.Slice(0, x.Rank), _op == ReduceOp.Max);
+            return;
+        }
+
+        if (x.DType == DType.F64 && _op is ReduceOp.LogSum or ReduceOp.LogSumExp)
+        {
+            if (run.Exact)
+            {
+                // Nodes shaped at run time (axes given as a runtime input) never reach Prepare, so the check is repeated here.
+                throw new SessionException(SessionErrorKind.ExactModeUnavailable, "Exact mode is not available: float64 ReduceLogSum and ReduceLogSumExp have no exact kernel.");
+            }
+
+            ReduceExtra.LogDouble(x.Data<double>(), y.MutableData<double>(), x.Shape.Dimensions, mask.Slice(0, x.Rank), _op == ReduceOp.LogSumExp);
             return;
         }
 

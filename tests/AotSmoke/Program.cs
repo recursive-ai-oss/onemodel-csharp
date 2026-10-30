@@ -7,7 +7,9 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using RecursiveAI.OneModel;
+using RecursiveAI.OneModel.Format;
 using RecursiveAI.OneModel.Graph;
+using RecursiveAI.OneModel.Onnx;
 using RecursiveAI.OneModel.Tensors;
 
 // Calls the library from a NativeAOT binary: the tensor/kernel self-check, then a small model end to end (import, session, plan,
@@ -107,6 +109,32 @@ foreach ((string name, double bound) in new[] { ("int8_dyn", 2e-2), ("int8_qdq",
     if (!(diff / max <= bound))
     {
         return 6;
+    }
+}
+
+// The OneModel format: import, save to a stream, load that through the same entry point (chosen by magic), and get the same bits.
+foreach (string name in new[] { "mlp", "int8_qdq" })
+{
+    using JsonDocument fd = JsonDocument.Parse(Open(name == "mlp" ? "reference.json" : "int8_qdq.json"));
+    JsonElement fc = name == "mlp" ? fd.RootElement.GetProperty("cases").GetProperty("mlp-5") : fd.RootElement;
+    float[] fIn = [.. fc.GetProperty("input").EnumerateArray().Select(e => (float)e.GetDouble())];
+    int[] fShape = [.. fc.GetProperty("shape").EnumerateArray().Select(e => e.GetInt32())];
+    using var onnxBytes = new MemoryStream();
+    Open(name + ".onnx").CopyTo(onnxBytes);
+    using var saved = new MemoryStream();
+    using (IrModel ir = OnnxImporter.Load(onnxBytes.ToArray()))
+    {
+        ModelFormat.Save(ir, saved);
+    }
+
+    saved.Position = 0;
+    using Model direct = Model.Load(new MemoryStream(onnxBytes.ToArray()));
+    using Model viaFormat = Model.Load(saved);
+    bool same = direct.Run(fIn, fShape).AsSpan().SequenceEqual(viaFormat.Run(fIn, fShape));
+    Console.WriteLine($"{name}: saved and reloaded in the OneModel format ({saved.Length} bytes), outputs {(same ? "equal" : "DIFFER")}");
+    if (!same)
+    {
+        return 7;
     }
 }
 
