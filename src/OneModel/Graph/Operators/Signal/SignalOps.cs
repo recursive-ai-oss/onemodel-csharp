@@ -165,10 +165,11 @@ internal sealed class DftOp : OpKernel
         int outer = OpUtil.Product(d, 0, p.Axis), inner = OpUtil.Product(d, p.Axis + 1, d.Length - 1);
         bool half = _inverse && _onesided;
         int nIn = half ? p.N : p.NIn;
-        double[] buf = new double[(2 * nIn) + (2 * p.Bins) + (2 * p.N)];
-        Span<double> re = buf.AsSpan(0, nIn), im = buf.AsSpan(nIn, nIn);
-        Span<double> ore = buf.AsSpan(2 * nIn, p.Bins), oim = buf.AsSpan((2 * nIn) + p.Bins, p.Bins);
-        Span<double> table = buf.AsSpan((2 * nIn) + (2 * p.Bins), 2 * p.N);
+        Span<double> buf = run.Scratch(DType.F64, Shape.Create((2 * nIn) + (2 * p.Bins) + (2 * p.N))).MutableData<double>();
+        buf.Clear();
+        Span<double> re = buf.Slice(0, nIn), im = buf.Slice(nIn, nIn);
+        Span<double> ore = buf.Slice(2 * nIn, p.Bins), oim = buf.Slice((2 * nIn) + p.Bins, p.Bins);
+        Span<double> table = buf.Slice((2 * nIn) + (2 * p.Bins), 2 * p.N);
         for (int o = 0; o < outer; o++)
         {
             for (int i = 0; i < inner; i++)
@@ -305,9 +306,10 @@ internal sealed class StftOp : OpKernel
         bool hasFl = run.Inputs.Length > 3 && !run.Inputs[3].IsEmpty;
         var g = Geometry(xt.Shape, OpUtil.First(run.Inputs[1]), hasWindow ? run.Inputs[2].Length : 0, hasFl, hasFl ? OpUtil.First(run.Inputs[3]) : 0, null);
         int batch = xt.Shape[0], len = xt.Shape[1], inLast = xt.Shape[2], fl = g.FrameLength;
-        double[] buf = new double[(2 * fl) + (2 * g.Bins) + (2 * fl)];
-        Span<double> re = buf.AsSpan(0, fl), im = buf.AsSpan(fl, fl), ore = buf.AsSpan(2 * fl, g.Bins), oim = buf.AsSpan((2 * fl) + g.Bins, g.Bins);
-        Span<double> table = buf.AsSpan((2 * fl) + (2 * g.Bins), 2 * fl);
+        Span<double> buf = run.Scratch(DType.F64, Shape.Create((2 * fl) + (2 * g.Bins) + (2 * fl))).MutableData<double>();
+        buf.Clear();
+        Span<double> re = buf.Slice(0, fl), im = buf.Slice(fl, fl), ore = buf.Slice(2 * fl, g.Bins), oim = buf.Slice((2 * fl) + g.Bins, g.Bins);
+        Span<double> table = buf.Slice((2 * fl) + (2 * g.Bins), 2 * fl);
         for (int b = 0; b < batch; b++)
         {
             for (int f = 0; f < g.Frames; f++)
