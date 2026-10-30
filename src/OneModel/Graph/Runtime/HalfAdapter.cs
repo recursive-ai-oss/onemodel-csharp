@@ -44,7 +44,7 @@ internal sealed class HalfAdapterKernel : OpKernel
     /// </summary>
     public static bool CanWrap(string opType, OpKernel kernel) =>
         kernel.ViewOfInput < 0 && !kernel.OutputsDataDependent &&
-        opType is not ("Cast" or "CastLike" or "Constant" or "ConstantOfShape" or "Shape" or "Size" or "If" or "Loop" or "Scan");
+        opType is not ("Cast" or "CastLike" or "Constant" or "ConstantOfShape" or "Shape" or "Size" or "Range" or "If" or "Loop" or "Scan");
 
     /// <summary>Wraps <paramref name="kernel"/>; <paramref name="keepCompact"/> marks the inputs whose half-precision constants stay compact.</summary>
     public static OpKernel Wrap(string opType, OpKernel kernel, bool[] keepCompact) => new HalfAdapterKernel(kernel, opType, keepCompact);

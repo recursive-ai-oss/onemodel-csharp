@@ -10,6 +10,11 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (args.Length >= 3 && args[0] == "conformance")
+        {
+            return RunConformance(args);
+        }
+
         if (args.Length >= 2 && args[0] == "sweep")
         {
             return Sweep(args[1], args.Length > 2 ? args[2] : null);
@@ -30,8 +35,42 @@ internal static class Program
             return LoadOne(args[1], args.Length > 2 && args[2] == "nomap");
         }
 
-        Console.Error.WriteLine("usage: sweep <root> [<dumpdir>] | dump <dumpdir> <model.onnx>... | tensors <root> <outfile> | load <model.onnx> [nomap]");
+        Console.Error.WriteLine("usage: sweep <root> [<dumpdir>] | dump <dumpdir> <model.onnx>... | tensors <root> <outfile> | load <model.onnx> [nomap] | conformance <backend-test-root> <outdir> [fast|exact|both] [name-regex]");
         return 2;
+    }
+
+    /// <summary>Runs every backend-test case and writes conformance-fast.tsv and/or conformance-exact.tsv to the output directory.</summary>
+    private static int RunConformance(string[] args)
+    {
+        string root = args[1], outDir = args[2];
+        string which = args.Length > 3 ? args[3] : "both";
+        System.Text.RegularExpressions.Regex? filter = args.Length > 4 ? new(args[4], System.Text.RegularExpressions.RegexOptions.CultureInvariant) : null;
+        Directory.CreateDirectory(outDir);
+        var cases = Conformance.ConformanceRunner.FindCases(root).Where(c => filter is null || filter.IsMatch(Path.GetFileName(c.Dir))).ToList();
+        if (cases.Count == 0)
+        {
+            Console.Error.WriteLine("no cases found under " + root);
+            return 2;
+        }
+
+        foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+        {
+            if (which != "both" && !string.Equals(which, mode.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var results = new List<Conformance.CaseResult>();
+            foreach ((string group, string dir) in cases)
+            {
+                results.Add(Conformance.ConformanceRunner.RunCase(group, dir, mode));
+            }
+
+            File.WriteAllText(Path.Combine(outDir, $"conformance-{(mode == ExecutionMode.Exact ? "exact" : "fast")}.tsv"), Conformance.ConformanceRunner.ToTsv(results));
+            Console.WriteLine($"{mode}: {cases.Count} cases; " + string.Join(", ", results.GroupBy(r => r.Status).OrderBy(g => g.Key).Select(g => $"{Conformance.ConformanceRunner.StatusName(g.Key)} {g.Count()}")));
+        }
+
+        return 0;
     }
 
     private static string KeyOf(string root, string file) =>

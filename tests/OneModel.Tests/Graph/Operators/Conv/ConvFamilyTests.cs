@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.RegularExpressions;
 using RecursiveAI.OneModel.Graph;
 using RecursiveAI.OneModel.Kernels;
 using RecursiveAI.OneModel.Onnx;
@@ -9,15 +8,12 @@ namespace RecursiveAI.OneModel.Tests.Graph.Operators.ConvFamily;
 
 /// <summary>
 /// The convolution / pooling / normalisation / resize family: generated cases checked against ONNX Runtime's recorded outputs,
-/// the frozen backend node cases, a naive convolution reference, thread-count independence and allocation-free steady state.
-/// The case directories come from tools/ops_conv_oracle.py (ONEMODEL_OPS_CONV) and tools/fetch_backend_test.py
-/// (ONEMODEL_BACKEND_TEST); a test whose directory is not set does nothing. ONEMODEL_BACKEND_REPORT receives the per-case list.
+/// a naive convolution reference, thread-count independence and allocation-free steady state.
+/// The case directories come from tools/ops_conv_oracle.py (ONEMODEL_OPS_CONV); a test whose directory is not set does nothing.
+/// ONEMODEL_BACKEND_REPORT receives the per-case list. The frozen backend cases run in ConformanceTests.
 /// </summary>
 public partial class ConvFamilyTests
 {
-    [GeneratedRegex("^test_(conv_|convtranspose|basic_conv|maxpool|averagepool|globalaveragepool|globalmaxpool|batchnorm|resize|upsample)")]
-    private static partial Regex WantedNode();
-
     [Theory]
     [InlineData(ExecutionMode.Fast)]
     [InlineData(ExecutionMode.Exact)]
@@ -48,60 +44,6 @@ public partial class ConvFamilyTests
 
         Write(report, $"generated cases, mode {mode}: pass {pass}, fail {failures.Count}");
         Assert.True(failures.Count == 0, $"{failures.Count} failed of {pass + failures.Count}:{Environment.NewLine}{string.Join(Environment.NewLine, failures.Take(40))}");
-    }
-
-    [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void BackendNodeCases(ExecutionMode mode)
-    {
-        string? root = Environment.GetEnvironmentVariable("ONEMODEL_BACKEND_TEST");
-        if (string.IsNullOrEmpty(root))
-        {
-            return;
-        }
-
-        string node = Directory.Exists(Path.Combine(root, "node")) ? Path.Combine(root, "node") : root;
-        var failures = new List<string>();
-        var report = new StringBuilder();
-        var perOp = new SortedDictionary<string, (int Pass, int Fail, int Gap)>();
-        foreach (string c in Directory.GetDirectories(node).Order(StringComparer.Ordinal))
-        {
-            string name = Path.GetFileName(c);
-            if (!WantedNode().IsMatch(name) || name.Contains("training_mode", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            string op = Regex.Match(name, "^test_([a-z]+)").Groups[1].Value;
-            string outcome = CaseRunner.Run(c, mode, scaled: false, out long opset);
-            report.Append(name).Append(" (opset ").Append(opset).Append("): ").AppendLine(outcome);
-            (int p, int f, int g) = perOp.GetValueOrDefault(op);
-            if (outcome == "PASS")
-            {
-                p++;
-            }
-            else if (outcome.StartsWith("UNSUPPORTED", StringComparison.Ordinal))
-            {
-                g++;
-            }
-            else
-            {
-                f++;
-                failures.Add($"{name}: {outcome}");
-            }
-
-            perOp[op] = (p, f, g);
-        }
-
-        report.AppendLine($"backend cases, mode {mode}");
-        foreach ((string op, (int p, int f, int g)) in perOp)
-        {
-            report.AppendLine($"{op}: pass {p}, fail {f}, gap {g}");
-        }
-
-        Write(report, "");
-        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
     }
 
     private static void Write(StringBuilder report, string summary)
