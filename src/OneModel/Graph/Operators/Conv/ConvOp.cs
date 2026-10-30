@@ -1,6 +1,7 @@
 using System;
 using RecursiveAI.OneModel.Graph.Runtime;
 using RecursiveAI.OneModel.Kernels;
+using RecursiveAI.OneModel.Kernels.Exact;
 using RecursiveAI.OneModel.Tensors;
 
 namespace RecursiveAI.OneModel.Graph.Operators;
@@ -18,12 +19,59 @@ internal sealed class ConvOp : OpKernel
     private readonly int _group;
     private readonly FusedActivation? _activation;
 
-    private ConvOp(ConvOp source, FusedActivation activation)
+    // Set by ConvPackPass: the weights packed for one instruction set (the kernels' panel layout) and their original shape. The
+    // node then has no weights input; the tensor belongs to the graph that made it.
+    private readonly Tensor _packed;
+    private readonly Shape _packedShape;
+    private readonly KernelPath _packedPath;
+
+    // Set by ConvResidualFusionPass: input 3 is a tensor added to the convolution (after the bias, before the activation).
+    private readonly bool _residual;
+
+    private ConvOp(ConvOp source, bool residual)
     {
         _attrs = source._attrs;
         _group = source._group;
-        _activation = activation;
+        _activation = source._activation;
+        _packed = source._packed;
+        _packedShape = source._packedShape;
+        _packedPath = source._packedPath;
+        _residual = residual;
     }
+
+    private ConvOp(ConvOp source, FusedActivation activation)
+    {
+        _residual = source._residual;
+        _attrs = source._attrs;
+        _group = source._group;
+        _activation = activation;
+        _packed = source._packed;
+        _packedShape = source._packedShape;
+        _packedPath = source._packedPath;
+    }
+
+    private ConvOp(ConvOp source, Tensor packed, Shape weightsShape, KernelPath path)
+    {
+        _residual = source._residual;
+        _attrs = source._attrs;
+        _group = source._group;
+        _activation = source._activation;
+        _packed = packed;
+        _packedShape = weightsShape;
+        _packedPath = path;
+    }
+
+    /// <summary>The same convolution reading its weights from <paramref name="packed"/> (see ConvPackPass); input 1 is then absent.</summary>
+    internal ConvOp WithPackedWeights(Tensor packed, Shape weightsShape, KernelPath path) => new(this, packed, weightsShape, path);
+
+    /// <summary>The same convolution adding input 3 to its result (see ConvResidualFusionPass).</summary>
+    internal ConvOp WithResidual() => new(this, true);
+
+    /// <summary>True when input 3 is a residual that is added to the result.</summary>
+    internal bool HasResidual => _residual;
+
+    /// <summary>The group count.</summary>
+    internal int Group => _group;
 
     /// <summary>The same convolution with <paramref name="activation"/> applied to every output after the bias (see ConvActivationFusionPass).</summary>
     internal ConvOp WithActivation(FusedActivation activation) => new(this, activation);
@@ -45,19 +93,31 @@ internal sealed class ConvOp : OpKernel
 
     public override bool SupportsExact => true;
 
+    // A packed convolution owns its packed weights (the copy made by WithActivation, which shares them, is dropped by its pass).
+    public override void Dispose()
+    {
+        if (!_packed.IsEmpty)
+        {
+            _packed.Dispose();
+        }
+
+        base.Dispose();
+    }
+
     public override void Infer(InferContext ctx)
     {
-        if (!ctx.HasInput(0) || !ctx.HasInput(1))
+        bool packed = !_packed.IsEmpty;
+        if (!ctx.HasInput(0) || (!packed && !ctx.HasInput(1)))
         {
             throw ctx.Fail("expects inputs X and W");
         }
 
-        if (ctx.InputType(0) != DType.F32 || ctx.InputType(1) != DType.F32 || (ctx.HasInput(2) && ctx.InputType(2) != DType.F32))
+        if (ctx.InputType(0) != DType.F32 || (!packed && ctx.InputType(1) != DType.F32) || (ctx.HasInput(2) && ctx.InputType(2) != DType.F32))
         {
             throw ctx.Unsupported($"element types {ctx.InputType(0)}/{ctx.InputType(1)} are not supported yet (float32 only)");
         }
 
-        Shape x = ctx.InputShape(0), w = ctx.InputShape(1);
+        Shape x = ctx.InputShape(0), w = packed ? _packedShape : ctx.InputShape(1);
         if (x.Rank < 3 || x.Rank != w.Rank)
         {
             throw ctx.Fail($"X {x} and W {w} must have the same rank, at least 3");
@@ -86,7 +146,16 @@ internal sealed class ConvOp : OpKernel
         }
 
         Geometry(x, w, ctx, out ConvShape s);
-        ctx.SetOutput(0, DType.F32, x.Rank == 3 ? Shape.Create(s.N, s.Cout, s.OutW) : Shape.Create(s.N, s.Cout, s.OutH, s.OutW));
+        Shape os = OutShape(x.Rank, in s);
+        if (_residual)
+        {
+            if (!ctx.HasInput(3) || ctx.InputType(3) != DType.F32 || !Shape.TryBroadcast(os, ctx.InputShape(3), out os))
+            {
+                throw ctx.Fail("the residual must be float32 and broadcast with the convolution output");
+            }
+        }
+
+        ctx.SetOutput(0, DType.F32, os);
     }
 
     // Lifts one-dimensional convolutions to height 1 and resolves strides, dilations, pads and output size.
@@ -116,13 +185,42 @@ internal sealed class ConvOp : OpKernel
 
     public override void Run(in OpRun run)
     {
-        Tensor x = run.Inputs[0], w = run.Inputs[1], y = run.Outputs[0];
+        Tensor x = run.Inputs[0], y = run.Outputs[0];
         if (y.Length == 0)
         {
             return;
         }
 
         ReadOnlySpan<float> bias = run.Inputs.Length > 2 && !run.Inputs[2].IsEmpty ? run.Inputs[2].Data<float>() : default;
+        if (!_packed.IsEmpty)
+        {
+            if (run.Path != _packedPath || run.KernelMode != KernelMode.Fast)
+            {
+                throw new InvalidOperationException("Weights were packed for a different instruction set or mode than this run uses.");
+            }
+
+            Geometry(x.Shape, _packedShape, null, out ConvShape ps);
+            if (!_residual)
+            {
+                Conv.RunPacked(run.Path, in ps, x.Data<float>(), _packed.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
+                return;
+            }
+
+            Tensor res = run.Inputs[3];
+            if (res.Shape.Equals(y.Shape))
+            {
+                Conv.RunPacked(run.Path, in ps, x.Data<float>(), _packed.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation, res.Data<float>());
+                return;
+            }
+
+            // The residual broadcasts the output to a larger shape: convolve into scratch, then add with broadcasting.
+            Tensor tmp = run.Scratch(DType.F32, OutShape(x.Rank, in ps));
+            Conv.RunPacked(run.Path, in ps, x.Data<float>(), _packed.Data<float>(), tmp.MutableData<float>(), run.Threads, bias, null);
+            AddResidual(in run, tmp, res, y);
+            return;
+        }
+
+        Tensor w = run.Inputs[1];
         if (x.Rank == 5)
         {
             Conv3d.Run(Conv3d.Resolve(_attrs, x.Shape, w.Shape, _group, null), x.Data<float>(), w.Data<float>(), bias, y.MutableData<float>(), _activation, run.Path, run.Exact);
@@ -130,6 +228,24 @@ internal sealed class ConvOp : OpKernel
         }
 
         Geometry(x.Shape, w.Shape, null, out ConvShape s);
-        Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
+        if (!_residual)
+        {
+            Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), y.MutableData<float>(), run.Threads, bias, _activation);
+            return;
+        }
+
+        Tensor conv = run.Scratch(DType.F32, OutShape(x.Rank, in s));
+        Conv.Run(run.KernelMode, run.Path, in s, x.Data<float>(), w.Data<float>(), conv.MutableData<float>(), run.Threads, bias, null);
+        AddResidual(in run, conv, run.Inputs[3], y);
+    }
+
+    private static Shape OutShape(int rank, in ConvShape s) =>
+        rank == 3 ? Shape.Create(s.N, s.Cout, s.OutW) : Shape.Create(s.N, s.Cout, s.OutH, s.OutW);
+
+    // The unfused path of a convolution that carries a residual: y = activation(conv + residual) with the stand-alone kernels.
+    private void AddResidual(in OpRun run, Tensor conv, Tensor res, Tensor y)
+    {
+        Broadcast.Binary<float, FloatRows<AddArith>>(run.Path, run.Exact, y.Shape, conv.Shape, res.Shape, conv.Data<float>(), res.Data<float>(), y.MutableData<float>(), run.Threads);
+        _activation?.Apply(run.Path, run.Exact, y.MutableData<float>());
     }
 }

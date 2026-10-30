@@ -28,15 +28,26 @@ The scalar and 4-lane paths run wherever .NET runs; the 4-lane path is what brow
 
 ## Convolution
 
-* **Regular and grouped:** im2col (Chellapilla, Puri and Simard 2006): per image and group, the input patches become the columns
-  of a `(Cin/G*KH*KW) x (OutH*OutW)` matrix, rows ordered channel, kernel row, kernel column; the group's weights are A and
-  the group's output channels are C. Rows of the im2col matrix are built in chunks of 16. A 1x1, stride-1, unpadded
-  convolution uses the input directly as B.
+* **Exact mode, regular and grouped:** im2col (Chellapilla, Puri and Simard 2006): per image and group, the input patches become the
+  columns of a `(Cin/G*KH*KW) x (OutH*OutW)` matrix, rows ordered channel, kernel row, kernel column; the group's weights are A and
+  the group's output channels are C. Rows of the im2col matrix are built in chunks of 16. A 1x1, stride-1, unpadded convolution uses the
+  input directly as B.
+* **Fast mode, regular and grouped:** the same product without the im2col matrix, with prepacked weights and tiles that gather their own
+  columns; see [kernels-conv.md](kernels-conv.md). The bits equal the im2col path's in fast mode.
 * **Depthwise** (`Groups == Cin`, any channel multiplier): a direct kernel, described in [kernels-depthwise.md](kernels-depthwise.md).
+
+## One row of A
+
+In fast mode on AVX2 and AVX-512 a product with `m = 1` (a classifier on one sample, a decoder step) does not use the tile microkernel,
+which would compute 6 or 12 rows to keep one. It runs a matrix-vector kernel (`Kernels/Fast/FastGemv.cs`): four strips of packed B
+at a time, eight independent accumulator chains, one fused multiply-add per tap in increasing k from +0 or from the previous block's
+stored value, which is the tile kernel's order, so the bits are the same. Chunks are the same `Nc`-column tiles (so the epilogue sees the
+same tile edges); the work estimate is the time to read B at about 10 bytes per nanosecond per thread, so a large weight matrix uses
+several threads, which read it faster together.
 
 ## Fixed chunks and thread independence
 
-Chunk sizes (8 strips of B per packing chunk, one `MC x NC` tile per compute chunk, 16 im2col rows, planes per depthwise chunk from the plane size) are
+Chunk sizes (8 strips of B per packing chunk, one `MC x NC` tile per compute chunk, 16 im2col rows, planes per depthwise chunk from the plane size, the convolution tiles of [kernels-conv.md](kernels-conv.md)) are
 constants of the kernel and the shape. They are never derived from the number of threads or processors. Every output is computed
 by exactly one chunk, with the whole of `k` in one order, so there are no partial results to combine and a result cannot depend on
 which thread ran a chunk or on how many threads there were. `k` is never split across threads. A fixed-chunk parallel-for

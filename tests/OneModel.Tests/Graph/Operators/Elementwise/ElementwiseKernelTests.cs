@@ -4,6 +4,7 @@ using RecursiveAI.OneModel.Kernels;
 using RecursiveAI.OneModel.Kernels.Exact;
 using RecursiveAI.OneModel.Onnx;
 using RecursiveAI.OneModel.Tensors;
+using RecursiveAI.OneModel.Tests.Kernels;
 
 namespace RecursiveAI.OneModel.Tests.Graph.Operators.Elementwise;
 
@@ -21,6 +22,83 @@ public class ElementwiseKernelTests
         }
 
         return best;
+    }
+
+    [Fact]
+    public void LargeBroadcastOutputsDoNotDependOnTheThreadCount()
+    {
+        var rng = new KernelTestData.Rng(99);
+        (int[] A, int[] B)[] cases =
+        [
+            ([300, 1000], [300, 1000]),
+            ([300, 1000], [1000]),
+            ([1000, 300], [1000, 1]),
+            ([1, 100000], [1]),
+            ([70000], [70000]),
+            ([2, 3, 20000], [3, 1]),
+            ([5000, 40], [40]),
+        ];
+        foreach (bool exact in new[] { false, true })
+        {
+            foreach ((int[] da, int[] db) in cases)
+            {
+                Shape sa = Shape.Create(da), sb = Shape.Create(db);
+                Assert.True(Shape.TryBroadcast(sa, sb, out Shape so));
+                var a = new float[sa.Length];
+                var b = new float[sb.Length];
+                KernelTestData.Fill(ref rng, a, true);
+                KernelTestData.Fill(ref rng, b, true);
+                var one = new float[so.Length];
+                var many = new float[so.Length];
+                Broadcast.Binary<float, FloatRows<AddArith>>(KernelPaths.Best(), exact, so, sa, sb, a, b, one, 1);
+                Broadcast.Binary<float, FloatRows<AddArith>>(KernelPaths.Best(), exact, so, sa, sb, a, b, many, 7);
+                Assert.True(KernelTestData.SameBits(one, many), $"{sa} + {sb} exact={exact}");
+                // Spot-check against the plain loop.
+                for (int i = 0; i < so.Length; i += 997)
+                {
+                    int ra = 0, rb = 0, rest = i, strideA = 1, strideB = 1;
+                    for (int d = so.Rank - 1; d >= 0; d--)
+                    {
+                        int idx = rest % so[d];
+                        rest /= so[d];
+                        int da2 = d - (so.Rank - sa.Rank), db2 = d - (so.Rank - sb.Rank);
+                        if (da2 >= 0)
+                        {
+                            ra += sa[da2] == 1 ? 0 : idx * strideA;
+                            strideA *= sa[da2];
+                        }
+
+                        if (db2 >= 0)
+                        {
+                            rb += sb[db2] == 1 ? 0 : idx * strideB;
+                            strideB *= sb[db2];
+                        }
+                    }
+
+                    float want = a[ra] + b[rb];
+                    Assert.True(float.IsNaN(want) ? float.IsNaN(many[i]) : BitConverter.SingleToUInt32Bits(want) == BitConverter.SingleToUInt32Bits(many[i]), $"{sa} + {sb} at {i}");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void LargeReluDoesNotDependOnTheThreadCountAndWorksInPlace()
+    {
+        var rng = new KernelTestData.Rng(5);
+        var x = new float[200003];
+        KernelTestData.Fill(ref rng, x, true);
+        foreach (bool exact in new[] { false, true })
+        {
+            var one = new float[x.Length];
+            var many = new float[x.Length];
+            ReluParallel.Run(KernelPaths.Best(), exact, x, one, 1);
+            ReluParallel.Run(KernelPaths.Best(), exact, x, many, 7);
+            Assert.True(KernelTestData.SameBits(one, many));
+            var inPlace = (float[])x.Clone();
+            ReluParallel.Run(KernelPaths.Best(), exact, inPlace, inPlace, 7);
+            Assert.True(KernelTestData.SameBits(one, inPlace));
+        }
     }
 
     /// <summary>One graph through Exp, Sub, Greater, Where, Cast, Max, Neg, Tanh, Gelu and Mean.</summary>

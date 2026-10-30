@@ -113,11 +113,92 @@ internal static unsafe class Conv
                     ep.Path = path;
                 }
 
-                ViaGemm(mode, path, s, pin, pw, pout, threads, ep);
+                if (ep is not null)
+                {
+                    ep.RowOffset = 0;
+                }
+
+                if (mode == KernelMode.Fast)
+                {
+                    ConvPacked.Run(path, s, pin, pw, null, pout, threads, ep);
+                }
+                else
+                {
+                    ViaGemm(mode, path, s, pin, pw, pout, threads, ep);
+                }
+
                 if (ep is not null)
                 {
                     ep.Activation = null;
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Run"/> in fast mode with the weights packed beforehand by <see cref="ConvPacked.PackWeights"/> for the same path
+    /// and shape. Not for depthwise convolutions. Gives the same bits as <see cref="Run"/> on the unpacked weights.
+    /// </summary>
+    public static void RunPacked(
+        KernelPath path, in ConvShape s, ReadOnlySpan<float> input, ReadOnlySpan<float> packedWeights, Span<float> output, int threads,
+        ReadOnlySpan<float> bias = default, FusedActivation? activation = null, ReadOnlySpan<float> residual = default)
+    {
+        Validate(s);
+        if (s.IsDepthwise)
+        {
+            throw new ArgumentException("Depthwise convolutions have no packed form.", nameof(s));
+        }
+
+        if (input.Length < (long)s.N * s.Cin * s.H * s.W)
+        {
+            throw new ArgumentException("The input is smaller than N x Cin x H x W.", nameof(input));
+        }
+
+        if (output.Length < (long)s.N * s.Cout * s.OutH * s.OutW)
+        {
+            throw new ArgumentException("The output is smaller than N x Cout x OutH x OutW.", nameof(output));
+        }
+
+        if (packedWeights.Length < ConvPacked.PackedWeightsLength(path, s))
+        {
+            throw new ArgumentException("The packed weights are smaller than PackedWeightsLength.", nameof(packedWeights));
+        }
+
+        if (!bias.IsEmpty && bias.Length < s.Cout)
+        {
+            throw new ArgumentException("The bias is smaller than Cout.", nameof(bias));
+        }
+
+        if (!residual.IsEmpty && residual.Length < (long)s.N * s.Cout * s.OutH * s.OutW)
+        {
+            throw new ArgumentException("The residual is smaller than the output.", nameof(residual));
+        }
+
+        if (!KernelPaths.IsSupported(path))
+        {
+            throw new PlatformNotSupportedException($"Kernel path {path} is not supported on this machine.");
+        }
+
+        fixed (float* pin = input, pw = packedWeights, pout = output, pbias = bias, pres = residual)
+        {
+            ConvEpilogue? ep = null;
+            if (!bias.IsEmpty || activation is not null || !residual.IsEmpty)
+            {
+                ep = t_convEpilogue ??= new ConvEpilogue();
+                ep.Bias = pbias;
+                ep.RowOffset = 0;
+                ep.Activation = activation;
+                ep.Path = path;
+                // The residual has the output's layout, so a tile's residual sits at the same offset from the residual's start.
+                ep.Residual = residual.IsEmpty ? null : pres;
+                ep.OutputBase = pout;
+            }
+
+            ConvPacked.Run(path, s, pin, null, pw, pout, threads, ep);
+            if (ep is not null)
+            {
+                ep.Activation = null;
+                ep.Residual = null;
             }
         }
     }
@@ -139,6 +220,8 @@ internal static unsafe class Conv
         public int RowOffset;
         public FusedActivation? Activation;
         public KernelPath Path;
+        public float* Residual;
+        public float* OutputBase;
 
         public void Apply(float* tile, nint ldc, int row0, int col0, int rows, int cols, KernelMode mode)
         {
@@ -151,8 +234,37 @@ internal static unsafe class Conv
                     BiasActivationEpilogue.AddScalar(row, Bias[RowOffset + row0 + r], exact);
                 }
 
+                if (Residual != null)
+                {
+                    // Bounds: the tile lies in the output and the residual holds as many elements (checked in RunPacked).
+                    AddRow(tile + (r * ldc), Residual + ((tile + (r * ldc)) - OutputBase), cols);
+                }
+
                 Activation?.Apply(Path, exact, row);
             }
+        }
+    }
+
+    // row[i] += res[i], one rounded addition each, as the stand-alone Add does (fast mode only).
+    private static void AddRow(float* row, float* res, int n)
+    {
+        int i = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            for (; i + 8 <= n; i += 8)
+            {
+                Vector256.Store(Vector256.Load(row + i) + Vector256.Load(res + i), row + i);
+            }
+        }
+
+        for (; i + 4 <= n; i += 4)
+        {
+            Vector128.Store(Vector128.Load(row + i) + Vector128.Load(res + i), row + i);
+        }
+
+        for (; i < n; i++)
+        {
+            row[i] += res[i];
         }
     }
 
