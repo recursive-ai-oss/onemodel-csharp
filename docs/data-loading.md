@@ -14,6 +14,8 @@ Consumers receive batches in step order. Workers build a window of `Prefetch` st
 
 Threads are created in one file (`Data/DataLoader.cs`, `BatchSequence`). This is I/O-style prefetch, not compute partitioning: nothing computed depends on which thread ran it.
 
+Where the platform cannot start threads (browser WebAssembly, WASI: `OperatingSystem.IsBrowser()` or `IsWasi()`), the loader runs as 0 workers whatever `Workers` says, with no error; the batches are the same by the contract above.
+
 Datasets are read from several threads at once (`IDataset<T>.GetSample` must be thread-safe) and must return the same sample for the same index.
 
 ## 2. Random numbers

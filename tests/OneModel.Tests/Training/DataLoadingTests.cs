@@ -267,4 +267,23 @@ public class DataLoadingTests
         long per = (GC.GetAllocatedBytesForCurrentThread() - before) / 100;
         Assert.Equal(0, per);
     }
+
+    [Fact]
+    public void WithoutThreadSupportTheLoaderRunsInlineWithTheSameBatches()
+    {
+        var ds = new ListDataset<ImageExample>(MakeImages(50));
+        var sampler = EpochSampler.Shuffled(50, 8, 2);
+        string threaded = StreamHash(sampler, ds, 3, 4, 0, 14);
+        Assert.Equal(0, WorkerPolicy.Effective(0));
+        Assert.Equal(3, WorkerPolicy.Effective(3));
+        try
+        {
+            WorkerPolicy.ForceNoThreads = true;
+            Assert.Equal(0, WorkerPolicy.Effective(3));
+            var before = System.Diagnostics.Process.GetCurrentProcess().Threads.Count;
+            Assert.Equal(threaded, StreamHash(sampler, ds, 3, 4, 0, 14));
+            Assert.True(System.Diagnostics.Process.GetCurrentProcess().Threads.Count <= before + 1);
+        }
+        finally { WorkerPolicy.ForceNoThreads = null; }
+    }
 }

@@ -17,7 +17,7 @@ public sealed class DataLoaderOptions
     /// <summary>The run seed, default 0. Together with the epoch, step and slot it fixes every random choice.</summary>
     public ulong Seed { get; init; }
 
-    /// <summary>Background threads that build batches, default 2; 0 builds each batch on the calling thread. The batches are the same for every value.</summary>
+    /// <summary>Background threads that build batches, default 2; 0 builds each batch on the calling thread. Where the platform cannot start threads (browser WebAssembly, WASI) the loader uses 0 whatever this says. The batches are the same for every value.</summary>
     public int Workers { get; init; } = 2;
 
     /// <summary>How many batches may be built ahead of the consumer, default 4, at least 1 when there are workers. The batches are the same for every value.</summary>
@@ -77,7 +77,7 @@ public sealed class DataLoader<TSample, TBatch>
     {
         ArgumentOutOfRangeException.ThrowIfNegative(firstStep);
         ArgumentOutOfRangeException.ThrowIfLessThan(endStep, firstStep);
-        return new BatchSequence<TBatch>(new Producer(this), firstStep, endStep, _options.Workers, _options.Prefetch);
+        return new BatchSequence<TBatch>(new Producer(this), firstStep, endStep, WorkerPolicy.Effective(_options.Workers), _options.Prefetch);
     }
 
     private sealed class Buffers
@@ -130,6 +130,18 @@ public sealed class DataLoader<TSample, TBatch>
             Array.Clear(buf.Samples, 0, n); // do not keep samples alive between batches
         }
     }
+}
+
+/// <summary>Decides how many worker threads a stream really starts.</summary>
+internal static class WorkerPolicy
+{
+    /// <summary>Test switch: pretend the platform cannot start threads (as browser WebAssembly and WASI cannot).</summary>
+    internal static bool? ForceNoThreads;
+
+    internal static bool ThreadsSupported => !(ForceNoThreads ?? (OperatingSystem.IsBrowser() || OperatingSystem.IsWasi()));
+
+    /// <summary>The requested count, or 0 where threads cannot be started. Batches are the same either way.</summary>
+    internal static int Effective(int requested) => ThreadsSupported ? requested : 0;
 }
 
 /// <summary>Builds one batch by global step. Implementations must be thread-safe given distinct worker states.</summary>
