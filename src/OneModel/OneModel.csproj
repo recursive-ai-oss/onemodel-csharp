@@ -5,6 +5,7 @@
     <RootNamespace>$(PackagePrefix).$(LibName)</RootNamespace>
     <PackageId>$(PackagePrefix).$(LibName)</PackageId>
     <Description>A neural-network runtime for .NET in pure managed C# with no dependency beyond the shared framework: ONNX import, graph optimization and SIMD CPU kernels for inference; training is in RecursiveAI.OneModel.Training.</Description>
+    <PackageValidationBaselineVersion>0.3.0-preview.1</PackageValidationBaselineVersion>
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
