@@ -49,7 +49,9 @@ does not depend on the thread count.
 ## Threads
 
 The work estimate given to the pool is the multiply-add count divided by 8 per nanosecond (a core does about 40). The pool wakes at most
-one thread per 80 microseconds of estimated work; with the conservative rate the small layers of MobileNetV3 stayed on one thread. Measured
+one thread per 20 microseconds of estimated work (it was 80; on a 16-core Zen 4 desktop, 8/16/32 threads, ResNet-50 convolution chain 18.7/14.6/14.3 ms at 80 us,
+16.6/13.0/12.0 at 30 us, 16.6/12.7/11.6 at 20 us, MobileNetV3-large 3.06/2.30/2.19 ms at 80, 2.35/1.66/1.58 at 30, 2.30/1.63/1.57 at 20; indicative, shared host);
+the shared gathering phase is estimated at one nanosecond per gathered element (k times n), so it is spread over threads too. With the old rate the small layers of MobileNetV3 stayed on one thread. Measured
 on 8 threads (indicative, shared host), MobileNetV3-large's convolutions took 4.0 ms with the rate set to 40, 2.9 ms at 20, 2.1 ms at 10
 and 1.9 ms at 5 or lower; ResNet-50's did not change. Depthwise convolutions use four times their estimate for the same reason.
 

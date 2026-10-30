@@ -1,6 +1,6 @@
 # OneModel
 
-A neural-network runtime for .NET in pure managed C#, with no native binaries and no dependency beyond the shared framework. It will load ONNX models and our own format and run them on SIMD CPU kernels, with training to follow on the same kernels. The name is provisional.
+A neural-network runtime for .NET in pure managed C#, with no native binaries and no dependency beyond the shared framework. It will load ONNX models and our own format and run them on SIMD CPU kernels, with training to follow on the same kernels.
 
 **Status:** work in progress; models cannot be run yet. In place: the tensor layer (strided views over a pooled allocator, fp16/bf16, the record each operation keeps for gradients), fast and bit-exact fp32 kernels for matrix products, convolution, attention and softmax on AVX2, AVX-512, NEON and portable SIMD, our own exp/log/tanh/erf, and a fixed-chunk thread pool. Next: ONNX import, sessions and `Model.Load(...).Run(...)`.
 

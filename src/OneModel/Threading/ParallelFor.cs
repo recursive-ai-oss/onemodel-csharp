@@ -61,7 +61,7 @@ internal static class ParallelFor
     /// The smallest amount of work, in nanoseconds of single-thread time, that is worth one more thread: waking a helper and
     /// collecting its result costs about this much. Callers estimate their work with <see cref="Run(ChunkJob,int,int,long)"/>.
     /// </summary>
-    public const long MinWorkPerThread = 80_000;
+    public const long MinWorkPerThread = 20_000;
 
     /// <summary>
     /// Runs every chunk in <c>[0, chunks)</c> of <paramref name="job"/> using at most <paramref name="threads"/> threads, the calling
