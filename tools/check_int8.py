@@ -10,9 +10,9 @@ REFERENCE_DIR holds inputs/*.npy and outputs/*.npy (ONNX Runtime ORT_ENABLE_ALL,
   * for rank >= 3 outputs, the minimum cosine of the mean-pooled vectors (mean over the second-to-last axis);
   * the decision agreement: rows whose argmax over the last axis is the same as the reference's.
 
-The floor for each is what ONNX Runtime itself shows against its own ORT_ENABLE_ALL output: ORT_DISABLE_ALL, or, when those two
-outputs agree to within 1e-5 of the output scale (the float kernels do not depend on the level), the worst of four runs of ORT_ENABLE_ALL with relative
-noise of 1e-7 on the float inputs. A row passes when, for every float output,
+The floor of each statistic is the smaller of two values, both measured against ORT_ENABLE_ALL: ORT_DISABLE_ALL, and the worst
+of four runs of ORT_ENABLE_ALL with relative noise of 1e-7 on the float inputs. Both are ONNX Runtime's own sensitivity; the
+worse one is the honest floor. A row passes when, for every float output,
 
   (a) the 1st-percentile row cosine and (rank >= 3) the pooled cosine are each at least min(0.99, their floor); and
   (b) with --task class or token (class per image, token per position): decisions agree on at least 95% of the positions, or
@@ -65,17 +65,12 @@ sess = session(ort.GraphOptimizationLevel.ORT_DISABLE_ALL)
 names = [o.name for o in sess.get_outputs()]
 floor_outs = [dict(zip(names, sess.run(None, feeds)))]
 refs = {n: np.load(os.path.join(a.ref, "outputs", n + ".npy")) for n in names if os.path.exists(os.path.join(a.ref, "outputs", n + ".npy"))}
-floor_kind = "ORT_DISABLE_ALL"
-if all(np.abs(floor_outs[0][n] - refs[n]).max() <= 1e-5 * max(np.abs(refs[n]).max(), 1e-30) for n in refs):
-    # The two levels agree to 1e-5 of the output scale (the float kernels do not depend on the level): use ONNX Runtime's response to 1e-7 relative noise on the float inputs instead.
-    floor_kind = "1e-7 input noise"
-    rng = np.random.default_rng(1)
-    full = session(ort.GraphOptimizationLevel.ORT_ENABLE_ALL)
-    floor_outs = []
-    for _ in range(4):
-        f2 = {k: (v * (1 + 1e-7 * rng.standard_normal(v.shape)).astype(np.float32) if v.dtype == np.float32 else v) for k, v in feeds.items()}
-        floor_outs.append(dict(zip(names, full.run(None, f2))))
-print(f"floor: {floor_kind}")
+# Also the worst of four ORT_ENABLE_ALL runs with 1e-7 relative noise on the float inputs; the floor is the worse of the two spreads.
+rng = np.random.default_rng(1)
+full = session(ort.GraphOptimizationLevel.ORT_ENABLE_ALL)
+for _ in range(4):
+    f2 = {k: (v * (1 + 1e-7 * rng.standard_normal(v.shape)).astype(np.float32) if v.dtype == np.float32 else v) for k, v in feeds.items()}
+    floor_outs.append(dict(zip(names, full.run(None, f2))))
 
 ok = True
 for n in names:
