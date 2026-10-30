@@ -140,6 +140,19 @@ fixed settings (momentum, betas, ε, amsgrad). Then it copies the tensors, resto
 step count. Errors are `CheckpointException(Kind)`: `BadHeader`, `BadManifest`, `BadTensor`, `Mismatch`. A checkpoint with optimizer state
 loads into a model alone; asking for optimizer state from a model-only file is a `Mismatch`.
 
+**Hostile input.** A checkpoint is untrusted: the reader reads the whole input, then checks in this order before it touches the model or
+optimizer: the header (magic, version 1, flags 0, reserved 0, `file_length` equal to the real length, manifest and data offsets inside the file and
+`data_offset` a multiple of 64) -> `BadHeader`; the manifest (valid UTF-8 JSON of depth at most 32, an object with the required fields, integers
+that fit, dtype one of `f32`/`i32`/`i64`, no negative or oversized dimension) -> `BadManifest`; each tensor entry against the target (names, types
+and shapes equal, in order, and the shape is compared *before* any size is computed from it, so a hostile shape never allocates) -> `Mismatch`;
+then each entry's `offset` and `length` (length equal to the shape's byte size, offset at least 0, both inside the data region, checked without
+overflow) -> `BadTensor`. Only then are values copied. No bad input may raise any other exception type, and a rejected file leaves the model and
+optimizer unchanged. The committed cases are in `testdata/checkpoint/hostile/<kind>-<name>.ckpt` (41 files; `CheckpointHostileTests` assembles each by
+hand from this section, regenerates them with `ONEMODEL_WRITE_TESTDATA=1`, and requires the typed error from memory and from the file). The fuzz target
+`checkpoint` (`tools/run_fuzz.sh`) tries every input against four model/optimizer pairs and again with its header length fields repaired, so that
+mutations of the manifest and data get past the length checks; seeds are valid checkpoints of each pair plus the hostile files. Its `cov` figure
+in libFuzzer's output is a constant of the SharpFuzz driver (3 for every target); the meaningful figure is `ft`.
+
 **Resume rule.** Model, buffers (including dropout counters), optimizer state, hyper-parameters and the step count are the whole training
 state; schedules and dropout are functions of them. A run saved at step k and continued in a fresh process reproduces the uninterrupted run
 bit for bit in the same arithmetic mode and thread count (and, in exact mode, on any machine). The caller supplies the data order (store
