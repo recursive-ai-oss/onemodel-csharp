@@ -92,7 +92,8 @@ public sealed partial class Tracer : IDisposable
     private readonly List<Atom> _atoms = [];
     private readonly HashSet<string> _usedNames = new(StringComparer.Ordinal);
     private readonly Dictionary<ConstKey, string> _constants = [];
-    private readonly Dictionary<string, string> _parameterNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<ConstKey, string> _parameterNames = [];
+    private readonly Dictionary<(TensorBuffer? Buffer, int Generation, int Offset), string> _parameterStorage = [];
     private readonly List<(Tensor Tensor, long Version, string Name)> _captured = [];
     private readonly Dictionary<string, TraceValue> _byName = new(StringComparer.Ordinal);
     private int _counter;
@@ -113,6 +114,9 @@ public sealed partial class Tracer : IDisposable
         t._active = true;
         return t;
     }
+
+    /// <summary>True while any tracer is recording on the calling thread. Layers whose behaviour a graph cannot hold (random dropout masks) check it.</summary>
+    public static bool IsTracing => TraceContext.Current is not null;
 
     /// <summary>True until <see cref="Finish(ReadOnlySpan{string}, ReadOnlySpan{Tensor})"/> or <see cref="Dispose"/>.</summary>
     public bool IsRecording => _active;
@@ -215,7 +219,8 @@ public sealed partial class Tracer : IDisposable
             throw Fail(TraceErrorKind.InvalidUsage, $"The parameter name '{name}' is empty or already used.");
         }
 
-        _parameterNames[KeyOf(tensor).ToString()] = name;
+        _parameterNames[KeyOf(tensor)] = name;
+        _parameterStorage[(tensor.Buffer, tensor.Generation, tensor.Offset)] = name;
     }
 
     /// <summary>Stops recording and returns the traced model with one output.</summary>
@@ -356,10 +361,7 @@ public sealed partial class Tracer : IDisposable
 
     // ---- constants -----------------------------------------------------------------------------------------------------------
 
-    private readonly record struct ConstKey(TensorBuffer? Buffer, int Generation, int Offset, DType DType, string Shape, string Strides)
-    {
-        public override string ToString() => $"{Buffer?.GetHashCode()}:{Generation}:{Offset}:{DType}:{Shape}:{Strides}";
-    }
+    private readonly record struct ConstKey(TensorBuffer? Buffer, int Generation, int Offset, DType DType, string Shape, string Strides);
 
     private static ConstKey KeyOf(in Tensor t) =>
         new(t.Buffer, t.Generation, t.Offset, t.DType, t.Shape.ToString(), t.IsBlocked ? "blocked" : t.Strides.ToString());
@@ -377,7 +379,10 @@ public sealed partial class Tracer : IDisposable
             return existing;
         }
 
-        string name = _parameterNames.TryGetValue(key.ToString(), out string? given) ? given : FreshName("const");
+        // A named weight seen through another view (a transposed copy for a matrix product) keeps its name as a prefix.
+        string name = _parameterNames.TryGetValue(key, out string? given) ? given
+            : _parameterStorage.TryGetValue((t.Buffer, t.Generation, t.Offset), out string? baseName) ? FreshName(baseName + ".view")
+            : FreshName("const");
         using Tensor copy = t.Clone();
         if ((long)copy.Length * copy.ElementSize > int.MaxValue)
         {

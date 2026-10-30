@@ -11,6 +11,7 @@ using RecursiveAI.OneModel.Format;
 using RecursiveAI.OneModel.Graph;
 using RecursiveAI.OneModel.Onnx;
 using RecursiveAI.OneModel.Tensors;
+using RecursiveAI.OneModel.Tracing;
 using RecursiveAI.OneModel.Training;
 using RecursiveAI.OneModel.Training.Data;
 
@@ -321,6 +322,60 @@ foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
     if (lh0 != lh2)
     {
         return 12;
+    }
+}
+
+{
+    // Tracing: record a small conv / pooling / linear model with a symbolic batch, run it, save it, load it, run it again.
+    Tensor W(int seed, params int[] dims)
+    {
+        var rng = new Random(seed);
+        Shape sh = Shape.Create(dims);
+        var d = new float[sh.Length];
+        for (int i = 0; i < d.Length; i++)
+        {
+            d[i] = (float)(rng.NextDouble() - 0.5);
+        }
+
+        return Tensor.FromSpan<float>(d, sh);
+    }
+
+    Tensor cw = W(1, 4, 3, 3, 3), cb = W(2, 4), fw = W(3, 5, 4 * 3 * 3), fb = W(4, 5);
+    Tensor Net(Tensor x) =>
+        Ops.Linear(Ops.MaxPool2d(Ops.Relu(Ops.Conv2d(x, cw, cb, new Conv2dParams(PadH: 1, PadW: 1))), new Pool2dParams(2, 2, 2, 2, 0, 0)).Reshape(x.Shape[0], 36), fw, fb);
+    using Tracer tracer = Tracer.Begin();
+    Tensor tx = tracer.Input("x", W(9, 3, 3, 6, 6), "n", null, null, null);
+    Tensor ty = Net(tx);
+    using TracedModel traced = tracer.Finish("y", ty);
+    using Session inMemory = traced.CreateSession();
+    string tpath = Path.Combine(Path.GetTempPath(), "aot-trace-" + Guid.NewGuid().ToString("N") + ".onemodel");
+    try
+    {
+        traced.Save(tpath);
+        using Session loaded = Session.Load(tpath);
+        Tensor probe = W(11, 5, 3, 6, 6);
+        Span<Tensor> o1 = new Tensor[1], o2 = new Tensor[1];
+        inMemory.Run(["x"], [probe], ["y"], o1);
+        loaded.Run(["x"], [probe], ["y"], o2);
+        bool same = o1[0].ToArray<float>().AsSpan().SequenceEqual(o2[0].ToArray<float>());
+        using Tensor eager = Net(probe);
+        double tmax = 0, tdiff = 0;
+        float[] a = o1[0].ToArray<float>(), e = eager.ToArray<float>();
+        for (int i = 0; i < a.Length; i++)
+        {
+            tmax = Math.Max(tmax, Math.Abs(e[i]));
+            tdiff = Math.Max(tdiff, Math.Abs(a[i] - e[i]));
+        }
+
+        Console.WriteLine($"trace: {traced.NodeCount} nodes, saved and loaded outputs {(same ? "equal" : "DIFFER")}, scaled error vs eager at another batch {tdiff / tmax:E2}");
+        if (!same || !(tdiff / tmax < 1e-5))
+        {
+            return 12;
+        }
+    }
+    finally
+    {
+        File.Delete(tpath);
     }
 }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using RecursiveAI.OneModel.Tensors;
+using RecursiveAI.OneModel.Tracing;
 
 namespace RecursiveAI.OneModel.Training;
 
@@ -243,6 +244,12 @@ public sealed class Dropout : NnModule
         if (!IsTraining || _p == 0f)
         {
             return input;
+        }
+
+        if (Tracer.IsTracing)
+        {
+            throw new TraceException(TraceErrorKind.UnsupportedOperation,
+                "Dropout in training mode draws a random mask on every call, which a traced graph would freeze. Call Eval() on the module before tracing.");
         }
 
         long draw = _counter.Data<long>()[0];
