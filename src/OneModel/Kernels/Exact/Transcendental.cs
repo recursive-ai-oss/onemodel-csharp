@@ -260,6 +260,42 @@ internal static class Transcendental
     }
 
     /// <summary>
+    /// GELU with the erf form for fast mode: 0.5 * x * (1 + erf(x/sqrt(2))) with erf(x/sqrt(2)) = x * P(x^2) / Q(x^2), a degree 5 over
+    /// degree 5 rational minimax fit (tools/transcendentals/gelu_rational.py) on |x| &lt;= 5.6 and the limit values beyond: 1 + erf is
+    /// 2 within half a unit in the last place for x above 5.6, and gelu(x) is below 1e-7 in magnitude for x below -5.6, where it
+    /// returns -0. The fit's error is 2e-8 and the fp32 evaluation's 3.5e-7 (about 6 units in the last place of erf near 1),
+    /// which is the accuracy of the separate Erf/Add/Mul operators of a model running in fp32; unlike <see cref="GeluErf"/> it does not
+    /// keep the relative accuracy of the negative tail, where the result is below 1e-3 and its error stays below 1e-6.
+    /// Costs about a sixth of <see cref="GeluErf"/>: no exponential, one division. Fast instantiations only (it uses multiply-adds).
+    /// </summary>
+    public static TV GeluErfFast<TV, TO>(TV x)
+        where TV : struct
+        where TO : IVecOps<TV>
+    {
+        const float Limit = 5.6f;
+        TV sign = TO.And(x, B<TV, TO>(SignMaskBits));
+        TV ax = TO.And(x, B<TV, TO>(AbsMaskBits));
+        TV c = TO.Select(TO.GreaterThan(ax, TO.Splat(Limit)), TO.Splat(Limit), ax);
+        TV z = TO.Mul(c, c);
+        TV p = TO.Splat(4.4290683e-08f);
+        p = TO.Accumulate(TO.Splat(1.2713091e-05f), p, z);
+        p = TO.Accumulate(TO.Splat(0.0003477025f), p, z);
+        p = TO.Accumulate(TO.Splat(0.009414525f), p, z);
+        p = TO.Accumulate(TO.Splat(0.068752296f), p, z);
+        p = TO.Accumulate(TO.Splat(0.79788446f), p, z);
+        TV q = TO.Splat(1.1802138e-06f);
+        q = TO.Accumulate(TO.Splat(7.510214e-05f), q, z);
+        q = TO.Accumulate(TO.Splat(0.001912981f), q, z);
+        q = TO.Accumulate(TO.Splat(0.028940111f), q, z);
+        q = TO.Accumulate(TO.Splat(0.25283393f), q, z);
+        q = TO.Accumulate(TO.Splat(1f), q, z);
+        TV erf = TO.Or(TO.Mul(c, TO.Div(p, q)), sign);
+        TV res = TO.Mul(TO.Mul(TO.Splat(0.5f), x), TO.Add(TO.Splat(1f), erf));
+        res = TO.Select(TO.LessThan(x, TO.Splat(-Limit)), B<TV, TO>(SignMaskBits), res);
+        return Canonical<TV, TO>(TO.Select(TO.Equal(x, x), res, x));
+    }
+
+    /// <summary>
     /// GELU with the tanh form: 0.5 * x * (1 + tanh(k*(x + 0.044715*x^3))), k = sqrt(2/pi). Computed through the identity
     /// 1 + tanh(u) = 2*sigmoid(2u), which is exact and has no cancellation in the negative tail, so it is x * sigmoid(2u).
     /// </summary>
