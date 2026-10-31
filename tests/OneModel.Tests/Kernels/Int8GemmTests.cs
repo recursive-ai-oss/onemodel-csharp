@@ -124,6 +124,56 @@ public class Int8GemmTests
     }
 
     [Fact]
+    public void RequantizationMatchesTheFormulaForExtremeScales()
+    {
+        // Large, tiny, negative, infinite and NaN multipliers: the vector paths clamp before rounding when the scale is finite and
+        // must still give clamp(round_half_even(sum * mult) + zero) for every sum, and the smallest value for a NaN scale.
+        float[] mults = [0.37f, 1f, 123456.7f, 1e-7f, -0.5f, -3.3e5f, 0f, 3e38f, float.PositiveInfinity, float.NegativeInfinity, float.NaN, 0.5f, 0.25f];
+        var rng = new Random(99);
+        foreach (KernelPath path in Paths)
+        {
+            Int8Format f = Int8Format.For(path);
+            foreach (float mu in mults)
+            {
+                foreach (bool unsignedOut in new[] { false, true })
+                {
+                    const int m = 7, n = 70, k = 33;
+                    byte[] a = new byte[m * k], b = new byte[k * n];
+                    rng.NextBytes(a);
+                    rng.NextBytes(b);
+                    byte[] packed = new byte[f.PackedBBytes(k, n)];
+                    int[] sums = new int[n];
+                    Int8Matmul.PackB(in f, b, n, true, k, n, packed, sums, 1);
+                    byte[] got = new byte[m * n];
+                    int yz = unsignedOut ? 17 : -9;
+                    var call = new Int8Call
+                    {
+                        Format = f, M = m, N = n, K = k, ARaw = a, Lda = k, AU8 = false, BPacked = packed, BSums = sums,
+                        ZaScalar = 0, ZbScalar = -3, Ldc = n, Mult = mu, QuantUnsigned = unsignedOut, QuantZero = yz, Threads = 1, OutQuant = got,
+                    };
+                    Int8Matmul.Run(ref call);
+                    int lo = unsignedOut ? 0 : -128, hi = unsignedOut ? 255 : 127;
+                    for (int i = 0; i < m; i++)
+                    {
+                        for (int j = 0; j < n; j++)
+                        {
+                            long acc = 0;
+                            for (int p = 0; p < k; p++)
+                            {
+                                acc += (long)(sbyte)a[i * k + p] * ((b[p * n + j] - 128) + 3);
+                            }
+
+                            float fv = MathF.Round((float)(int)acc * mu) + yz;
+                            int want = float.IsNaN(fv) ? lo : fv < lo ? lo : fv > hi ? hi : (int)fv;
+                            Assert.True(got[i * n + j] == (byte)want, $"{path} mult {mu} unsigned={unsignedOut} [{i},{j}] sum {acc}: {got[i * n + j]} vs {(byte)want}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    [Fact]
     public void ChunkSizeDependsOnThreadsButTheProductDoesNot()
     {
         var rng = new Random(77);
