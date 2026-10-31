@@ -31,6 +31,28 @@ internal static unsafe class Int8Quantize
     {
         int lo = unsigned ? 0 : -128, hi = unsigned ? 255 : 127;
         long i = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            // Eight lanes: the same operations per element, so the bytes are those of the 128-bit loop; the division dominates the cost.
+            Vector256<float> ws = Vector256.Create(scale);
+            Vector256<float> wz = Vector256.Create((float)zeroPoint);
+            Vector256<float> wlo = Vector256.Create((float)lo);
+            Vector256<float> whi = Vector256.Create((float)hi);
+            for (; i + 32 <= n; i += 32)
+            {
+                Vector256<int> q0 = Quant8(x + i, ws, wz, wlo, whi);
+                Vector256<int> q1 = Quant8(x + i + 8, ws, wz, wlo, whi);
+                Vector256<int> q2 = Quant8(x + i + 16, ws, wz, wlo, whi);
+                Vector256<int> q3 = Quant8(x + i + 24, ws, wz, wlo, whi);
+                Vector256<short> s0 = Vector256.Narrow(q0, q1);
+                Vector256<short> s1 = Vector256.Narrow(q2, q3);
+                Vector256<byte> packed = unsigned
+                    ? Vector256.Narrow(s0.AsUInt16(), s1.AsUInt16())
+                    : Vector256.Narrow(s0, s1).AsByte();
+                packed.Store(y + i);
+            }
+        }
+
         if (Vector128.IsHardwareAccelerated)
         {
             Vector128<float> vs = Vector128.Create(scale);
@@ -66,6 +88,15 @@ internal static unsafe class Int8Quantize
         return unsigned
             ? Vector128.Narrow(s0.AsUInt16(), s1.AsUInt16())
             : Vector128.Narrow(s0, s1).AsByte();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<int> Quant8(float* p, Vector256<float> scale, Vector256<float> zero, Vector256<float> lo, Vector256<float> hi)
+    {
+        Vector256<float> v = Vector256.Round(Vector256.Load(p) / scale) + zero;
+        v = Vector256.ConditionalSelect(Vector256.Equals(v, v), v, lo);
+        v = Vector256.Min(Vector256.Max(v, lo), hi);
+        return Vector256.ConvertToInt32(v);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -144,7 +175,77 @@ internal static unsafe class Int8Quantize
     {
         float lo = float.PositiveInfinity, hi = float.NegativeInfinity;
         long i = 0;
-        if (Vector128.IsHardwareAccelerated && n >= 8)
+        if (Vector256.IsHardwareAccelerated && n >= 64)
+        {
+            // Four independent accumulators hide the select latency; min and max do not depend on the order, so the lane split is free.
+            Vector256<float> l0 = Vector256.Create(lo), l1 = l0, l2 = l0, l3 = l0;
+            Vector256<float> h0 = Vector256.Create(hi), h1 = h0, h2 = h0, h3 = h0;
+            for (; i + 32 <= n; i += 32)
+            {
+                Vector256<float> a = Vector256.Load(x + i), b = Vector256.Load(x + i + 8);
+                Vector256<float> c = Vector256.Load(x + i + 16), d = Vector256.Load(x + i + 24);
+                l0 = Vector256.ConditionalSelect(Vector256.LessThan(a, l0), a, l0);
+                h0 = Vector256.ConditionalSelect(Vector256.GreaterThan(a, h0), a, h0);
+                l1 = Vector256.ConditionalSelect(Vector256.LessThan(b, l1), b, l1);
+                h1 = Vector256.ConditionalSelect(Vector256.GreaterThan(b, h1), b, h1);
+                l2 = Vector256.ConditionalSelect(Vector256.LessThan(c, l2), c, l2);
+                h2 = Vector256.ConditionalSelect(Vector256.GreaterThan(c, h2), c, h2);
+                l3 = Vector256.ConditionalSelect(Vector256.LessThan(d, l3), d, l3);
+                h3 = Vector256.ConditionalSelect(Vector256.GreaterThan(d, h3), d, h3);
+            }
+
+            // Merge: a NaN never sits in an accumulator (it starts at +-inf and a NaN compares false), so Min and Max are safe here.
+            Vector256<float> ml = Vector256.Min(Vector256.Min(l0, l1), Vector256.Min(l2, l3));
+            Vector256<float> mh = Vector256.Max(Vector256.Max(h0, h1), Vector256.Max(h2, h3));
+            for (int l = 0; l < 8; l++)
+            {
+                float a = ml.GetElement(l), b = mh.GetElement(l);
+                if (a < lo)
+                {
+                    lo = a;
+                }
+
+                if (b > hi)
+                {
+                    hi = b;
+                }
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated && n >= 64)
+        {
+            Vector128<float> l0 = Vector128.Create(lo), l1 = l0, l2 = l0, l3 = l0;
+            Vector128<float> h0 = Vector128.Create(hi), h1 = h0, h2 = h0, h3 = h0;
+            for (; i + 16 <= n; i += 16)
+            {
+                Vector128<float> a = Vector128.Load(x + i), b = Vector128.Load(x + i + 4);
+                Vector128<float> c = Vector128.Load(x + i + 8), d = Vector128.Load(x + i + 12);
+                l0 = Vector128.ConditionalSelect(Vector128.LessThan(a, l0), a, l0);
+                h0 = Vector128.ConditionalSelect(Vector128.GreaterThan(a, h0), a, h0);
+                l1 = Vector128.ConditionalSelect(Vector128.LessThan(b, l1), b, l1);
+                h1 = Vector128.ConditionalSelect(Vector128.GreaterThan(b, h1), b, h1);
+                l2 = Vector128.ConditionalSelect(Vector128.LessThan(c, l2), c, l2);
+                h2 = Vector128.ConditionalSelect(Vector128.GreaterThan(c, h2), c, h2);
+                l3 = Vector128.ConditionalSelect(Vector128.LessThan(d, l3), d, l3);
+                h3 = Vector128.ConditionalSelect(Vector128.GreaterThan(d, h3), d, h3);
+            }
+
+            Vector128<float> ml = Vector128.Min(Vector128.Min(l0, l1), Vector128.Min(l2, l3));
+            Vector128<float> mh = Vector128.Max(Vector128.Max(h0, h1), Vector128.Max(h2, h3));
+            for (int l = 0; l < 4; l++)
+            {
+                float a = ml.GetElement(l), b = mh.GetElement(l);
+                if (a < lo)
+                {
+                    lo = a;
+                }
+
+                if (b > hi)
+                {
+                    hi = b;
+                }
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated && n >= 8)
         {
             Vector128<float> vlo = Vector128.Create(lo), vhi = Vector128.Create(hi);
             for (; i + 4 <= n; i += 4)
