@@ -216,3 +216,46 @@ Findings.
   change touches every operator's entry point and saved-slot handling, and is a separate piece of work worth doing only if
   long-sequence transformer training on a CPU becomes a real use. Loss scaling is a float16 remedy and has nothing to scale while
   gradients stay float32, so it waits for the same work.
+
+## 10. Fine-tuning a CRNN line recognizer (measured against PyTorch)
+
+The reproduction check for the training stack: fine-tune a convolutional-recurrent line recognizer (six conv blocks with batch norm and
+max pooling, a two-layer bidirectional LSTM of 192, a linear layer to 622 classes, CTC) for 2000 steps from a released checkpoint, once
+with a PyTorch trainer and once with this library, and compare. `tools/CrnnFinetune` is the driver (`train`, `eval`, `export`);
+`tools/crnn_ref/` runs the PyTorch side as a black box and compares the runs.
+
+**Recipe.** AdamW (lr 6e-5, weight decay 0.01, betas 0.9/0.999), 200-step linear warm-up from `lr/200` then a half cosine down to 2% of
+the peak over the remaining steps (`WarmupCosineLr`), gradient-norm clip 5, CTC (blank 0, mean over lines, `zeroInfinity`), batch
+statistics in training mode, 128 lines per batch of mixed sources. Lines are 32 px high and padded to the batch's widest line by
+repeating the last column; the model sees only each line's true width (`lengths` below).
+
+**Library additions.** `Ops.Lstm`/`Ops.Gru` and `Recurrent.Forward(input, lengths)` take per-row sequence lengths with packed-sequence
+meaning: the forward direction needs no change; the reverse direction runs as a forward pass over each row reversed within its length
+(a gather by an involutive permutation), so it starts at step `length-1` from the zero state; outputs at padded steps are exactly zero and
+carry zero gradient (the layer output is multiplied by a 0/1 mask). Tests: every padded row equals the row run alone at its length, for
+LSTM and GRU, uni- and bidirectional, two layers; gradients by finite differences. `WarmupCosineLr` is `base·(s+1)/W` for `s < W`, then
+`base·(f + (1−f)·(1+cos(πp))/2)`, `p = (s−W)/(T−W)`.
+
+**Data.** The trainer's augmentation draws from a GPU generator, which cannot be reproduced here, so the PyTorch trainer dumps each
+step's batch (after augmentation, rounded to bytes, padded) and both sides train on that one stream. The stream depends only on the seed
+and step, except that the targeted-error source is weighted by a measurement of the starting model, so a reference run reuses the first
+run's measurement file to get the same stream. Augmentation is therefore not ported; that is the remaining gap for training without
+PyTorch.
+
+**Results** (host: a 32-thread Zen 4 machine shared with other jobs; ours on CPU, 8 threads, fast mode; references on an RTX 4070; the
+generated-photo source of the original recipe is left out, which changes the mix, not the comparison).
+
+- *First step.* Loss 0.166759 ours against 0.166759 for PyTorch with TF32 off (relative 4e-7); gradient norm within 1e-5. Steps 0–100
+  agree to 1e-7 relative in the loss.
+- *Later steps.* Two fp32 trajectories of a chaotic training diverge: the per-step loss differs by 5e-3 (median relative) between ours and
+  strict-fp32 PyTorch over steps 0–999, and by 5e-3 between PyTorch with TF32 on and PyTorch with it off, so ours is as close to
+  PyTorch as PyTorch is to a re-rounded PyTorch. Means over 200-step windows agree within 3e-3 (at steps 0–199, 6e-6).
+- *Quality at 2000 steps.* Character error rate on the twelve validation sets, in percent, against the shipped trainer (bf16
+  autocast): val 1.642 / 1.620, receipt-style 7.775 / 7.810, gaps 4.509 / 4.472, interface 0.380 / 0.383, tight 1.370 / 1.366,
+  receipt photos 2.163 / 2.173, mask 13.403 / 13.542, quantity 12.389 / 12.463, figures 5.291 / 5.313, small text 15.277 / 15.239, reader
+  1.758 / 1.749, shot 0.329 / 0.337 (reference / ours). Every set is within 5% relative (the largest is 2.3%, shot), and all but mask (0.139 pp) and quantity
+  (0.074 pp), the two sets with the highest error rates, are also within 0.05 percentage points.
+- *Export.* `CrnnFinetune export` writes the weights as a model container from its specification (batch norm folded in double precision,
+  binary16 weights, nearest even). The consumer's own parity test, run unchanged, passes on the exported file and fails when a byte of a
+  tensor is flipped.
+- *Cost.* See the table at the end of this section.
