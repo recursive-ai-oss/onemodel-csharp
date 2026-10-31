@@ -42,10 +42,20 @@ internal static unsafe class ConvPacked
     [ThreadStatic]
     private static RowJob? t_rowJob;
 
+    // The register tile of a convolution. On AVX-512 it is 16x16 rather than the matrix product's 12x32: output-channel counts are
+    // almost always multiples of 8 or 16 (64, 128, 256, ...), where 12-row strips leave up to 12% of the rows as padding, and 16-column
+    // strips pad the small feature maps (196 = 12.25 strips of 16, 6.1 of 32) less. Every output is summed in the same order whatever the
+    // tile, so the result does not change. Measured on ResNet-50, one thread: about 5% faster.
+    internal static Gemm.Blocking GetBlocking(KernelPath path) =>
+        path == KernelPath.Avx512 ? new(FastConvAvx512M16.Mr, FastConvAvx512M16.Nr, 96, 128) : Gemm.GetBlocking(path);
+
+    private static delegate*<int, float*, float*, float*, nint, int, void> SelectMicro(KernelPath path) =>
+        path == KernelPath.Avx512 ? &FastConvAvx512M16.Kernel : Gemm.SelectMicro(KernelMode.Fast, path);
+
     /// <summary>Floats <see cref="PackWeights"/> writes for weights of <paramref name="s"/> packed for <paramref name="path"/>.</summary>
     public static long PackedWeightsLength(KernelPath path, in ConvShape s)
     {
-        int mr = Gemm.GetBlocking(path).Mr;
+        int mr = GetBlocking(path).Mr;
         long coutG = s.Cout / s.Groups;
         long k = (long)(s.Cin / s.Groups) * s.KH * s.KW;
         return s.Groups * ((coutG + mr - 1) / mr) * mr * k;
@@ -75,7 +85,7 @@ internal static unsafe class ConvPacked
             throw new ArgumentException("The destination is smaller than PackedWeightsLength.", nameof(dst));
         }
 
-        int mr = Gemm.GetBlocking(path).Mr;
+        int mr = GetBlocking(path).Mr;
         fixed (float* pw = weights, pd = dst)
         {
             for (int g = 0; g < s.Groups; g++)
@@ -99,7 +109,7 @@ internal static unsafe class ConvPacked
         KernelPath path, in ConvShape s, float* input, float* weights, float* packedWeights, float* output, int threads,
         IGemmEpilogue? epilogue)
     {
-        Gemm.Blocking blk = Gemm.GetBlocking(path);
+        Gemm.Blocking blk = GetBlocking(path);
         int cinG = s.Cin / s.Groups;
         int coutG = s.Cout / s.Groups;
         int k = cinG * s.KH * s.KW;
@@ -440,7 +450,7 @@ internal static unsafe class ConvPacked
             _packedWeights = packedWeights;
             _output = output;
             _epilogue = epilogue;
-            _micro = Gemm.SelectMicro(KernelMode.Fast, path);
+            _micro = SelectMicro(path);
             SharedPanels = null;
         }
 
