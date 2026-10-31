@@ -28,7 +28,10 @@ internal static unsafe class Scratch
     /// <summary>The packed panel of B columns one convolution tile reads (used by whichever thread runs the tile).</summary>
     public const int PackPanel = 5;
 
-    private const int Slots = 6;
+    /// <summary>Slot for all of A packed once, shared by the chunks of one product (the caller's buffer).</summary>
+    public const int PackAll = 6;
+
+    private const int Slots = 7;
 
     [ThreadStatic]
     private static float*[]? t_pointers;

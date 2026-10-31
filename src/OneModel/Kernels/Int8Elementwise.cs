@@ -63,9 +63,18 @@ internal static unsafe class Int8Elementwise
         return Int8Quantize.QuantizeOne(da + db, p.YScale, p.YZero, lo, hi);
     }
 
+    /// <summary>Scalar reference for one element of a product: <c>quantize(dequantize(a) * dequantize(b))</c>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int MulOne(byte a, byte b, in Int8AddParams p, int lo, int hi)
+    {
+        float da = (float)((p.AUnsigned ? a : (sbyte)a) - p.AZero) * p.AScale;
+        float db = (float)((p.BUnsigned ? b : (sbyte)b) - p.BZero) * p.BScale;
+        return Int8Quantize.QuantizeOne(da * db, p.YScale, p.YZero, lo, hi);
+    }
+
     // Sixteen bytes to four vectors of four ints, sign- or zero-extended.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void Widen(Vector128<byte> b, bool unsigned, out Vector128<int> w0, out Vector128<int> w1, out Vector128<int> w2, out Vector128<int> w3)
+    internal static void Widen(Vector128<byte> b, bool unsigned, out Vector128<int> w0, out Vector128<int> w1, out Vector128<int> w2, out Vector128<int> w3)
     {
         Vector128<short> s0, s1;
         if (unsigned)
@@ -88,7 +97,7 @@ internal static unsafe class Int8Elementwise
 
     // Quantizes four float sums like Int8Quantize's own four-lane step (NaN goes to the smallest value).
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Vector128<int> Q(Vector128<float> sum, Vector128<float> scale, Vector128<float> zero, Vector128<float> lo, Vector128<float> hi)
+    internal static Vector128<int> Q(Vector128<float> sum, Vector128<float> scale, Vector128<float> zero, Vector128<float> lo, Vector128<float> hi)
     {
         Vector128<float> v = Vector128.Round(sum / scale) + zero;
         v = Vector128.ConditionalSelect(Vector128.Equals(v, v), v, lo);

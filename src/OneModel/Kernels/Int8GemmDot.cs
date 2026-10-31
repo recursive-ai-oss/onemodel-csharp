@@ -89,4 +89,71 @@ internal static unsafe class Int8GemmDot
         AdvSimd.Store(c + (3 * ldc) + 8, c32);
         AdvSimd.Store(c + (3 * ldc) + 12, c33);
     }
+
+    /// <summary>
+    /// One column of C (a matrix-vector product) for <paramref name="strips"/> strips of four rows: <c>c[r * ldc] (+)= sum over k of A[r, k] * b[k]</c>.
+    /// The generic kernel computes sixteen columns at once and a vector has only one real column, so this reads the first column of the
+    /// packed B strip (per k quad, the first four of its 64 bytes) and puts four rows in the four lanes of one SDOT. Several strips run
+    /// side by side so the dependent adds of one strip overlap.
+    /// Bounds the caller guarantees: each strip of <c>a</c> holds kq*16 bytes at <c>stripBytes</c> intervals, <c>b</c> holds kq*64 bytes
+    /// (only the first four of each 64 are read, but a 16-byte load starts there), and <c>c</c> has 4*strips rows of <c>ldc</c> ints.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal static void Gemv(int kq, byte* a, long stripBytes, int strips, byte* b, int* c, nint ldc, int accumulate)
+    {
+        int s = 0;
+        for (; s + 4 <= strips; s += 4)
+        {
+            byte* a0 = a + (s * stripBytes), a1 = a0 + stripBytes, a2 = a1 + stripBytes, a3 = a2 + stripBytes;
+            int* c0 = c + (4L * s * ldc);
+            Vector128<int> r0 = accumulate != 0 ? Load4(c0, ldc) : Vector128<int>.Zero;
+            Vector128<int> r1 = accumulate != 0 ? Load4(c0 + (4 * ldc), ldc) : Vector128<int>.Zero;
+            Vector128<int> r2 = accumulate != 0 ? Load4(c0 + (8 * ldc), ldc) : Vector128<int>.Zero;
+            Vector128<int> r3 = accumulate != 0 ? Load4(c0 + (12 * ldc), ldc) : Vector128<int>.Zero;
+            for (int p = 0; p < kq; p++)
+            {
+                Vector128<sbyte> bq = AdvSimd.LoadVector128((sbyte*)(b + (p * 64L)));
+                r0 = Dp.DotProductBySelectedQuadruplet(r0, AdvSimd.LoadVector128((sbyte*)(a0 + (p * 16L))), bq, 0);
+                r1 = Dp.DotProductBySelectedQuadruplet(r1, AdvSimd.LoadVector128((sbyte*)(a1 + (p * 16L))), bq, 0);
+                r2 = Dp.DotProductBySelectedQuadruplet(r2, AdvSimd.LoadVector128((sbyte*)(a2 + (p * 16L))), bq, 0);
+                r3 = Dp.DotProductBySelectedQuadruplet(r3, AdvSimd.LoadVector128((sbyte*)(a3 + (p * 16L))), bq, 0);
+            }
+
+            Store4(c0, ldc, r0);
+            Store4(c0 + (4 * ldc), ldc, r1);
+            Store4(c0 + (8 * ldc), ldc, r2);
+            Store4(c0 + (12 * ldc), ldc, r3);
+        }
+
+        for (; s < strips; s++)
+        {
+            byte* a0 = a + (s * stripBytes);
+            int* c0 = c + (4L * s * ldc);
+            Vector128<int> r0 = accumulate != 0 ? Load4(c0, ldc) : Vector128<int>.Zero;
+            Vector128<int> r1 = Vector128<int>.Zero;
+            int p = 0;
+            for (; p + 2 <= kq; p += 2)
+            {
+                r0 = Dp.DotProductBySelectedQuadruplet(r0, AdvSimd.LoadVector128((sbyte*)(a0 + (p * 16L))), AdvSimd.LoadVector128((sbyte*)(b + (p * 64L))), 0);
+                r1 = Dp.DotProductBySelectedQuadruplet(r1, AdvSimd.LoadVector128((sbyte*)(a0 + ((p + 1) * 16L))), AdvSimd.LoadVector128((sbyte*)(b + ((p + 1) * 64L))), 0);
+            }
+
+            if (p < kq)
+            {
+                r0 = Dp.DotProductBySelectedQuadruplet(r0, AdvSimd.LoadVector128((sbyte*)(a0 + (p * 16L))), AdvSimd.LoadVector128((sbyte*)(b + (p * 64L))), 0);
+            }
+
+            Store4(c0, ldc, r0 + r1);
+        }
+    }
+
+    private static Vector128<int> Load4(int* c, nint ldc) => Vector128.Create(c[0], c[ldc], c[2 * ldc], c[3 * ldc]);
+
+    private static void Store4(int* c, nint ldc, Vector128<int> v)
+    {
+        c[0] = v.GetElement(0);
+        c[ldc] = v.GetElement(1);
+        c[2 * ldc] = v.GetElement(2);
+        c[3 * ldc] = v.GetElement(3);
+    }
 }

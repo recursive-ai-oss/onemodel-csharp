@@ -140,7 +140,7 @@ internal static unsafe class Int8Conv
         // otherwise the whole matrix is packed first.
         bool pointwiseVector = pointwise && Int8Pack.Supported(in f);
         // Only worth it when more than one thread will work on the product: one thread packs the whole matrix once, with no repeats.
-        long work = (long)coutG * nCols * k / 50;
+        long work = ((long)coutG * nCols * k / 50) + ((long)coutG * nCols / 2);
         bool onDemand = (pointwiseVector || vectorGather) && c.Threads > 1 && work / ParallelFor.MinWorkPerThread > 1;
         byte* packed = null;
         int* sums = null;
@@ -290,7 +290,15 @@ internal static unsafe class Int8Conv
             job.Mult = c.Mult;
             job.MultVec = c.MultVec.IsEmpty ? null : pm;
             int planes = s.N * s.Cin;
+            int* offsets = stackalloc int[MaxDirectTaps];
+            if (Int8Depthwise.Supports(in s))
+            {
+                Int8Depthwise.TapOffsets(in s, offsets);
+            }
+
+            job.Offsets = offsets;
             ParallelFor.Run(job, (planes + PlanesPerChunk - 1) / PlanesPerChunk, c.Threads, (long)planes * nCols * s.KH * s.KW / 4);
+            job.Offsets = null;
         }
     }
 
@@ -470,6 +478,9 @@ internal static unsafe class Int8Conv
         public float Mult;
         public float* MultVec;
 
+        // Where each kernel tap starts in the padded copy of a plane (the same for every plane); set once per call.
+        public int* Offsets;
+
         public override void RunChunk(int chunk)
         {
             int planes = S.N * S.Cin;
@@ -477,6 +488,7 @@ internal static unsafe class Int8Conv
             int p1 = Math.Min(planes, p0 + PlanesPerChunk);
             int outH = S.OutH, outW = S.OutW, taps = S.KH * S.KW;
             int* wv = stackalloc int[MaxDirectTaps];
+            bool direct = Int8Depthwise.Supports(in S);
             int lo = QuantUnsigned ? 0 : -128, hi = QuantUnsigned ? 255 : 127;
             for (int p = p0; p < p1; p++)
             {
@@ -491,9 +503,9 @@ internal static unsafe class Int8Conv
                 long outBase = (long)p * outH * outW;
                 int bias = Bias != null ? Bias[ch] : 0;
                 float mult = MultVec != null ? MultVec[ch] : Mult;
-                if (Int8Depthwise.Supports(in S))
+                if (direct)
                 {
-                    Int8Depthwise.Plane(in S, plane, XU8, XZero, wv, bias, mult, OutInt32 != null ? OutInt32 + outBase : null,
+                    Int8Depthwise.Plane(in S, plane, XU8, XZero, wv, Offsets, bias, mult, OutInt32 != null ? OutInt32 + outBase : null,
                         OutQuant != null ? OutQuant + outBase : null, QuantUnsigned, QuantZero);
                     continue;
                 }

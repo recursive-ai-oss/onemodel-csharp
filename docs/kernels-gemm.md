@@ -7,10 +7,18 @@ exist for every kernel; the exact mode's definition is in `exact-mode.md`.
 
 1. **Pack B** once per call, for all of `k` and `n`: for each block of `KC = 256` rows of B, strips of `NR` columns, element
    `(p, j)` of a strip at `p*NR + j`; a ragged last strip is padded with +0. Work is split into chunks of 8 strips per k-block.
-2. **Tiles.** C is cut into `MC x NC` tiles (the constants below). A tile is one chunk of work. For each k-block the tile packs its
-   `MC x KC` block of A into strips of `MR` rows (element `(p, r)` at `p*MR + r`, padded with +0), then for each `NR`-wide strip of
-   B it runs the microkernel down the A strips, so the B strip (`KC x NR x 4` bytes, 16 KB for AVX2) stays in the first-level
-   cache while the A block (about 100 KB) streams from the second level.
+2. **Tiles.** C is cut into row blocks of at most `MC` rows and column blocks of at most `NC` columns; a tile is one chunk of work.
+   The row blocks are balanced (`m` rows are split into `ceil(m / MC)` blocks of equal size rounded up to a multiple of `MR`, so
+   128 rows are two blocks of 64, not 96 and 32). When that gives fewer than 32 tiles the column blocks are cut finer, down to two
+   strips (`2 * NR` columns), until there are 32 or the minimum is reached: one sequence through a transformer layer has few rows
+   and would otherwise leave most threads without a tile. These sizes are functions of `m`, `n` and the path only. For each k-block
+   the tile gets its `MC x KC` block of A as strips of `MR` rows (element `(p, r)` at `p*MR + r`, padded with +0), then for each
+   `NR`-wide strip of B it runs the microkernel down the A strips, so the B strip (`KC x NR x 4` bytes, 16 KB for AVX2) stays in
+   the first-level cache while the A block (about 100 KB) streams from the second level.
+   A block of A is needed by every tile of its row block. When A is small (at most 2^21 floats, 8 MB) it is packed once per product
+   instead of once per tile: the first tile to reach a (row block, k block) packs it into a shared buffer and the other tiles of
+   that row block wait for the copy (one block is a copy of at most `MC x KC` floats), so no tile waits for one that has not
+   started. The packed values are the same either way. Larger A is packed per tile.
 3. **Microkernel.** An `MR x NR` tile of accumulators in registers; each step of k loads one A column of `MR` values and one
    B row of `NR` values and updates every accumulator. A later k-block starts from the C values the earlier blocks stored; the
    first block starts from +0. Ragged edge tiles run the full microkernel on a scratch tile and copy out the valid part.
@@ -47,7 +55,7 @@ several threads, which read it faster together.
 
 ## Fixed chunks and thread independence
 
-Chunk sizes (8 strips of B per packing chunk, one `MC x NC` tile per compute chunk, 16 im2col rows, planes per depthwise chunk from the plane size, the convolution tiles of [kernels-conv.md](kernels-conv.md)) are
+Chunk sizes (8 strips of B per packing chunk, one row-block by column-block tile per compute chunk, sized from the shape as above, 16 im2col rows, planes per depthwise chunk from the plane size, the convolution tiles of [kernels-conv.md](kernels-conv.md)) are
 constants of the kernel and the shape. They are never derived from the number of threads or processors. Every output is computed
 by exactly one chunk, with the whole of `k` in one order, so there are no partial results to combine and a result cannot depend on
 which thread ran a chunk or on how many threads there were. `k` is never split across threads. A fixed-chunk parallel-for

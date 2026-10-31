@@ -56,6 +56,113 @@ internal static unsafe class Int8Pool
         }
     }
 
+    [ThreadStatic]
+    private static AverageJob? t_average;
+
+    /// <summary>Parameters of a global average over 8-bit planes: the input's type, zero point and scale, and the output's.</summary>
+    internal readonly record struct AverageParams(bool XUnsigned, int XZero, float XScale, bool YUnsigned, int YZero, float YScale);
+
+    /// <summary>
+    /// The mean of each of <paramref name="planes"/> planes of <paramref name="plane"/> values, quantized: the sum of the integers is
+    /// exact, the mean is <c>(sum - plane * zero) * scale / plane</c> in float32, and the quantization is that of QuantizeLinear.
+    /// </summary>
+    /// <remarks>Bounds: both spans are checked against planes * plane (and planes) before any pointer is formed.</remarks>
+    public static void GlobalAverage(ReadOnlySpan<byte> x, Span<byte> y, long planes, int plane, in AverageParams p, int threads)
+    {
+        if (planes < 0 || plane <= 0 || x.Length < planes * plane || y.Length < planes)
+        {
+            throw new ArgumentException("A buffer is smaller than the planes need.");
+        }
+
+        if (planes == 0)
+        {
+            return;
+        }
+
+        fixed (byte* px = x, py = y)
+        {
+            int perChunk = (int)Math.Max(1, Math.Min(planes, OutputsPerChunk / plane));
+            int chunks = (int)((planes + perChunk - 1) / perChunk);
+            if (threads <= 1 || chunks < 2)
+            {
+                Averages(px, py, 0, planes, plane, in p);
+                return;
+            }
+
+            AverageJob job = t_average ??= new AverageJob();
+            job.X = px;
+            job.Y = py;
+            job.Planes = planes;
+            job.Plane = plane;
+            job.PerChunk = perChunk;
+            job.P = p;
+            ParallelFor.Run(job, chunks, threads, planes * plane / 4);
+            job.X = null;
+            job.Y = null;
+        }
+    }
+
+    private static void Averages(byte* x, byte* y, long first, long end, int plane, in AverageParams p)
+    {
+        int lo = p.YUnsigned ? 0 : -128, hi = p.YUnsigned ? 255 : 127;
+        byte flip = p.XUnsigned ? (byte)0 : (byte)0x80;
+        for (long i = first; i < end; i++)
+        {
+            // Signed bytes are summed as b ^ 0x80 (an offset of 128 each) and the offset is taken off again.
+            long sum = SumBytes(x + (i * plane), plane, flip) - (p.XUnsigned ? 0 : 128L * plane);
+            float mean = (float)(sum - ((long)plane * p.XZero)) * p.XScale / plane;
+            y[i] = (byte)Int8Quantize.QuantizeOne(mean, p.YScale, p.YZero, lo, hi);
+        }
+    }
+
+    // The sum of (b ^ flip) over n bytes. Sixteen lanes of 16-bit partial sums take at most 128 rounds of two bytes (2 * 255 * 128 < 65536).
+    private static long SumBytes(byte* p, int n, byte flip)
+    {
+        long total = 0;
+        int i = 0;
+        if (Vector128.IsHardwareAccelerated)
+        {
+            Vector128<byte> vflip = Vector128.Create(flip);
+            Vector128<uint> wide = Vector128<uint>.Zero;
+            while (i + 16 <= n)
+            {
+                Vector128<ushort> part = Vector128<ushort>.Zero;
+                for (int r = 0; r < 128 && i + 16 <= n; r++, i += 16)
+                {
+                    Vector128<byte> v = Vector128.Load(p + i) ^ vflip;
+                    part += Vector128.WidenLower(v) + Vector128.WidenUpper(v);
+                }
+
+                wide += Vector128.WidenLower(part) + Vector128.WidenUpper(part);
+            }
+
+            total = Vector128.Sum(wide);
+        }
+
+        for (; i < n; i++)
+        {
+            total += (byte)(p[i] ^ flip);
+        }
+
+        return total;
+    }
+
+    private sealed class AverageJob : ChunkJob
+    {
+        public byte* X;
+        public byte* Y;
+        public long Planes;
+        public int Plane;
+        public int PerChunk;
+        public AverageParams P;
+
+        public override void RunChunk(int chunk)
+        {
+            long first = (long)chunk * PerChunk;
+            Averages(X, Y, first, Math.Min(Planes, first + PerChunk), Plane, in P);
+        }
+    }
+
     private sealed class PlaneJob : ChunkJob
     {
         public PoolGeom G;
