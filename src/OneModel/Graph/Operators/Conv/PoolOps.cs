@@ -242,7 +242,15 @@ internal sealed class GlobalAveragePoolOp : OpKernel
         }
 
         int plane = x.Length / (x.Shape[0] * x.Shape[1]);
-        Pooling.GlobalAverage(x.Data<float>(), y.MutableData<float>(), plane);
+        if (run.Exact)
+        {
+            Pooling.GlobalAverage(x.Data<float>(), y.MutableData<float>(), plane);
+        }
+        else
+        {
+            Pooling.GlobalAverageFast(x.Data<float>(), y.MutableData<float>(), plane);
+        }
+
         if (run.Exact)
         {
             Pooling.CanonicalizeNaN(y.MutableData<float>());

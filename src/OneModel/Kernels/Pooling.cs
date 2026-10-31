@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.Runtime.Intrinsics;
 
 namespace RecursiveAI.OneModel.Kernels;
 
@@ -212,6 +213,47 @@ internal static class Pooling
             foreach (float v in x.Slice(p * plane, plane))
             {
                 sum += v;
+            }
+
+            y[p] = sum / plane;
+        }
+    }
+
+    /// <summary>
+    /// Fast-mode global average: each plane is summed in four independent 4-lane accumulators (16 elements per step), which are
+    /// combined as (a0 + a1) + (a2 + a3), then lane 0 + 1 + 2 + 3, then the remaining elements one at a time, and divided by the plane
+    /// size. The order is fixed (it depends on the plane size only, and is the same on every instruction set), but it is not the
+    /// sequential order of <see cref="GlobalAverage"/>, which exact mode keeps.
+    /// </summary>
+    public static void GlobalAverageFast(ReadOnlySpan<float> x, Span<float> y, int plane)
+    {
+        for (int p = 0; p < y.Length; p++)
+        {
+            ReadOnlySpan<float> v = x.Slice(p * plane, plane);
+            int i = 0;
+            float sum;
+            if (plane >= 16)
+            {
+                Vector128<float> a0 = Vector128<float>.Zero, a1 = a0, a2 = a0, a3 = a0;
+                for (; i + 16 <= plane; i += 16)
+                {
+                    a0 += Vector128.Create(v.Slice(i, 4));
+                    a1 += Vector128.Create(v.Slice(i + 4, 4));
+                    a2 += Vector128.Create(v.Slice(i + 8, 4));
+                    a3 += Vector128.Create(v.Slice(i + 12, 4));
+                }
+
+                Vector128<float> a = (a0 + a1) + (a2 + a3);
+                sum = ((a.GetElement(0) + a.GetElement(1)) + a.GetElement(2)) + a.GetElement(3);
+            }
+            else
+            {
+                sum = 0f;
+            }
+
+            for (; i < plane; i++)
+            {
+                sum += v[i];
             }
 
             y[p] = sum / plane;

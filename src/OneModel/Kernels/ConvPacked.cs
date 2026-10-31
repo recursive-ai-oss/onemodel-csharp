@@ -7,7 +7,7 @@ namespace RecursiveAI.OneModel.Kernels;
 /// <summary>
 /// Fast-mode convolution as one blocked matrix product per (image, group) with no im2col matrix (Goto and van de Geijn 2008,
 /// section 4; im2col from Chellapilla, Puri and Simard 2006). The weights are A (Cout/G rows by Cin/G*KH*KW columns) and the input
-/// patches are B. The patches are gathered straight from the (zero-padded) input planes into the kc x nr strips the microkernel
+/// patches are B. The patches are gathered straight from the input planes (a padded border is written as zeros while gathering) into the kc x nr strips the microkernel
 /// reads, so the unfolded matrix is never written. When one tile covers all the rows, each tile gathers its own columns and the
 /// whole product is a single parallel phase; when the rows need several tiles, the strips are gathered once, in parallel, and the
 /// tiles share them. The weights can be packed once when the model is loaded (<see cref="PackWeights"/>).
@@ -32,17 +32,11 @@ internal static unsafe class ConvPacked
     // Strips gathered per chunk of the shared gathering phase.
     private const int StripsPerPackChunk = 8;
 
-    // Planes padded per chunk.
-    private const int PlanesPerPadChunk = 4;
-
     [ThreadStatic]
     private static Job? t_job;
 
     [ThreadStatic]
     private static PackJob? t_packJob;
-
-    [ThreadStatic]
-    private static PadJob? t_padJob;
 
     /// <summary>Floats <see cref="PackWeights"/> writes for weights of <paramref name="s"/> packed for <paramref name="path"/>.</summary>
     public static long PackedWeightsLength(KernelPath path, in ConvShape s)
@@ -94,7 +88,7 @@ internal static unsafe class ConvPacked
     /// Bounds the caller (<see cref="Conv.Run"/>, <see cref="Conv.RunPacked"/>) has checked: <c>input</c> covers N*Cin*H*W floats,
     /// <c>output</c> N*Cout*OutH*OutW, <c>weights</c> Cout*Cin/G*KH*KW, <c>packedWeights</c> <see cref="PackedWeightsLength"/>, and
     /// the shape is valid with a non-empty output. A tap of an output column reads row oy*StrideH + ky*DilH and column
-    /// ox*StrideW + kx*DilW of the padded plane, which the output size formula keeps inside it; a tile writes rows below Cout/G of
+    /// ox*StrideW + kx*DilW of the padded plane, which the output size formula keeps inside it (outside the real plane it is a zero tap); a tile writes rows below Cout/G of
     /// its group by columns below OutH*OutW.
     /// </remarks>
     public static void Run(
@@ -111,29 +105,13 @@ internal static unsafe class ConvPacked
         int tilesN = (n + nc - 1) / nc;
         long macs = (long)s.N * s.Cout * n * k;
 
-        // Zero padding is done once, into a copy of the planes, so that gathering never tests for the edge.
-        int hp = s.H + s.PadTop + s.PadBottom;
-        int wp = s.W + s.PadLeft + s.PadRight;
+        // Padding is never materialised: the gathering writes the zero border itself, so there is no extra pass over the input and
+        // no copy for the other cores to fetch.
+        bool direct = s.PadTop != 0 || s.PadLeft != 0 || s.PadBottom != 0 || s.PadRight != 0;
         float* planes = input;
-        if (hp != s.H || wp != s.W)
-        {
-            long total = (long)s.N * s.Cin * hp * wp;
-            planes = Scratch.Get(Scratch.Im2Col, total);
-            PadJob pad = t_padJob ??= new PadJob();
-            pad.Src = input;
-            pad.Dst = planes;
-            pad.H = s.H;
-            pad.W = s.W;
-            pad.Hp = hp;
-            pad.Wp = wp;
-            pad.PadTop = s.PadTop;
-            pad.PadLeft = s.PadLeft;
-            pad.Planes = s.N * s.Cin;
-            ParallelFor.Run(pad, (pad.Planes + PlanesPerPadChunk - 1) / PlanesPerPadChunk, threads, (long)s.N * s.Cin * hp * wp / 8);
-        }
 
         Job job = t_job ??= new Job();
-        job.Setup(path, blk, s, hp, wp, mc, nc, tilesM, tilesN, planes, weights, packedWeights, output, epilogue);
+        job.Setup(path, blk, s, direct, mc, nc, tilesM, tilesN, planes, weights, packedWeights, output, epilogue);
         try
         {
             long tileWork = (long)tilesM * tilesN;
@@ -210,41 +188,6 @@ internal static unsafe class ConvPacked
         }
     }
 
-    // Copies the planes into zero-bordered planes.
-    private sealed class PadJob : ChunkJob
-    {
-        public float* Src;
-        public float* Dst;
-        public int H;
-        public int W;
-        public int Hp;
-        public int Wp;
-        public int PadTop;
-        public int PadLeft;
-        public int Planes;
-
-        public override void RunChunk(int chunk)
-        {
-            int end = Math.Min(Planes, (chunk + 1) * PlanesPerPadChunk);
-            for (int q = chunk * PlanesPerPadChunk; q < end; q++)
-            {
-                float* src = Src + ((long)q * H * W);
-                float* dst = Dst + ((long)q * Hp * Wp);
-                new Span<float>(dst, PadTop * Wp).Clear();
-                for (int y = 0; y < H; y++)
-                {
-                    float* row = dst + ((long)(PadTop + y) * Wp);
-                    new Span<float>(row, PadLeft).Clear();
-                    new Span<float>(src + ((long)y * W), W).CopyTo(new Span<float>(row + PadLeft, W));
-                    new Span<float>(row + PadLeft + W, Wp - PadLeft - W).Clear();
-                }
-
-                int bottom = Hp - PadTop - H;
-                new Span<float>(dst + ((long)(PadTop + H) * Wp), bottom * Wp).Clear();
-            }
-        }
-    }
-
     // The shared gathering phase: chunk = (k block, group of strips) of the current (image, group).
     private sealed class PackJob : ChunkJob
     {
@@ -288,6 +231,11 @@ internal static unsafe class ConvPacked
         private int _dilH;
         private int _dilW;
         private int _hp;
+        private bool _direct;
+        private int _h;
+        private int _w;
+        private int _padTop;
+        private int _padLeft;
         private int _wp;
         private int _outW;
         private bool _contiguous;
@@ -314,7 +262,7 @@ internal static unsafe class ConvPacked
         public float* PlanesOf(int img, int g) => _input + (((long)img * _cin) + ((long)g * _cinG)) * _hp * _wp;
 
         public void Setup(
-            KernelPath path, Gemm.Blocking blk, in ConvShape s, int hp, int wp, int mc, int nc, int tilesM, int tilesN,
+            KernelPath path, Gemm.Blocking blk, in ConvShape s, bool direct, int mc, int nc, int tilesM, int tilesN,
             float* input, float* weights, float* packedWeights, float* output, IGemmEpilogue? epilogue)
         {
             _mr = blk.Mr;
@@ -331,17 +279,22 @@ internal static unsafe class ConvPacked
             _kh = s.KH;
             _kw = s.KW;
             K = _cinG * s.KH * s.KW;
-            _hp = hp;
-            _wp = wp;
+            _hp = s.H;
+            _wp = s.W;
+            _direct = direct;
+            _h = s.H;
+            _w = s.W;
+            _padTop = s.PadTop;
+            _padLeft = s.PadLeft;
             _strideH = s.StrideH;
             _strideW = s.StrideW;
             _dilH = s.DilH;
             _dilW = s.DilW;
             _outW = s.OutW;
             N = s.OutH * _outW;
-            // When consecutive output columns are consecutive in the padded plane (unit strides and a one-column kernel), any run of
+            // When consecutive output columns are consecutive in the plane (unit strides, no padding, a one-column kernel), any run of
             // columns is one contiguous copy, rows included.
-            _contiguous = s.StrideH == 1 && s.StrideW == 1 && wp == _outW;
+            _contiguous = !direct && s.StrideH == 1 && s.StrideW == 1 && s.W == _outW;
             _mPad = (long)((_coutG + _mr - 1) / _mr) * _mr;
             _input = input;
             _weights = weights;
@@ -459,11 +412,17 @@ internal static unsafe class ConvPacked
 
         /// <summary>
         /// Gathers taps pc..pc+kc-1 of the patches of output columns col0..col0+cols-1 into strips of nr columns: strip s at s*kc*nr,
-        /// element (p, j) at p*nr + j, the last strip padded with +0. <paramref name="planes"/> is the first padded input plane of the
-        /// group. Padding taps are zeros already in the padded plane, so they are real multiplications by zero, as in im2col.
+        /// element (p, j) at p*nr + j, the last strip padded with +0. <paramref name="planes"/> is the first input plane of the
+        /// group. Padding taps are real multiplications by zero, as in im2col (see <c>PackPanelDirect</c>, which writes the border).
         /// </summary>
         public void PackPanel(float* dst, float* planes, int pc, int kc, int col0, int cols)
         {
+            if (_direct)
+            {
+                PackPanelDirect(dst, planes, pc, kc, col0, cols);
+                return;
+            }
+
             int nr = Nr;
             int nStrips = (cols + nr - 1) / nr;
             long stripStride = (long)kc * nr;
@@ -531,6 +490,113 @@ internal static unsafe class ConvPacked
                         {
                             dp[j] = sp[j * _strideW];
                         }
+                    }
+                }
+
+                if (lastCols < nr)
+                {
+                    new Span<float>(row + ((nStrips - 1) * stripStride) + lastCols, nr - lastCols).Clear();
+                }
+
+                if (++kx == _kw)
+                {
+                    kx = 0;
+                    if (++ky == _kh)
+                    {
+                        ky = 0;
+                        ci++;
+                    }
+                }
+            }
+        }
+
+        // PackPanel for unpadded planes: the zero border is produced while gathering. For tap (ky, kx) and an output row oy the input
+        // row is oy * strideH + ky * dilH - padTop; a row outside the plane is all zeros, and inside it the columns outside the plane
+        // (left and right of a run) are zeros too. Those are the same products by zero a padded copy would give, but no core has to
+        // build, and no other core has to fetch, a copy of the planes.
+        private void PackPanelDirect(float* dst, float* planes, int pc, int kc, int col0, int cols)
+        {
+            int nr = Nr;
+            int nStrips = (cols + nr - 1) / nr;
+            long stripStride = (long)kc * nr;
+            int maxRuns = Math.Min(cols, 512);
+            int* runOy = stackalloc int[maxRuns];
+            int* runOx = stackalloc int[maxRuns];
+            int* runDst = stackalloc int[maxRuns];
+            int* runLen = stackalloc int[maxRuns];
+            int nRuns = 0;
+            for (int s = 0; s < nStrips; s++)
+            {
+                int colStart = col0 + (s * nr);
+                int sc = Math.Min(nr, cols - (s * nr));
+                int oy = colStart / _outW;
+                int ox = colStart - (oy * _outW);
+                int j = 0;
+                while (j < sc)
+                {
+                    int seg = Math.Min(sc - j, _outW - ox);
+                    runOy[nRuns] = oy;
+                    runOx[nRuns] = ox;
+                    runDst[nRuns] = (int)(s * stripStride) + j;
+                    runLen[nRuns++] = seg;
+                    j += seg;
+                    oy++;
+                    ox = 0;
+                }
+            }
+
+            int lastCols = cols - ((nStrips - 1) * nr);
+            int kx = pc % _kw;
+            int t = pc / _kw;
+            int ky = t % _kh;
+            int ci = t / _kh;
+            long planeSize = (long)_h * _w;
+            for (int p = 0; p < kc; p++)
+            {
+                float* plane = planes + (ci * planeSize);
+                float* row = dst + ((long)p * nr);
+                int dy = (ky * _dilH) - _padTop;
+                int dx = (kx * _dilW) - _padLeft;
+                for (int r = 0; r < nRuns; r++)
+                {
+                    float* d = row + runDst[r];
+                    int len = runLen[r];
+                    int iy = (runOy[r] * _strideH) + dy;
+                    if ((uint)iy >= (uint)_h)
+                    {
+                        new Span<float>(d, len).Clear();
+                        continue;
+                    }
+
+                    int ix0 = (runOx[r] * _strideW) + dx;
+                    int jlo = ix0 >= 0 ? 0 : (-ix0 + _strideW - 1) / _strideW;
+                    int jhi = ix0 >= _w ? 0 : Math.Min(len, (_w - ix0 + _strideW - 1) / _strideW);
+                    jlo = Math.Min(jlo, len);
+                    jhi = Math.Max(jhi, jlo);
+                    if (jlo > 0)
+                    {
+                        new Span<float>(d, jlo).Clear();
+                    }
+
+                    if (jhi > jlo)
+                    {
+                        float* sp = plane + ((long)iy * _w) + ix0 + ((long)jlo * _strideW);
+                        if (_strideW == 1)
+                        {
+                            CopyRun(sp, d + jlo, jhi - jlo);
+                        }
+                        else
+                        {
+                            for (int j = jlo; j < jhi; j++)
+                            {
+                                d[j] = sp[(j - jlo) * _strideW];
+                            }
+                        }
+                    }
+
+                    if (jhi < len)
+                    {
+                        new Span<float>(d + jhi, len - jhi).Clear();
                     }
                 }
 

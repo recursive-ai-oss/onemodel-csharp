@@ -21,9 +21,12 @@ so all of those give the same bits (the tests check packed against unpacked and 
   Unpacked weights are packed per tile instead, as `Gemm` does for A.
 * **B is the patches**, `K` rows by `OutH*OutW` columns. It is never built as a matrix: strips of `NR` columns, each `kc x NR` (element
   `(p, j)` at `p*NR + j`, a ragged last strip padded with +0), are gathered from the input planes.
-* **Padding is done once.** When any padding is present the input planes are first copied into zero-bordered planes (chunks of 4
-  planes), so gathering never tests for the edge. A tap `(ky, kx)` of output column `(oy, ox)` then reads padded row
-  `oy*StrideH + ky*DilH`, column `ox*StrideW + kx*DilW`, which the output-size formula keeps inside the padded plane.
+* **Padding is never materialised** (fast mode). The zero border is written while gathering: for tap `(ky, kx)` and output row `oy` the
+  input row is `oy*StrideH + ky*DilH - PadTop`; a row outside the plane is all zeros, and in a row the columns outside the plane (left
+  and right of a run) are zeros too. These are the same products by zero that a padded copy would give, so the result is bit for bit
+  the one the padded copy gave. The earlier design copied the planes into zero-bordered planes in a first parallel phase; on a 16-core
+  Zen 4 desktop that phase cost 40-140 microseconds per 3x3 layer of ResNet-50 (the single thread that built the copy, and the cache
+  traffic of every other core fetching it) and is gone: the convolution chain at 16/32 threads went from 12.7/11.6 to 12.3/11.1 ms.
 * **Runs.** For the columns of a tile, the columns that are consecutive in one output row form a *run* (first padded-plane position,
   place in the strip row, length). The runs are the same for every tap, so they are listed once per tile; a tap is then one copy per run
   (contiguous when `StrideW = 1`, strided otherwise). With unit strides and a one-column kernel (the 1x1 case, and `3x1`), consecutive output
@@ -58,7 +61,7 @@ and 1.9 ms at 5 or lower; ResNet-50's did not change. Depthwise convolutions use
 ## Memory
 
 One packed copy of the weights replaces the original (the pass releases the original once nothing else reads it). Scratch per thread:
-one panel of at most `Nc * Kc` floats, and the packed A block when the weights are not prepacked. The padded planes and the shared
+one panel of at most `Nc * Kc` floats, and the packed A block when the weights are not prepacked. The shared
 strips live in the calling thread's scratch for the duration of the call.
 
 ## Max pooling and element-wise work

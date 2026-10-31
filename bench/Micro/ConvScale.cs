@@ -9,7 +9,7 @@ namespace RecursiveAI.OneModel.Benchmarks;
 
 /// <summary>
 /// Times each distinct convolution of ResNet-50 and MobileNetV3 (batch 1, fp32, fast mode) at several thread counts, then the
-/// whole chain back to back as a model run would issue it. Usage: <c>convscale [--threads 1,8,16,32] [--net resnet|mobilenet] [--ms 300]</c>.
+/// whole chain back to back as a model run would issue it. Usage: <c>convscale [--threads 1,8,16,32] [--net resnet|mobilenet] [--ms 300]</c>; <c>convscale hashes</c> prints output hashes of many shapes; <c>convscale poolcost</c> times an empty parallel call.
 /// </summary>
 internal static class ConvScale
 {
@@ -110,6 +110,11 @@ internal static class ConvScale
 
     public static int Run(string[] args)
     {
+        if (args.Length > 0 && args[0] == "hashes")
+        {
+            return Hashes();
+        }
+
         if (args.Length > 0 && args[0] == "poolcost")
         {
             PoolCost(args.Length > 1 ? args[1].Split(',').Select(int.Parse).ToArray() : [1, 2, 4, 8, 16, 32]);
@@ -191,6 +196,74 @@ internal static class ConvScale
 
         Console.WriteLine("CHAIN ms\t\t\t" + string.Join("\t", chain.Select(t => (t * 1e3).ToString("F2"))) + "\t" + string.Join("\t", chain.Skip(1).Select(t => (chain[0] / t).ToString("F2"))));
         Console.WriteLine("# load after " + File.ReadAllText("/proc/loadavg").Trim());
+        return 0;
+    }
+
+    // Output hashes of a spread of padded, strided, dilated and grouped shapes, at 1 and 8 threads, with and without bias, residual and
+    // activation: two builds or settings that must agree bit for bit give the same lines.
+    private static int Hashes()
+    {
+        KernelPath path = KernelPaths.Best();
+        var rng = new Random(11);
+        int[] ks = [1, 2, 3, 5, 7];
+        int n = 0;
+        for (int iter = 0; iter < 60; iter++)
+        {
+            int k = ks[rng.Next(ks.Length)];
+            int kh = rng.Next(4) == 0 ? ks[rng.Next(ks.Length)] : k;
+            int stride = 1 + rng.Next(3);
+            int dil = 1 + rng.Next(2);
+            int groups = rng.Next(4) == 0 ? 2 : 1;
+            int cin = groups * (1 + rng.Next(40));
+            int cout = groups * (1 + rng.Next(70));
+            int h = 1 + rng.Next(40), w = 1 + rng.Next(40);
+            int pt = rng.Next(4), pl = rng.Next(4), pb = rng.Next(4), pr = rng.Next(4);
+            var s = new ConvShape(rng.Next(2) + 1, cin, h, w, cout, kh, k, stride, stride, pt, pl, pb, pr, dil, dil, groups);
+            if (h + pt + pb < dil * (kh - 1) + 1 || w + pl + pr < dil * (k - 1) + 1 || s.IsDepthwise) continue;
+            var input = new float[(long)s.N * s.Cin * s.H * s.W];
+            var wt = new float[(long)s.Cout * (s.Cin / s.Groups) * s.KH * s.KW];
+            for (int i = 0; i < input.Length; i++) input[i] = (float)rng.NextDouble() - 0.5f;
+            for (int i = 0; i < wt.Length; i++) wt[i] = ((float)rng.NextDouble() - 0.5f) * 0.3f;
+            var packed = new float[ConvPacked.PackedWeightsLength(path, s)];
+            ConvPacked.PackWeights(path, s, wt, packed);
+            var bias = new float[s.Cout];
+            for (int i = 0; i < bias.Length; i++) bias[i] = (float)rng.NextDouble();
+            foreach (int th in new[] { 1, 8 })
+            {
+                var o = new float[(long)s.N * s.Cout * s.OutH * s.OutW];
+                Conv.RunPacked(path, s, input, packed, o, th, bias);
+                ulong hsh = 14695981039346656037UL;
+                foreach (float f in o) { hsh = (hsh ^ BitConverter.SingleToUInt32Bits(f)) * 1099511628211UL; }
+                Console.WriteLine($"{iter} t{th} {s} {hsh:X16}");
+                n++;
+            }
+        }
+
+        // depthwise with bias, which the fast path now fuses
+        for (int iter = 0; iter < 20; iter++)
+        {
+            int c = 1 + rng.Next(50), kk = new[] { 3, 5 }[rng.Next(2)], stride = 1 + rng.Next(2), hh = 5 + rng.Next(30);
+            var s = new ConvShape(1, c, hh, hh, c, kk, kk, stride, stride, kk / 2, kk / 2, kk / 2, kk / 2, 1, 1, c);
+            var input = new float[(long)s.N * s.Cin * s.H * s.W];
+            var wt = new float[(long)s.Cout * s.KH * s.KW];
+            for (int i = 0; i < input.Length; i++) input[i] = (float)rng.NextDouble() - 0.5f;
+            for (int i = 0; i < wt.Length; i++) wt[i] = ((float)rng.NextDouble() - 0.5f) * 0.3f;
+            var bias = new float[c];
+            for (int i = 0; i < c; i++) bias[i] = (float)rng.NextDouble();
+            foreach (int th in new[] { 1, 8 })
+            {
+                var o = new float[(long)s.N * s.Cout * s.OutH * s.OutW];
+                Conv.Run(KernelMode.Fast, path, s, input, wt, o, th, bias);
+                var o2 = new float[o.Length];
+                Conv.Run(KernelMode.Fast, path, s, input, wt, o2, th);
+                unsafe { fixed (float* pb = bias, po = o2) { Conv.AddChannelBias(false, pb, po, s.N, s.Cout, s.OutH * s.OutW, th); } }
+                Console.WriteLine(o.AsSpan().SequenceEqual(o2) ? "dw fused == separate" : "dw MISMATCH");
+                ulong hsh = 14695981039346656037UL;
+                foreach (float f in o) { hsh = (hsh ^ BitConverter.SingleToUInt32Bits(f)) * 1099511628211UL; }
+                Console.WriteLine($"dw{iter} t{th} {s} {hsh:X16}");
+            }
+        }
+
         return 0;
     }
 

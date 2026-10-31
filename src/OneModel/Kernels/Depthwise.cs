@@ -46,23 +46,32 @@ internal static unsafe class Depthwise
     /// Bounds: the caller (<see cref="Conv.Run"/>) has validated the shape and that the three buffers cover the extents above. Every
     /// load is at most the last element of the padded plane, as worked out in the comments of <c>Job.RunChunk</c>.
     /// </remarks>
-    public static void Run(KernelMode mode, KernelPath path, in ConvShape s, float* input, float* weights, float* output, int threads)
+    public static void Run(
+        KernelMode mode, KernelPath path, in ConvShape s, float* input, float* weights, float* output, int threads, float* bias = null,
+        FusedActivation? activation = null)
     {
         int planes = s.N * s.Cout;
         int outPlane = s.OutH * s.OutW;
+        if (mode == KernelMode.Exact)
+        {
+            // Exact mode keeps its separate bias and activation passes (the caller's), so its bits are those of the stand-alone operators.
+            bias = null;
+            activation = null;
+        }
+
         int perChunk = Math.Clamp(ElementsPerChunk / Math.Max(1, outPlane), 1, MaxPlanesPerChunk);
         int chunks = (planes + perChunk - 1) / perChunk;
         bool exact = mode == KernelMode.Exact;
         ChunkJob job = (exact, path) switch
         {
-            (true, KernelPath.Avx512) => Job<ExactLanes16, ExactLanes8, ExactLanes4, ExactLanes1>.Get(s, input, weights, output, true, perChunk),
-            (true, KernelPath.Avx2) => Job<ExactLanes8, ExactLanes4, ExactLanes4, ExactLanes1>.Get(s, input, weights, output, true, perChunk),
-            (true, KernelPath.Neon or KernelPath.Portable128) => Job<ExactLanes4, ExactLanes4, ExactLanes4, ExactLanes1>.Get(s, input, weights, output, true, perChunk),
-            (true, _) => Job<ExactLanes1, ExactLanes1, ExactLanes1, ExactLanes1>.Get(s, input, weights, output, true, perChunk),
-            (false, KernelPath.Avx512) => Job<FastLanes16, FastLanes8, FastLanes4, FastLanes1>.Get(s, input, weights, output, false, perChunk),
-            (false, KernelPath.Avx2) => Job<FastLanes8, FastLanes4, FastLanes4, FastLanes1>.Get(s, input, weights, output, false, perChunk),
-            (false, KernelPath.Neon or KernelPath.Portable128) => Job<FastLanes4, FastLanes4, FastLanes4, FastLanes1>.Get(s, input, weights, output, false, perChunk),
-            _ => Job<FastLanes1, FastLanes1, FastLanes1, FastLanes1>.Get(s, input, weights, output, false, perChunk),
+            (true, KernelPath.Avx512) => Job<ExactLanes16, ExactLanes8, ExactLanes4, ExactLanes1>.Get(s, input, weights, output, true, perChunk, bias, activation, path),
+            (true, KernelPath.Avx2) => Job<ExactLanes8, ExactLanes4, ExactLanes4, ExactLanes1>.Get(s, input, weights, output, true, perChunk, bias, activation, path),
+            (true, KernelPath.Neon or KernelPath.Portable128) => Job<ExactLanes4, ExactLanes4, ExactLanes4, ExactLanes1>.Get(s, input, weights, output, true, perChunk, bias, activation, path),
+            (true, _) => Job<ExactLanes1, ExactLanes1, ExactLanes1, ExactLanes1>.Get(s, input, weights, output, true, perChunk, bias, activation, path),
+            (false, KernelPath.Avx512) => Job<FastLanes16, FastLanes8, FastLanes4, FastLanes1>.Get(s, input, weights, output, false, perChunk, bias, activation, path),
+            (false, KernelPath.Avx2) => Job<FastLanes8, FastLanes4, FastLanes4, FastLanes1>.Get(s, input, weights, output, false, perChunk, bias, activation, path),
+            (false, KernelPath.Neon or KernelPath.Portable128) => Job<FastLanes4, FastLanes4, FastLanes4, FastLanes1>.Get(s, input, weights, output, false, perChunk, bias, activation, path),
+            _ => Job<FastLanes1, FastLanes1, FastLanes1, FastLanes1>.Get(s, input, weights, output, false, perChunk, bias, activation, path),
         };
 
         // Nanoseconds on one thread, roughly: the taps at several outputs per nanosecond, plus building the padded plane. Four times
@@ -91,9 +100,14 @@ internal static unsafe class Depthwise
         private float* _output;
         private bool _canonicalNaN;
         private int _planesPerChunk;
+        private float* _bias;
+        private FusedActivation? _activation;
+        private KernelPath _path;
 
         /// <summary>The calling thread's job object, refilled: a steady-state call allocates nothing.</summary>
-        public static Job<T0, T1, T2, TS> Get(in ConvShape s, float* input, float* weights, float* output, bool canonicalNaN, int planesPerChunk)
+        public static Job<T0, T1, T2, TS> Get(
+            in ConvShape s, float* input, float* weights, float* output, bool canonicalNaN, int planesPerChunk, float* bias,
+            FusedActivation? activation, KernelPath path)
         {
             Job<T0, T1, T2, TS> job = t_job ??= new Job<T0, T1, T2, TS>();
             job._s = s;
@@ -102,6 +116,9 @@ internal static unsafe class Depthwise
             job._output = output;
             job._canonicalNaN = canonicalNaN;
             job._planesPerChunk = planesPerChunk;
+            job._bias = bias;
+            job._activation = activation;
+            job._path = path;
             return job;
         }
 
@@ -179,6 +196,20 @@ internal static unsafe class Depthwise
                     {
                         Compute<TS>(src, rowStride, tapOff, w, taps, dst, outH, outW);
                     }
+                }
+
+                // Bias and activation while the plane is still in this core's cache (fast mode only): a separate pass over planes
+                // written by other cores costs more than the convolution itself on small layers. One rounded add, then the function,
+                // exactly what the stand-alone passes do.
+                if (_bias != null || _activation != null)
+                {
+                    var row = new Span<float>(dst, outH * outW);
+                    if (_bias != null)
+                    {
+                        BiasActivationEpilogue.AddScalar(row, _bias[q % s.Cout], false);
+                    }
+
+                    _activation?.Apply(_path, false, row);
                 }
 
                 if (_canonicalNaN)
