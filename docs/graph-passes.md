@@ -17,6 +17,7 @@ Every pass states whether it **preserves bits**: results identical with and with
 | Pass | Level | Preserves bits | What it does |
 |---|---|---|---|
 | `qdq` | All | no | Rewrites quantize-dequantize Conv/Gemm patterns to `QLinearConv` / `QLinearMatMul`; skipped in exact mode. Runs first, before `constant-fold` would turn the weights' `DequantizeLinear` into float constants. See [int8.md](int8.md). |
+| `qdq-fusion` | All | no | After `qdq`: `DequantizeLinear -> f -> QuantizeLinear` for element-wise f becomes a 256-entry table lookup on the bytes, `Dequantize, Dequantize, Mul, Quantize` and `Dequantize, GlobalAveragePool, Quantize` become byte operators. Skipped in exact mode. See [int8.md](int8.md). |
 | `matmul-integer-fusion` | All | yes | `MatMulInteger -> Cast -> Mul [-> Add]` becomes one dynamic-quantization product node. See [int8.md](int8.md). |
 | `constant-fold` | Basic | yes | Evaluates every node whose inputs are all constants, once, through its own kernel in the session's mode. Skips data-dependent shapes, nodes feeding a graph output, and results larger than both the inputs and 64 KiB. A view of a constant becomes a copy. Shape-dependent folding (Shape, Size of a runtime input) stays in plans. |
 | `conv-batchnorm-fold` | All | **no** | `Conv → BatchNormalization` (constant statistics) becomes one Conv: `W' = W·s` per output channel, `b' = (b − mean)·s + beta`, `s = scale / sqrt(var + epsilon)`, in double precision, rounded once. The scale moves before the sum, so the last bits differ. |

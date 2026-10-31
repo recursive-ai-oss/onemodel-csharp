@@ -114,6 +114,9 @@ internal ref struct Int8Call
     public ReadOnlySpan<float> MultVec;
     public bool MultPerRow;
 
+    /// <summary>When set, B is produced on demand by this source (a convolution's patches) and <see cref="BPacked"/> and <see cref="BSums"/> are not used.</summary>
+    public Int8BPanelSource? BSource;
+
     public int Threads;
 }
 
@@ -152,7 +155,7 @@ internal static unsafe class Int8Matmul
             Int8Packed.CheckSource(c.ARaw.Length, c.Lda, m, k, "A");
         }
 
-        if (c.BPacked.Length < f.PackedBBytes(k, n) || c.BSums.Length < n)
+        if (c.BSource == null && (c.BPacked.Length < f.PackedBBytes(k, n) || c.BSums.Length < n))
         {
             throw new ArgumentException("The packed B or its column sums are too small.");
         }
@@ -219,7 +222,7 @@ internal static unsafe class Int8Matmul
             ep.MultPerRow = c.MultPerRow;
             Int8Zero za = c.ZaVec.IsEmpty ? new Int8Zero(c.ZaScalar) : new Int8Zero(pza);
             Int8Zero zb = c.ZbVec.IsEmpty ? new Int8Zero(c.ZbScalar) : new Int8Zero(pzb);
-            Int8Gemm.Run(in f, m, n, k, in a, pBp, pBs, in za, in zb, in ep, c.Threads);
+            Int8Gemm.Run(in f, m, n, k, in a, pBp, pBs, in za, in zb, in ep, c.Threads, c.BSource);
         }
     }
 

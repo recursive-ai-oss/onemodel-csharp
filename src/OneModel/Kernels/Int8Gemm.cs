@@ -89,6 +89,20 @@ internal readonly struct Int8Format
     }
 }
 
+/// <summary>
+/// Produces strips of packed B on demand, on the thread that multiplies them (so a convolution gathers its patches straight into the
+/// cache of the core that uses them, and the gather runs in parallel with the product instead of before it).
+/// </summary>
+internal abstract unsafe class Int8BPanelSource
+{
+    /// <summary>
+    /// Packs strips [<paramref name="firstStrip"/>, <paramref name="firstStrip"/> + <paramref name="strips"/>) of B, in the layout of the
+    /// format, to <paramref name="dst"/> (strip after strip, Nr * KPad bytes each) and the sums of their valid columns to
+    /// <paramref name="sums"/> (Nr per strip, in strip order) when the caller needs them.
+    /// </summary>
+    public abstract void Pack(int firstStrip, int strips, byte* dst, int* sums);
+}
+
 /// <summary>A zero point that is one value for every row (or column) or one value each.</summary>
 internal readonly unsafe struct Int8Zero
 {
@@ -208,8 +222,38 @@ internal static unsafe class Int8Gemm
     }
 
     /// <summary>
+    /// As <see cref="RequantRow"/> for <paramref name="n"/> a multiple of 8 when the caller can spare the bytes: writes exactly n bytes
+    /// and reads exactly n ints, with no scalar tail. A caller that writes the rows of a plane in order uses it with n a little past the
+    /// row's width; the next row overwrites the extra bytes.
+    /// </summary>
+    internal static void RequantRowPadded(int* row, byte* q, int n, float mult, int zeroPoint, bool unsigned)
+    {
+        int lo = unsigned ? 0 : -128;
+        int hi = unsigned ? 255 : 127;
+        Vector128<float> vm = Vector128.Create(mult), vz = Vector128.Create((float)zeroPoint);
+        Vector128<float> vlo = Vector128.Create((float)lo), vhi = Vector128.Create((float)hi);
+        int j = 0;
+        for (; j + 16 <= n; j += 16)
+        {
+            Vector128<int> q0 = Quant4(row + j, vm, vz, vlo, vhi);
+            Vector128<int> q1 = Quant4(row + j + 4, vm, vz, vlo, vhi);
+            Vector128<int> q2 = Quant4(row + j + 8, vm, vz, vlo, vhi);
+            Vector128<int> q3 = Quant4(row + j + 12, vm, vz, vlo, vhi);
+            Int8Quantize.Pack16(q0, q1, q2, q3, unsigned).Store(q + j);
+        }
+
+        if (j < n)
+        {
+            Vector128<int> q0 = Quant4(row + j, vm, vz, vlo, vhi);
+            Vector128<int> q1 = Quant4(row + j + 4, vm, vz, vlo, vhi);
+            Int8Quantize.Pack16(q0, q1, q0, q1, unsigned).GetLower().Store(q + j);
+        }
+    }
+
+    /// <summary>
     /// Requantizes <paramref name="n"/> sums with one multiplier: <see cref="Requant"/> on every element, four lanes at a time where
-    /// the vectors are hardware accelerated. Reads n ints at <paramref name="row"/> and writes n bytes at <paramref name="q"/>.
+    /// the vectors are hardware accelerated. Writes n bytes at <paramref name="q"/>; reads n ints at <paramref name="row"/> rounded up to a
+    /// multiple of 16 (the values past n are converted and dropped, so the memory must be readable but may hold anything).
     /// </summary>
     internal static void RequantRow(int* row, byte* q, int n, float mult, int zeroPoint, bool unsigned)
     {
@@ -228,12 +272,37 @@ internal static unsafe class Int8Gemm
                 Vector128<int> q3 = Quant4(row + j + 12, vm, vz, vlo, vhi);
                 Int8Quantize.Pack16(q0, q1, q2, q3, unsigned).Store(q + j);
             }
+
+            if (j < n)
+            {
+                // The tail through one more vector step and a 16-byte stack copy: sixteen ints are read from the row (the caller
+                // guarantees that many past the last block, see the remarks), only n - j bytes are written.
+                Vector128<int> q0 = Quant4(row + j, vm, vz, vlo, vhi);
+                Vector128<int> q1 = Quant4(row + j + 4, vm, vz, vlo, vhi);
+                Vector128<int> q2 = Quant4(row + j + 8, vm, vz, vlo, vhi);
+                Vector128<int> q3 = Quant4(row + j + 12, vm, vz, vlo, vhi);
+                byte* tmp = stackalloc byte[16];
+                Int8Quantize.Pack16(q0, q1, q2, q3, unsigned).Store(tmp);
+                for (int i = 0; j + i < n; i++)
+                {
+                    q[j + i] = tmp[i];
+                }
+
+                return;
+            }
         }
 
         for (; j < n; j++)
         {
             q[j] = (byte)Requant(row[j], mult, zeroPoint, lo, hi);
         }
+    }
+
+    private static Vector128<int> QuantSum(Vector128<int> sum, Vector128<float> mult, Vector128<float> zero, Vector128<float> lo, Vector128<float> hi)
+    {
+        Vector128<float> v = Vector128.Round(Vector128.ConvertToSingle(sum) * mult) + zero;
+        v = Vector128.ConditionalSelect(Vector128.Equals(v, v), v, lo);
+        return Vector128.ConvertToInt32(Vector128.Min(Vector128.Max(v, lo), hi));
     }
 
     private static Vector128<int> Quant4(int* p, Vector128<float> mult, Vector128<float> zero, Vector128<float> lo, Vector128<float> hi)
@@ -326,7 +395,7 @@ internal static unsafe class Int8Gemm
     /// with zero, and writes each column's sum of shifted values to <paramref name="colSums"/>. Reads the k x n matrix; writes
     /// <see cref="Int8Format.PackedBBytes"/> bytes at <paramref name="dst"/> and n ints at <paramref name="colSums"/>.
     /// </summary>
-    public static void PackB(in Int8Format f, byte* src, long ldb, bool u8, int k, int n, byte* dst, int* colSums, int threads)
+    public static void PackB(in Int8Format f, byte* src, long ldb, bool u8, int k, int n, byte* dst, int* colSums, int threads, bool wantSums = true)
     {
         int strips = (n + f.Nr - 1) / f.Nr;
         PackBJob job = t_packJob ??= new PackBJob();
@@ -339,8 +408,11 @@ internal static unsafe class Int8Gemm
         job.Dst = dst;
         job.ColSums = colSums;
         job.Strips = strips;
-        // Work estimates are nanoseconds on one thread and only decide how many threads are worth waking: about 1 ns to pack an element of B.
-        ParallelFor.Run(job, (strips + PackStripsPerChunk - 1) / PackStripsPerChunk, threads, (long)k * n);
+        job.WantSums = wantSums;
+        job.Vector = Int8Pack.Supported(in f);
+        // Work estimates are nanoseconds on one thread and only decide how many threads are worth waking: about 1 ns to pack an element
+        // of B with the scalar packer, a tenth of that with the vector one.
+        ParallelFor.Run(job, (strips + PackStripsPerChunk - 1) / PackStripsPerChunk, threads, job.Vector ? (long)k * n / 8 : (long)k * n);
     }
 
     /// <summary>
@@ -358,8 +430,9 @@ internal static unsafe class Int8Gemm
     /// <param name="zeroB">B's zero point per column, in the shifted domain.</param>
     /// <param name="ep">The output.</param>
     /// <param name="threads">Upper bound on threads; changes speed only.</param>
+    /// <param name="source">When not null, B is packed on demand by this source and <paramref name="packedB"/> and <paramref name="colSums"/> are not read.</param>
     public static void Run(in Int8Format f, int m, int n, int k, in Int8A a, byte* packedB, int* colSums, in Int8Zero zeroA,
-        in Int8Zero zeroB, in Int8Epilogue ep, int threads)
+        in Int8Zero zeroB, in Int8Epilogue ep, int threads, Int8BPanelSource? source = null)
     {
         Int8A a2 = a;
         if (a.Packed == null)
@@ -396,6 +469,7 @@ internal static unsafe class Int8Gemm
         job.ZeroB = zeroB;
         job.Ep = ep;
         job.TilesN = (n + f.Nc - 1) / f.Nc;
+        job.Source = source;
         job.Micro = f.Isa switch
         {
             Int8Isa.Avx512 => &Int8GemmAvx512.Kernel,
@@ -404,8 +478,24 @@ internal static unsafe class Int8Gemm
             _ => &ScalarKernel,
         };
         int tilesM = (m + f.Mc - 1) / f.Mc;
+        job.TilesM = tilesM;
+        // With an on-demand B a chunk packs its panel of columns once and multiplies it with a group of row tiles. Packing a panel costs a
+        // good fraction of one tile's product, so the groups are as large as can be while there are still two chunks per usable thread.
+        // The choice moves work between chunks and never changes a result (every output is one exact integer computed by one chunk).
+        // Plus about half a nanosecond per output for the epilogue, which is most of the time when k is small.
+        long work = ((long)m * n * k / 50) + ((long)m * n / 2);
+        int usable = (int)Math.Clamp(work / ParallelFor.MinWorkPerThread, 1, Math.Max(1, threads));
+        int group = tilesM;
+        while (group > 1 && ((tilesM + group - 1) / group * job.TilesN) < 2 * usable)
+        {
+            group--;
+        }
+
+        job.GroupTiles = source == null ? 1 : group;
+        int groups = (tilesM + job.GroupTiles - 1) / job.GroupTiles;
         // About 50 multiply-adds per nanosecond per thread at the measured 100 giga-operations per second.
-        ParallelFor.Run(job, tilesM * job.TilesN, threads, (long)m * n * k / 50);
+        ParallelFor.Run(job, groups * job.TilesN, threads, work);
+        job.Source = null;
     }
 
     // The reference microkernel: a 4x4 tile over k pairs, A as bytes (k pair per row), B as bytes (k pair per column).
@@ -456,8 +546,8 @@ internal static unsafe class Int8Gemm
 
         public static byte* Get(int slot, long bytes)
         {
-            t_ptr ??= new void*[5];
-            t_len ??= new long[5];
+            t_ptr ??= new void*[7];
+            t_len ??= new long[7];
             if (bytes < 64)
             {
                 bytes = 64;
@@ -490,11 +580,19 @@ internal static unsafe class Int8Gemm
         public byte* Dst;
         public int* ColSums;
         public int Strips;
+        public bool WantSums;
+        public bool Vector;
 
         public override void RunChunk(int chunk)
         {
             int s0 = chunk * PackStripsPerChunk;
             int s1 = Math.Min(Strips, s0 + PackStripsPerChunk);
+            if (Vector)
+            {
+                Int8Pack.PackBStrips(in F, Src, Ldb, U8, K, N, Dst, ColSums, WantSums, s0, s1);
+                return;
+            }
+
             int nr = F.Nr;
             int g = F.G;
             int kp = F.KPad(K);
@@ -576,15 +674,46 @@ internal static unsafe class Int8Gemm
         public Int8Zero ZeroB;
         public Int8Epilogue Ep;
         public int TilesN;
+        public int TilesM;
+        public int GroupTiles = 1;
+        public Int8BPanelSource? Source;
         public delegate*<int, byte*, byte*, int*, nint, int, void> Micro;
 
         public override void RunChunk(int chunk)
         {
             Int8Format f = F;
-            int i0 = (chunk / TilesN) * f.Mc;
             int j0 = (chunk % TilesN) * f.Nc;
-            int mc = Math.Min(f.Mc, M - i0);
             int nc = Math.Min(f.Nc, N - j0);
+            int kp = f.KPad(K);
+            long stripB = (long)f.Nr * kp;
+            byte* bBase;
+            int* colSums;
+            if (Source != null)
+            {
+                int nStr = (nc + f.Nr - 1) / f.Nr;
+                bBase = Slab.Get(5, nStr * stripB);
+                colSums = (int*)Slab.Get(6, (long)nStr * f.Nr * sizeof(int));
+                Source.Pack(j0 / f.Nr, nStr, bBase, colSums);
+            }
+            else
+            {
+                bBase = PackedB + ((j0 / f.Nr) * stripB);
+                colSums = ColSums + j0;
+            }
+
+            int t0 = (chunk / TilesN) * GroupTiles;
+            int t1 = Math.Min(TilesM, t0 + GroupTiles);
+            for (int t = t0; t < t1; t++)
+            {
+                Tile(t * f.Mc, j0, nc, bBase, colSums);
+            }
+        }
+
+        // One tile of rows i0.. by the columns j0.. of the panel at bBase (whose first strip holds column j0); colSums[0] is column j0's sum.
+        private void Tile(int i0, int j0, int nc, byte* bBase, int* colSums)
+        {
+            Int8Format f = F;
+            int mc = Math.Min(f.Mc, M - i0);
             int mStrips = (mc + f.Mr - 1) / f.Mr;
             int nStrips = (nc + f.Nr - 1) / f.Nr;
             int kp = f.KPad(K);
@@ -595,7 +724,6 @@ internal static unsafe class Int8Gemm
             byte* aBase = A.Packed + ((i0 / f.Mr) * stripA);
             int* rowSums = A.RowSums + i0;
 
-            byte* bBase = PackedB + ((j0 / f.Nr) * stripB);
             if (kp == 0)
             {
                 new Span<int>(tile, f.Mc * f.Nc).Clear();
@@ -607,6 +735,13 @@ internal static unsafe class Int8Gemm
                 long aOff = (long)(pc / f.G) * f.Mr * f.G * f.ABytes;
                 long bOff = (long)(pc / f.G) * f.Nr * f.G;
                 int accumulate = pc > 0 ? 1 : 0;
+                if (nc == 1 && f.Isa == Int8Isa.Dot)
+                {
+                    // A matrix-vector product: the sixteen-column kernel would spend fifteen sixteenths of its work on padding.
+                    Int8GemmDot.Gemv(kgCount, aBase + aOff, stripA, mStrips, bBase + bOff, tile, f.Nc, accumulate);
+                    continue;
+                }
+
                 for (int js = 0; js < nStrips; js++)
                 {
                     byte* bp = bBase + (js * stripB) + bOff;
@@ -618,12 +753,12 @@ internal static unsafe class Int8Gemm
                 }
             }
 
-            Epilogue(tile, f.Nc, i0, j0, mc, nc, rowSums);
+            Epilogue(tile, f.Nc, i0, j0, mc, nc, rowSums, colSums);
         }
 
         // Applies the zero points and bias to the finished sums of a tile (in place, four lanes at a time), then writes them as int32,
         // float32 (sum * scale [+ bias]) or scaled, rounded and saturated 8-bit values.
-        private void Epilogue(int* tile, int ldt, int i0, int j0, int mc, int nc, int* rowSums)
+        private void Epilogue(int* tile, int ldt, int i0, int j0, int mc, int nc, int* rowSums, int* colSums)
         {
             ref readonly Int8Epilogue ep = ref Ep;
             for (int i = 0; i < mc; i++)
@@ -633,7 +768,15 @@ internal static unsafe class Int8Gemm
                 int t = unchecked(rowSums[i] - (K * za));
                 int biasRow = ep.Bias != null && !ep.BiasPerCol ? ep.Bias[gi] : 0;
                 int* row = tile + (i * ldt);
-                int* cs = ColSums + j0;
+                if (za == 0 && ZeroB.IsScalar && !ep.BiasPerCol && Vector128.IsHardwareAccelerated)
+                {
+                    // With a zero A zero point (symmetric weights) the correction is one constant per row, folded into the bias: one pass
+                    // from the sums to the output instead of two.
+                    FusedRow(row, nc, gi, j0, unchecked(biasRow - (ZeroB.Scalar * t)));
+                    continue;
+                }
+
+                int* cs = colSums;
                 int j = 0;
                 if (Vector128.IsHardwareAccelerated)
                 {
@@ -666,6 +809,75 @@ internal static unsafe class Int8Gemm
                 {
                     StoreQuant(row, ep.OutQuant + (gi * ep.Ldc) + j0, nc, j0, gi);
                 }
+            }
+        }
+
+        // One row of a tile whose only correction is the constant c: out = f(sum + c), with the same operations as the two-pass route.
+        private void FusedRow(int* row, int nc, int gi, int j0, int c)
+        {
+            ref readonly Int8Epilogue ep = ref Ep;
+            Vector128<int> vc = Vector128.Create(c);
+            int j = 0;
+            if (ep.OutInt32 != null)
+            {
+                int* dst = ep.OutInt32 + (gi * ep.Ldc) + j0;
+                for (; j + 4 <= nc; j += 4)
+                {
+                    (Vector128.Load(row + j) + vc).Store(dst + j);
+                }
+
+                for (; j < nc; j++)
+                {
+                    dst[j] = unchecked(row[j] + c);
+                }
+
+                return;
+            }
+
+            float mRow = ep.MultVec != null && ep.MultPerRow ? ep.MultVec[gi] : ep.Mult;
+            bool perCol = ep.MultVec != null && !ep.MultPerRow;
+            if (ep.OutFloat != null)
+            {
+                float* dst = ep.OutFloat + (gi * ep.Ldc) + j0;
+                Vector128<float> vm = Vector128.Create(mRow);
+                for (; j + 4 <= nc; j += 4)
+                {
+                    Vector128<float> m = perCol ? Vector128.Load(ep.MultVec + j0 + j) : vm;
+                    Vector128<float> v = Vector128.ConvertToSingle(Vector128.Load(row + j) + vc) * m;
+                    if (ep.BiasFloat != null)
+                    {
+                        v += Vector128.Load(ep.BiasFloat + j0 + j);
+                    }
+
+                    v.Store(dst + j);
+                }
+
+                for (; j < nc; j++)
+                {
+                    float v = (float)unchecked(row[j] + c) * (perCol ? ep.MultVec[j0 + j] : mRow);
+                    dst[j] = ep.BiasFloat != null ? v + ep.BiasFloat[j0 + j] : v;
+                }
+
+                return;
+            }
+
+            byte* q = ep.OutQuant + (gi * ep.Ldc) + j0;
+            int lo = ep.QuantUnsigned ? 0 : -128;
+            int hi = ep.QuantUnsigned ? 255 : 127;
+            Vector128<float> vms = Vector128.Create(mRow), vz = Vector128.Create((float)ep.QuantZero);
+            Vector128<float> vlo = Vector128.Create((float)lo), vhi = Vector128.Create((float)hi);
+            for (; j + 16 <= nc; j += 16)
+            {
+                Vector128<int> q0 = QuantSum(Vector128.Load(row + j) + vc, perCol ? Vector128.Load(ep.MultVec + j0 + j) : vms, vz, vlo, vhi);
+                Vector128<int> q1 = QuantSum(Vector128.Load(row + j + 4) + vc, perCol ? Vector128.Load(ep.MultVec + j0 + j + 4) : vms, vz, vlo, vhi);
+                Vector128<int> q2 = QuantSum(Vector128.Load(row + j + 8) + vc, perCol ? Vector128.Load(ep.MultVec + j0 + j + 8) : vms, vz, vlo, vhi);
+                Vector128<int> q3 = QuantSum(Vector128.Load(row + j + 12) + vc, perCol ? Vector128.Load(ep.MultVec + j0 + j + 12) : vms, vz, vlo, vhi);
+                Int8Quantize.Pack16(q0, q1, q2, q3, ep.QuantUnsigned).Store(q + j);
+            }
+
+            for (; j < nc; j++)
+            {
+                q[j] = (byte)Requant(unchecked(row[j] + c), perCol ? ep.MultVec[j0 + j] : mRow, ep.QuantZero, lo, hi);
             }
         }
 

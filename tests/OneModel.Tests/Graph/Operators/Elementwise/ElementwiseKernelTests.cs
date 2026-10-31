@@ -101,6 +101,42 @@ public class ElementwiseKernelTests
         }
     }
 
+    [Fact]
+    public void LargeUnaryFunctionsDoNotDependOnTheThreadCountAndWorkInPlace()
+    {
+        var rng = new KernelTestData.Rng(6);
+        var x = new float[200003];
+        KernelTestData.Fill(ref rng, x, true);
+        foreach (bool exact in new[] { false, true })
+        {
+            var one = new float[x.Length];
+            var many = new float[x.Length];
+            UnaryParallel.Run(KernelPaths.Best(), exact, new GeluUnary(false), x, one, 1);
+            UnaryParallel.Run(KernelPaths.Best(), exact, new GeluUnary(false), x, many, 7);
+            Assert.True(KernelTestData.SameBits(one, many));
+            var inPlace = (float[])x.Clone();
+            UnaryParallel.Run(KernelPaths.Best(), exact, new GeluUnary(false), inPlace, inPlace, 7);
+            Assert.True(KernelTestData.SameBits(one, inPlace));
+        }
+    }
+
+    [Fact]
+    public void LargeQuantizeAndMinMaxDoNotDependOnTheThreadCount()
+    {
+        var rng = new KernelTestData.Rng(8);
+        var x = new float[200003];
+        KernelTestData.Fill(ref rng, x, true);
+        QuantizeParallel.MinMax(x, out float min1, out float max1, 1);
+        QuantizeParallel.MinMax(x, out float min7, out float max7, 7);
+        Assert.Equal(BitConverter.SingleToUInt32Bits(min1), BitConverter.SingleToUInt32Bits(min7));
+        Assert.Equal(BitConverter.SingleToUInt32Bits(max1), BitConverter.SingleToUInt32Bits(max7));
+        var one = new byte[x.Length];
+        var many = new byte[x.Length];
+        QuantizeParallel.Quantize8(x, one, 0.05f, 128, true, 1);
+        QuantizeParallel.Quantize8(x, many, 0.05f, 128, true, 7);
+        Assert.True(one.AsSpan().SequenceEqual(many));
+    }
+
     /// <summary>One graph through Exp, Sub, Greater, Where, Cast, Max, Neg, Tanh, Gelu and Mean.</summary>
     private static byte[] Chain() => new ModelBuilder(20)
         .Input("x", 1, "n")

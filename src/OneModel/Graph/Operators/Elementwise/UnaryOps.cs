@@ -41,7 +41,7 @@ internal sealed class FloatFunctionOp<TOp>(TOp op) : UnaryKernelBase where TOp :
     protected override bool IsSupported(DType t) => t == DType.F32;
 
     public override void Run(in OpRun run) =>
-        FloatUnary.Run(run.Path, run.Exact, op, run.Inputs[0].Data<float>(), run.Outputs[0].MutableData<float>());
+        UnaryParallel.Run(run.Path, run.Exact, op, run.Inputs[0].Data<float>(), run.Outputs[0].MutableData<float>(), run.Threads);
 }
 
 /// <summary>Namespace for the OpDefs of the float functions.</summary>

@@ -17,7 +17,7 @@ for ky in 0 .. KH-1:            # row-major tap order
 `x_padded` is the input plane with the padding written as real zeros, so a padding tap is a multiplication by zero (an infinite or NaN
 weight meets padding as NaN). Exact mode: the product is rounded, then the sum is rounded (no fused operation), and a NaN result is
 rewritten as the canonical NaN `0x7FC00000`. Fast mode: one fused multiply-add per tap where the hardware has it (AVX2+FMA, AVX-512,
-NEON), `acc + w*x` elsewhere. The bias, when present, is a separate pass: one rounded addition per output.
+NEON), `acc + w*x` elsewhere. The bias, when present, is one rounded addition per output, and the fused activation follows it. In exact mode these are separate passes after the whole convolution (so exact results are those of the stand-alone operators). In fast mode they run inside each chunk on its own planes, while they are still in that core's cache: as separate passes on one thread they cost more than the convolution itself on small layers (a 200-channel 14x14 layer: 93 microseconds for the bias pass against 3 on one thread, from fetching planes other cores had written). The bits are the same either way.
 
 Every output is computed independently with this one order. The lane count of the vector code therefore never changes a result:
 scalar, 4-lane, 8-lane and 16-lane paths give the same bits in exact mode, and in fast mode too wherever the fused operation is the same

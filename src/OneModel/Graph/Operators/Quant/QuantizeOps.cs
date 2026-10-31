@@ -200,7 +200,7 @@ internal sealed class QuantizeLinearOp : OpKernel
             }
             else
             {
-                Int8Quantize.Quantize8(xs, y8, scale, zp, unsigned);
+                QuantizeParallel.Quantize8(xs, y8, scale, zp, unsigned, run.Threads);
             }
 
             return;
@@ -375,7 +375,7 @@ internal sealed class DynamicQuantizeLinearOp : OpKernel
         Span<byte> zeroOut = run.Outputs[2].MutableData<byte>();
         Span<byte> y = run.Outputs[0].MutableData<byte>();
         ReadOnlySpan<float> xs = x.Data<float>();
-        Int8Quantize.MinMax(xs, out float min, out float max);
+        QuantizeParallel.MinMax(xs, out float min, out float max, run.Threads);
         // The range always contains zero, so that zero is exactly representable.
         float lo = Math.Min(0f, min), hi = Math.Max(0f, max);
         float scale = (hi - lo) / 255f;
@@ -398,6 +398,6 @@ internal sealed class DynamicQuantizeLinearOp : OpKernel
         scaleOut[0] = scale;
         zeroOut[0] = (byte)zp;
 
-        Int8Quantize.Quantize8(xs, y, scale, zp, unsigned: true);
+        QuantizeParallel.Quantize8(xs, y, scale, zp, unsigned: true, run.Threads);
     }
 }

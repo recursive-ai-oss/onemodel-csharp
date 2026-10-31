@@ -135,4 +135,25 @@ public class GemmTests
             }
         }
     }
+
+    [Fact]
+    public void SequenceSizedProductsAreExactAndIndependentOfThreads()
+    {
+        // A few hundred rows by several column chunks takes the shared packing of A and the finer column chunks.
+        foreach (KernelPath path in Paths())
+        {
+            foreach ((int m, int n, int k) in new[] { (100, 300, 300), (128, 768, 600), (130, 1500, 257), (7, 700, 520) })
+            {
+                var g = new KernelTestData.GemmCase(m, n, k, k, n, n, 0, 0, 0, 5, false);
+                (float[] a, float[] b, float[] expected) = KernelTestData.Materialize(g);
+                KernelTestData.ReferenceExact(m, n, k, a, k, b, n, expected, n);
+                foreach (int threads in new[] { 1, 8 })
+                {
+                    Assert.True(KernelTestData.SameBits(expected, KernelTestData.RunKernel(g, KernelMode.Exact, path, threads)), $"{path} exact {m}x{n}x{k} threads={threads}");
+                }
+
+                Assert.True(KernelTestData.SameBits(KernelTestData.RunKernel(g, KernelMode.Fast, path, 1), KernelTestData.RunKernel(g, KernelMode.Fast, path, 8)), $"{path} fast {m}x{n}x{k}");
+            }
+        }
+    }
 }

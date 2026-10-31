@@ -89,15 +89,19 @@ internal static unsafe class Conv
         {
             if (s.IsDepthwise)
             {
-                Depthwise.Run(mode, path, s, pin, pw, pout, threads);
-                if (!bias.IsEmpty)
+                bool fused = mode == KernelMode.Fast;
+                Depthwise.Run(mode, path, s, pin, pw, pout, threads, fused && !bias.IsEmpty ? pbias : null, fused ? activation : null);
+                if (!fused)
                 {
-                    AddChannelBias(mode == KernelMode.Exact, pbias, pout, s.N, s.Cout, s.OutH * s.OutW, threads);
-                }
+                    if (!bias.IsEmpty)
+                    {
+                        AddChannelBias(true, pbias, pout, s.N, s.Cout, s.OutH * s.OutW, threads);
+                    }
 
-                if (activation is not null)
-                {
-                    ActivatePlanes(path, mode == KernelMode.Exact, activation, pout, s.N * s.Cout, s.OutH * s.OutW, threads);
+                    if (activation is not null)
+                    {
+                        ActivatePlanes(path, true, activation, pout, s.N * s.Cout, s.OutH * s.OutW, threads);
+                    }
                 }
             }
             else

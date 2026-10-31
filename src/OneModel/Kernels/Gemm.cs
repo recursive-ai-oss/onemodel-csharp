@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using RecursiveAI.OneModel.Kernels.Exact;
 using RecursiveAI.OneModel.Kernels.Fast;
 using RecursiveAI.OneModel.Threading;
@@ -268,7 +269,42 @@ internal static unsafe class Gemm
             return;
         }
 
+        // Chunk shape (a function of m, n and the path only, so never of the thread count; the bits of C do not depend on it either, since
+        // every element is the same sequence of k blocks through the same microkernel). Balance the row blocks, and when the product
+        // would make fewer than MinTileChunks chunks (small m: a sequence of 128 tokens is two row blocks of 96 and 32), cut the columns
+        // finer, so that a dozen threads each get several chunks instead of one thread getting the one big one.
+        int mcE = RoundUp((m + tilesM - 1) / tilesM, blk.Mr);
+        tilesM = (m + mcE - 1) / mcE;
+        int ncE = blk.Nc;
+        if (tilesM * tilesN < MinTileChunks)
+        {
+            int wantN = (MinTileChunks + tilesM - 1) / tilesM;
+            ncE = Math.Max(MinStripsPerChunk * blk.Nr, RoundUp((n + wantN - 1) / wantN, blk.Nr));
+            ncE = Math.Min(ncE, blk.Nc);
+            tilesN = (n + ncE - 1) / ncE;
+        }
+
+        // Pack A once for the whole product when it is small, instead of once per column chunk. A product of a few hundred rows (one
+        // sequence through a transformer layer) has many column chunks, and packing the same rows again in each of them cost about a
+        // tenth of the multiplication. Whichever chunk first needs a (row block, k block) packs it for all the others (see TileJob).
+        int stripsM = (m + blk.Mr - 1) / blk.Mr;
+        float* sharedA = null;
+        int kBlocksA = (k + Kc - 1) / Kc;
+        if (tilesN > 1 && (long)stripsM * blk.Mr * k <= SharedAMaxFloats)
+        {
+            sharedA = Scratch.Get(Scratch.PackAll, (long)stripsM * blk.Mr * k);
+        }
+
         TileJob job = t_tileJob ??= new TileJob();
+        job.SharedA = sharedA;
+        if (sharedA is not null)
+        {
+            job.ResetPacked(tilesM * kBlocksA, kBlocksA);
+        }
+
+        job.StripsM = stripsM;
+        job.McE = mcE;
+        job.NcE = ncE;
         job.Mode = mode;
         job.Path = path;
         job.Blk = blk;
@@ -285,11 +321,18 @@ internal static unsafe class Gemm
         job.Micro = SelectMicro(mode, path);
         job.Epilogue = epilogue;
         // About 40 multiply-adds per nanosecond per thread (a good core on 256-bit FMA): a guess that only decides how many threads are worth waking.
+        job.TilesN = tilesN;
         ParallelFor.Run(job, tilesM * tilesN, threads, (long)m * n * k / 40);
         job.Epilogue = null;
     }
 
     /// <summary>The register tile and cache blocks of a path.</summary>
+    private const int MinTileChunks = 32;
+    private const long SharedAMaxFloats = 2L << 20;
+    private const int MinStripsPerChunk = 2;
+
+    private static int RoundUp(int x, int to) => (x + to - 1) / to * to;
+
     internal readonly record struct Blocking(int Mr, int Nr, int Mc, int Nc);
 
     internal static Blocking GetBlocking(KernelPath path) => path switch
@@ -464,6 +507,59 @@ internal static unsafe class Gemm
         public float* C;
         public nint Ldc;
         public int TilesN;
+        public int McE;
+        public int NcE;
+        public float* SharedA;
+        public int StripsM;
+
+        // Packing state of each (row block, k block) of the shared A: 0 not started, 1 being packed, 2 ready.
+        private int[] _packed = new int[16];
+        private int _kBlocks;
+
+        public void ResetPacked(int count, int kBlocks)
+        {
+            if (_packed.Length < count)
+            {
+                _packed = new int[count];
+            }
+            else
+            {
+                Array.Clear(_packed, 0, count);
+            }
+
+            _kBlocks = kBlocks;
+        }
+
+        // The first chunk to need a (row block, k block) packs it; the others wait for that thread to finish, which is the length of one
+        // small copy. No chunk waits for a chunk that has not started, so a single thread running the chunks in order never blocks.
+        private float* SharedBlock(int i0, int mc, int pc, int kc)
+        {
+            int mr = Blk.Mr;
+            float* block = SharedA + ((long)pc * StripsM * mr) + ((long)(i0 / mr) * kc * mr);
+            ref int state = ref _packed[((i0 / McE) * _kBlocks) + (pc / Kc)];
+            if (Interlocked.CompareExchange(ref state, 1, 0) == 0)
+            {
+                GemmPack.PackA(A + (i0 * Lda) + pc, Lda, mc, kc, mr, block);
+                Volatile.Write(ref state, 2);
+            }
+            else
+            {
+                int spins = 0;
+                while (Volatile.Read(ref state) != 2)
+                {
+                    if (++spins < 2000)
+                    {
+                        Thread.SpinWait(8);
+                    }
+                    else
+                    {
+                        Thread.Yield();
+                    }
+                }
+            }
+
+            return block;
+        }
         public delegate*<int, float*, float*, float*, nint, int, void> Micro;
         public IGemmEpilogue? Epilogue;
 
@@ -471,10 +567,10 @@ internal static unsafe class Gemm
         {
             int mr = Blk.Mr;
             int nr = Blk.Nr;
-            int i0 = (chunk / TilesN) * Blk.Mc;
-            int j0 = (chunk % TilesN) * Blk.Nc;
-            int mc = Math.Min(Blk.Mc, M - i0);
-            int nc = Math.Min(Blk.Nc, N - j0);
+            int i0 = (chunk / TilesN) * McE;
+            int j0 = (chunk % TilesN) * NcE;
+            int mc = Math.Min(McE, M - i0);
+            int nc = Math.Min(NcE, N - j0);
             float* packedA = Scratch.Get(Scratch.PackA, (long)Blk.Mc * Kc);
             float* edge = stackalloc float[Blk.Mr * Blk.Nr];
             int firstStrip = j0 / nr;
@@ -482,7 +578,15 @@ internal static unsafe class Gemm
             for (int pc = 0; pc < K; pc += Kc)
             {
                 int kc = Math.Min(Kc, K - pc);
-                GemmPack.PackA(A + (i0 * Lda) + pc, Lda, mc, kc, mr, packedA);
+                if (SharedA is null)
+                {
+                    GemmPack.PackA(A + (i0 * Lda) + pc, Lda, mc, kc, mr, packedA);
+                }
+                else
+                {
+                    packedA = SharedBlock(i0, mc, pc, kc);
+                }
+
                 float* bBlock = PackedB + ((long)pc * NStrips * nr);
                 int accumulate = pc > 0 ? 1 : 0;
 

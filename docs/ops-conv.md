@@ -72,7 +72,10 @@ All loops run window taps in depth, height, width order, one scalar at a time. O
 * **AveragePool divisor:** the window's taps inside the input, summed in order from +0 and divided (not multiplied by a reciprocal).
   With `count_include_pad` the divisor also counts taps in the declared padding, but never taps beyond it (the overhang that
   `ceil_mode` can create). Confirmed by ONNX Runtime on 5x5 inputs with kernel 3, stride 2, pad 1, `ceil_mode` and dilation 2.
-* **GlobalAveragePool:** each plane's sum in index order from +0 divided by the plane size.
+* **GlobalAveragePool:** exact mode: each plane's sum in index order from +0 divided by the plane size. Fast mode: four independent
+  4-lane accumulators over 16 elements per step, combined as (a0 + a1) + (a2 + a3), then lanes 0 + 1 + 2 + 3, then the remaining elements one
+  at a time, divided by the plane size (the order depends on the plane size only, and is the same on every instruction set; planes
+  under 16 elements are summed in index order).
 * ONNX Runtime refuses pads that are not smaller than the kernel; we do not (a window with no tap inside the input gives the type's
   lowest value for MaxPool and NaN for AveragePool).
 
