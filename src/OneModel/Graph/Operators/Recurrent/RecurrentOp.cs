@@ -136,7 +136,7 @@ internal abstract class RecurrentOp : OpKernel
             throw ctx.Fail($"P must be float32 [{_dirs}, {3 * hid}], got {ctx.InputShape(7)}");
         }
 
-        long scratch = RecurrentKernel.ScratchFloats(_cell, seq, batch, hid) + ((long)input * g * hid) + ((long)hid * g * hid);
+        long scratch = (RecurrentKernel.ScratchFloats(_cell, seq, batch, hid) * _dirs) + ((long)input * g * hid) + ((long)hid * g * hid);
         if (scratch >= int.MaxValue / 2)
         {
             throw ctx.Unsupported("the recurrent layer is too large for one scratch buffer");
@@ -221,16 +221,18 @@ internal abstract class RecurrentOp : OpKernel
         Tensor wtScratch = default, rtScratch = default;
         if (weights is null || weights.WT.IsEmpty)
         {
-            wtScratch = run.Scratch(DType.F32, Shape.Create(input, gh));
+            wtScratch = run.Scratch(DType.F32, Shape.Create(_dirs * input, gh));
         }
 
         if (weights is null || weights.RT.IsEmpty)
         {
-            rtScratch = run.Scratch(DType.F32, Shape.Create(hid, gh));
+            rtScratch = run.Scratch(DType.F32, Shape.Create(_dirs * hid, gh));
         }
 
         long total = RecurrentKernel.ScratchFloats(_cell, seq, batch, hid);
-        Span<float> scratch = batch == 0 || seq == 0 ? default : run.Scratch(DType.F32, Shape.Create((int)total)).MutableData<float>();
+        // Both directions step together, so each has its own scratch.
+        Span<float> scratch = batch == 0 || seq == 0 ? default : run.Scratch(DType.F32, Shape.Create(checked((int)(total * _dirs)))).MutableData<float>();
+        RecurrentDirection d0 = default, d1 = default;
 
         for (int dir = 0; dir < _dirs; dir++)
         {
@@ -241,7 +243,7 @@ internal abstract class RecurrentOp : OpKernel
             }
             else
             {
-                Span<float> dst = wtScratch.MutableData<float>();
+                Span<float> dst = wtScratch.MutableData<float>().Slice(dir * input * gh, input * gh);
                 Transpose(wTensor.Data<float>().Slice(dir * gh * input, gh * input), dst, gh, input);
                 wt = dst;
             }
@@ -252,7 +254,7 @@ internal abstract class RecurrentOp : OpKernel
             }
             else
             {
-                Span<float> dst = rtScratch.MutableData<float>();
+                Span<float> dst = rtScratch.MutableData<float>().Slice(dir * hid * gh, hid * gh);
                 Transpose(rTensor.Data<float>().Slice(dir * gh * hid, gh * hid), dst, gh, hid);
                 rt = dst;
             }
@@ -334,8 +336,29 @@ internal abstract class RecurrentOp : OpKernel
                 continue;
             }
 
-            RecurrentKernel.Bind(ref d, scratch);
-            RecurrentKernel.Run(ref d);
+            RecurrentKernel.Bind(ref d, scratch.Slice(dir * (int)total, (int)total));
+            if (dir == 0)
+            {
+                d0 = d;
+            }
+            else
+            {
+                d1 = d;
+            }
+        }
+
+        if (batch == 0 || seq == 0)
+        {
+            return;
+        }
+
+        if (_dirs == 2)
+        {
+            RecurrentKernel.Run(ref d0, ref d1, 2);
+        }
+        else
+        {
+            RecurrentKernel.Run(ref d0);
         }
     }
 

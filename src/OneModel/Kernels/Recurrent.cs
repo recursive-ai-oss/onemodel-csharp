@@ -192,8 +192,9 @@ internal ref struct RecurrentDirection
     public float Clip; // 0 = off
     public bool InputForget, LinearBeforeReset;
 
-    // Scratch, sized by RecurrentKernel.ScratchFloats and sliced by the caller.
-    public Span<float> Xw, Rec, Hbuf, Cbuf, Tmp, Tmp2, Tmp3;
+    // Scratch, sized by RecurrentKernel.ScratchFloats and sliced by the caller. A step reads the hidden state from Hbuf and writes the
+    // new one to Hnext (the two swap every step), so the hidden-unit chunks of a step never read what another chunk is writing.
+    public Span<float> Xw, Rec, Hbuf, Cbuf, Tmp, Tmp2, Tmp3, Hnext;
 }
 
 /// <summary>
@@ -202,16 +203,28 @@ internal ref struct RecurrentDirection
 /// The order of operations is fixed (docs/ops-recurrent.md), uses no fused multiply-add outside the GEMM and the activation
 /// polynomials, and so is bit-identical across machines in exact mode.
 /// </summary>
+/// <remarks>
+/// A step is split into chunks of <see cref="ChunkWidth"/> hidden units (all gates of those units, both directions of a bidirectional
+/// layer side by side). A chunk forms its columns of the recurrent product and runs the gate arithmetic for them, so it needs
+/// nothing from the other chunks until the next step; the chunk boundaries come from the hidden size alone, never from the thread
+/// count, and every output element is computed by one chunk in one fixed order.
+/// </remarks>
 internal static class RecurrentKernel
 {
+    /// <summary>Hidden units per chunk of a step: two AVX-512 vectors per gate, four AVX2 ones. A constant of the kernel.</summary>
+    public const int ChunkWidth = 32;
+
+    /// <summary>The most rows of a step product given to the streaming kernel; larger batches use the blocked GEMM on the chunk's columns.</summary>
+    private const int MaxGemvRows = 16;
+
     /// <summary>Gates per cell (the width multiplier of W, R and B).</summary>
     public static int Gates(RecurrentCell cell) => (int)cell;
 
-    /// <summary>The scratch floats one direction needs: Xw, Rec, Hbuf, Cbuf, Tmp, Tmp2, Tmp3, in that order.</summary>
+    /// <summary>The scratch floats one direction needs: Xw, Rec, Hbuf, Cbuf, Tmp, Tmp2, Tmp3, Hnext, in that order.</summary>
     public static long ScratchFloats(RecurrentCell cell, int seq, int batch, int hidden)
     {
         long gh = (long)Gates(cell) * hidden;
-        return ((long)seq * batch * gh) + ((long)batch * gh) + (2L * batch * hidden) + hidden + (2L * batch * hidden);
+        return ((long)seq * batch * gh) + ((long)batch * gh) + (2L * batch * hidden) + hidden + (3L * batch * hidden);
     }
 
     /// <summary>Maps the session's kernel path to the lane width of the elementwise functions.</summary>
@@ -237,21 +250,56 @@ internal static class RecurrentKernel
         d.Cbuf = scratch.Slice(o, bh); o += bh;
         d.Tmp = scratch.Slice(o, d.Hidden); o += d.Hidden;
         d.Tmp2 = scratch.Slice(o, bh); o += bh;
-        d.Tmp3 = scratch.Slice(o, bh);
+        d.Tmp3 = scratch.Slice(o, bh); o += bh;
+        d.Hnext = scratch.Slice(o, bh);
     }
 
     /// <summary>Runs one direction over all time steps.</summary>
-    public static void Run(ref RecurrentDirection d)
+    public static void Run(ref RecurrentDirection d) => Run(ref d, ref d, 1);
+
+    /// <summary>
+    /// Runs one direction (<paramref name="dirs"/> = 1) or both directions of a layer (<paramref name="dirs"/> = 2, each with its own
+    /// scratch) over all time steps. Both directions step together so one step's chunks cover both.
+    /// </summary>
+    public static void Run(ref RecurrentDirection d0, ref RecurrentDirection d1, int dirs)
     {
-        int seq = d.Seq, batch = d.Batch, hid = d.Hidden;
-        int g = Gates(d.Cell);
-        int gh = g * hid;
-        KernelMode mode = d.Exact ? KernelMode.Exact : KernelMode.Fast;
-        VecIsa isa = Isa(d.Path);
-        bool exact = d.Exact;
+        int maxLen = d0.Seq;
+        if (!d0.Lens.IsEmpty)
+        {
+            maxLen = 0;
+            foreach (int l in d0.Lens)
+            {
+                maxLen = Math.Max(maxLen, l);
+            }
+        }
+
+        for (int q = 0; q < dirs; q++)
+        {
+            ref RecurrentDirection d = ref (q == 0 ? ref d0 : ref d1);
+            InitState(ref d);
+            if (maxLen > 0 && d.Batch > 0)
+            {
+                // Input projection for every time step at once: Xw[row] = X[row] * W^T  (Goto & van de Geijn: one large, well-shaped product).
+                int gh = Gates(d.Cell) * d.Hidden;
+                Gemm.Run(d.Exact ? KernelMode.Exact : KernelMode.Fast, d.Path, d.Seq * d.Batch, gh, d.Input, d.X, d.Input, d.WT, gh, d.Xw, gh, d.Threads);
+            }
+        }
+
+        bool finalInNext = RecurrentSteps.Run(ref d0, ref d1, dirs, maxLen);
+
+        for (int q = 0; q < dirs; q++)
+        {
+            ref RecurrentDirection d = ref (q == 0 ? ref d0 : ref d1);
+            WriteFinal(ref d, finalInNext);
+        }
+    }
+
+    private static void InitState(ref RecurrentDirection d)
+    {
+        int hid = d.Hidden;
 
         // State starts from the given initial values, or zeros.
-        for (int b = 0; b < batch; b++)
+        for (int b = 0; b < d.Batch; b++)
         {
             Span<float> hrow = d.Hbuf.Slice(b * hid, hid);
             Span<float> crow = d.Cbuf.Slice(b * hid, hid);
@@ -273,67 +321,13 @@ internal static class RecurrentKernel
                 d.C0.Slice(b * d.StateBatchStride, hid).CopyTo(crow);
             }
         }
+    }
 
-        int maxLen = seq;
-        if (!d.Lens.IsEmpty)
-        {
-            maxLen = 0;
-            foreach (int l in d.Lens)
-            {
-                maxLen = Math.Max(maxLen, l);
-            }
-        }
-
-        if (maxLen > 0 && batch > 0)
-        {
-            // Input projection for every time step at once: Xw[row] = X[row] * W^T  (Goto & van de Geijn: one large, well-shaped product).
-            Gemm.Run(mode, d.Path, seq * batch, gh, d.Input, d.X, d.Input, d.WT, gh, d.Xw, gh, d.Threads);
-        }
-
-        // The per-step products have only `batch` rows; handing them to many threads costs more than it saves for small batches.
-        // Results do not depend on the thread count, so this changes speed only.
-        int stepThreads = batch >= 16 ? d.Threads : 1;
-        bool gruSplit = d.Cell == RecurrentCell.Gru && !d.LinearBeforeReset;
-        for (int s = 0; s < maxLen; s++)
-        {
-            // The recurrent product for the whole batch: Rec = H * R^T. For GRU with linear_before_reset = 0 only the z and r
-            // columns can be formed now; the h column needs r first.
-            StepProduct(ref d, batch, gruSplit ? 2 * hid : gh, hid, d.Hbuf, d.RT, gh, d.Rec, gh, stepThreads);
-
-            if (gruSplit)
-            {
-                for (int b = 0; b < batch; b++)
-                {
-                    if (!Active(d, b, s))
-                    {
-                        continue;
-                    }
-
-                    int t = Time(d, b, s);
-                    GruGatesZr(ref d, b, t, gh, isa, exact);
-                }
-
-                // (r (.) H) * Rh^T, where Rh^T is the last hid columns of R^T.
-                StepProduct(ref d, batch, hid, hid, d.Tmp2, d.RT.Slice(2 * hid), gh, d.Tmp3, hid, stepThreads);
-            }
-
-            for (int b = 0; b < batch; b++)
-            {
-                if (!Active(d, b, s))
-                {
-                    continue;
-                }
-
-                int t = Time(d, b, s);
-                switch (d.Cell)
-                {
-                    case RecurrentCell.Lstm: LstmStep(ref d, b, t, gh, isa, exact); break;
-                    case RecurrentCell.Gru: GruStep(ref d, b, t, gh, isa, exact); break;
-                    default: RnnStep(ref d, b, t, gh, isa, exact); break;
-                }
-            }
-        }
-
+    private static void WriteFinal(ref RecurrentDirection d, bool inNext)
+    {
+        int batch = d.Batch, hid = d.Hidden;
+        bool exact = d.Exact;
+        Span<float> h = inNext ? d.Hnext : d.Hbuf;
         if (!d.YH.IsEmpty)
         {
             for (int b = 0; b < batch; b++)
@@ -346,7 +340,7 @@ internal static class RecurrentKernel
                 }
                 else
                 {
-                    Store(dst, d.Hbuf.Slice(b * hid, hid), exact);
+                    Store(dst, h.Slice(b * hid, hid), exact);
                 }
             }
         }
@@ -368,17 +362,85 @@ internal static class RecurrentKernel
         }
     }
 
-    // C[m, n] = A[m, k] * B[k, n] for the few rows of a recurrent step: a streaming product for small batches, the blocked GEMM above.
-    private static void StepProduct(ref RecurrentDirection d, int m, int n, int k, ReadOnlySpan<float> a, ReadOnlySpan<float> b, int ldb,
-        Span<float> c, int ldc, int threads)
+    /// <summary>
+    /// One phase of one step for the hidden units <c>[j0, j0 + n)</c> of one direction. Phase 0 forms the recurrent product for those
+    /// units and, except for a GRU with <c>linear_before_reset = 0</c> (<paramref name="gruSplit"/>), finishes the step. In the split
+    /// case phase 0 stops after the update and reset gates, and phase 1 (which runs after every chunk has finished phase 0, because
+    /// it needs <c>r ⊙ H</c> for all hidden units) forms the candidate product and finishes the step.
+    /// </summary>
+    internal static void StepChunk(ref RecurrentDirection d, int phase, int s, int j0, int n, bool gruSplit)
     {
-        if (m <= RecurrentGemv.MaxRows)
+        int batch = d.Batch, hid = d.Hidden;
+        int gh = Gates(d.Cell) * hid;
+        VecIsa isa = Isa(d.Path);
+        bool exact = d.Exact;
+
+        // The recurrent product for the whole batch, these columns only: Rec = H * R^T. For a split GRU only the z and r columns can
+        // be formed now; the h column needs r first.
+        bool finishes;
+        if (phase == 0)
         {
-            RecurrentGemv.Run(d.Exact, Isa(d.Path), m, n, k, a, k, b, ldb, c, ldc);
+            int gates = gruSplit ? 2 : Gates(d.Cell);
+            RangeProduct(ref d, batch, n, hid, d.Hbuf, d.RT.Slice(j0), gh, d.Rec.Slice(j0), gh, gates, hid);
+
+            finishes = !gruSplit;
         }
         else
         {
-            Gemm.Run(d.Exact ? KernelMode.Exact : KernelMode.Fast, d.Path, m, n, k, a, k, b, ldb, c, ldc, threads);
+            // (r (.) H) * Rh^T, where Rh^T is the last hid columns of R^T.
+            RangeProduct(ref d, batch, n, hid, d.Tmp2, d.RT.Slice((2 * hid) + j0), gh, d.Tmp3.Slice(j0), hid, 1, 0);
+            finishes = true;
+        }
+
+        for (int b = 0; b < batch; b++)
+        {
+            if (!Active(d, b, s))
+            {
+                if (finishes)
+                {
+                    // A row past its length keeps its state.
+                    d.Hbuf.Slice((b * hid) + j0, n).CopyTo(d.Hnext.Slice((b * hid) + j0, n));
+                }
+
+                continue;
+            }
+
+            int t = Time(d, b, s);
+            if (phase == 1)
+            {
+                GruStep(ref d, b, t, gh, j0, n, isa, exact);
+            }
+            else if (gruSplit)
+            {
+                GruGatesZr(ref d, b, t, gh, j0, n, isa, exact);
+            }
+            else
+            {
+                switch (d.Cell)
+                {
+                    case RecurrentCell.Lstm: LstmStep(ref d, b, t, gh, j0, n, isa, exact); break;
+                    case RecurrentCell.Gru: GruStep(ref d, b, t, gh, j0, n, isa, exact); break;
+                    default: RnnStep(ref d, b, t, gh, j0, n, isa, exact); break;
+                }
+            }
+        }
+    }
+
+    // C[m, n] = A[m, k] * B[k, n] for the few rows of a recurrent step, for `groups` column blocks of width n starting `groupStride`
+    // columns apart (the gates): a streaming product for small batches, the blocked GEMM above.
+    private static void RangeProduct(ref RecurrentDirection d, int m, int n, int k, ReadOnlySpan<float> a, ReadOnlySpan<float> b, int ldb,
+        Span<float> c, int ldc, int groups, int groupStride)
+    {
+        if (m <= MaxGemvRows)
+        {
+            RecurrentGemv.Run(d.Exact, Isa(d.Path), m, n, k, a, k, b, ldb, c, ldc, groups, groupStride);
+            return;
+        }
+
+        // One thread: the chunks of the step are already spread over the threads.
+        for (int g = 0; g < groups; g++)
+        {
+            Gemm.Run(d.Exact ? KernelMode.Exact : KernelMode.Fast, d.Path, m, n, k, a, k, b.Slice(g * groupStride), ldb, c.Slice(g * groupStride), ldc, 1);
         }
     }
 
@@ -396,24 +458,11 @@ internal static class RecurrentKernel
         return len - 1 - s;
     }
 
-    // pre = (((xw + rec) + wb) + rb): the canonical order for a pre-activation.
-    private static void PreActivation(ReadOnlySpan<float> xw, Span<float> row, ReadOnlySpan<float> wb, ReadOnlySpan<float> rb, int offset, int count)
+    // pre = (((xw + rec) + wb) + rb): the canonical order for a pre-activation, for the columns [offset, offset + count) of the row.
+    private static void PreActivation(VecIsa isa, ReadOnlySpan<float> xw, Span<float> row, ReadOnlySpan<float> wb, ReadOnlySpan<float> rb, int offset, int count)
     {
-        for (int j = offset; j < offset + count; j++)
-        {
-            float v = xw[j] + row[j];
-            if (!wb.IsEmpty)
-            {
-                v += wb[j];
-            }
-
-            if (!rb.IsEmpty)
-            {
-                v += rb[j];
-            }
-
-            row[j] = v;
-        }
+        RecurrentVec.PreActivation(isa, xw.Slice(offset, count), row.Slice(offset, count), wb.IsEmpty ? default : wb.Slice(offset, count),
+            rb.IsEmpty ? default : rb.Slice(offset, count));
     }
 
     private static void ClipSpan(Span<float> x, float clip)
@@ -445,12 +494,13 @@ internal static class RecurrentKernel
         }
     }
 
-    private static void WriteY(ref RecurrentDirection d, int b, int t, bool exact)
+    // Y for the units [j0, j0 + n) of batch row b at time t, from the new hidden state.
+    private static void WriteY(ref RecurrentDirection d, int b, int t, int j0, int n, bool exact)
     {
         if (!d.Y.IsEmpty)
         {
             int hid = d.Hidden;
-            Store(d.Y.Slice(d.YOffset + (t * d.YTimeStep) + (b * d.YBatchStep), hid), d.Hbuf.Slice(b * hid, hid), exact);
+            Store(d.Y.Slice(d.YOffset + (t * d.YTimeStep) + (b * d.YBatchStep) + j0, n), d.Hnext.Slice((b * hid) + j0, n), exact);
         }
     }
 
@@ -459,26 +509,30 @@ internal static class RecurrentKernel
 
     // LSTM, Operators.md: it = f(Xt Wi + Ht-1 Ri + Pi (.) Ct-1 + Wbi + Rbi), ft likewise with Pf, ct = g(...), Ct = ft (.) Ct-1 + it (.) ct,
     // ot = f(Xt Wo + Ht-1 Ro + Po (.) Ct + Wbo + Rbo), Ht = ot (.) h(Ct). Gate order in the weights is i, o, f, c.
-    private static void LstmStep(ref RecurrentDirection d, int b, int t, int gh, VecIsa isa, bool exact)
+    private static void LstmStep(ref RecurrentDirection d, int b, int t, int gh, int j0, int n, VecIsa isa, bool exact)
     {
         int hid = d.Hidden;
         Span<float> row = d.Rec.Slice(b * gh, gh);
         ReadOnlySpan<float> xw = XwRow(d, b, t, gh);
-        Span<float> h = d.Hbuf.Slice(b * hid, hid);
-        Span<float> c = d.Cbuf.Slice(b * hid, hid);
-        PreActivation(xw, row, d.Wb, d.Rb, 0, gh);
+        Span<float> h = d.Hnext.Slice((b * hid) + j0, n);
+        Span<float> c = d.Cbuf.Slice((b * hid) + j0, n);
+        Span<float> tmp = d.Tmp.Slice(j0, n);
+        for (int g = 0; g < 4; g++)
+        {
+            PreActivation(isa, xw, row, d.Wb, d.Rb, (g * hid) + j0, n);
+        }
 
-        Span<float> gi = row.Slice(0, hid);
-        Span<float> go = row.Slice(hid, hid);
-        Span<float> gf = row.Slice(2 * hid, hid);
-        Span<float> gc = row.Slice(3 * hid, hid);
+        Span<float> gi = row.Slice(j0, n);
+        Span<float> go = row.Slice(hid + j0, n);
+        Span<float> gf = row.Slice((2 * hid) + j0, n);
+        Span<float> gc = row.Slice((3 * hid) + j0, n);
         if (!d.Peep.IsEmpty)
         {
-            for (int j = 0; j < hid; j++)
+            for (int j = 0; j < n; j++)
             {
-                float pi = d.Peep[j] * c[j];
+                float pi = d.Peep[j0 + j] * c[j];
                 gi[j] += pi;
-                float pf = d.Peep[(2 * hid) + j] * c[j];
+                float pf = d.Peep[(2 * hid) + j0 + j] * c[j];
                 gf[j] += pf;
             }
         }
@@ -486,61 +540,67 @@ internal static class RecurrentKernel
         ClipSpan(gi, d.Clip);
         ClipSpan(gf, d.Clip);
         ClipSpan(gc, d.Clip);
-        d.F.Apply(gi, d.Tmp, exact, isa);
+        d.F.Apply(gi, tmp, exact, isa);
         if (!d.InputForget)
         {
-            d.F.Apply(gf, d.Tmp, exact, isa);
+            d.F.Apply(gf, tmp, exact, isa);
         }
 
-        d.G.Apply(gc, d.Tmp, exact, isa);
+        d.G.Apply(gc, tmp, exact, isa);
 
-        for (int j = 0; j < hid; j++)
+        if (d.InputForget)
         {
-            // With input_forget the forget gate is coupled to the input gate: ft = 1 - it.
-            float fg = d.InputForget ? 1f - gi[j] : gf[j];
-            float keep = fg * c[j];
-            float add = gi[j] * gc[j];
-            c[j] = keep + add;
+            for (int j = 0; j < n; j++)
+            {
+                // With input_forget the forget gate is coupled to the input gate: ft = 1 - it.
+                float fg = 1f - gi[j];
+                float keep = fg * c[j];
+                float add = gi[j] * gc[j];
+                c[j] = keep + add;
+            }
+        }
+        else
+        {
+            RecurrentVec.CellUpdate(isa, c, gf, gi, gc);
         }
 
         if (!d.Peep.IsEmpty)
         {
-            for (int j = 0; j < hid; j++)
+            for (int j = 0; j < n; j++)
             {
-                float po = d.Peep[hid + j] * c[j];
+                float po = d.Peep[hid + j0 + j] * c[j];
                 go[j] += po;
             }
         }
 
         ClipSpan(go, d.Clip);
-        d.F.Apply(go, d.Tmp, exact, isa);
-        c.CopyTo(d.Tmp3.Slice(0, hid));
-        Span<float> tc = d.Tmp3.Slice(0, hid);
-        d.Hact.Apply(tc, d.Tmp, exact, isa);
-        for (int j = 0; j < hid; j++)
-        {
-            h[j] = go[j] * tc[j];
-        }
+        d.F.Apply(go, tmp, exact, isa);
+        Span<float> tc = d.Tmp3.Slice((b * hid) + j0, n);
+        c.CopyTo(tc);
+        d.Hact.Apply(tc, tmp, exact, isa);
+        RecurrentVec.Multiply(isa, h, go, tc);
 
-        WriteY(ref d, b, t, exact);
+        WriteY(ref d, b, t, j0, n, exact);
     }
 
     // GRU, first part: zt and rt, and r (.) Ht-1 for the product with Rh when linear_before_reset = 0.
-    private static void GruGatesZr(ref RecurrentDirection d, int b, int t, int gh, VecIsa isa, bool exact)
+    private static void GruGatesZr(ref RecurrentDirection d, int b, int t, int gh, int j0, int n, VecIsa isa, bool exact)
     {
         int hid = d.Hidden;
         Span<float> row = d.Rec.Slice(b * gh, gh);
         ReadOnlySpan<float> xw = XwRow(d, b, t, gh);
-        PreActivation(xw, row, d.Wb, d.Rb, 0, 2 * hid);
-        Span<float> gz = row.Slice(0, hid);
-        Span<float> gr = row.Slice(hid, hid);
+        PreActivation(isa, xw, row, d.Wb, d.Rb, j0, n);
+        PreActivation(isa, xw, row, d.Wb, d.Rb, hid + j0, n);
+        Span<float> gz = row.Slice(j0, n);
+        Span<float> gr = row.Slice(hid + j0, n);
+        Span<float> tmp = d.Tmp.Slice(j0, n);
         ClipSpan(gz, d.Clip);
         ClipSpan(gr, d.Clip);
-        d.F.Apply(gz, d.Tmp, exact, isa);
-        d.F.Apply(gr, d.Tmp, exact, isa);
-        Span<float> rh = d.Tmp2.Slice(b * hid, hid);
-        Span<float> h = d.Hbuf.Slice(b * hid, hid);
-        for (int j = 0; j < hid; j++)
+        d.F.Apply(gz, tmp, exact, isa);
+        d.F.Apply(gr, tmp, exact, isa);
+        Span<float> rh = d.Tmp2.Slice((b * hid) + j0, n);
+        ReadOnlySpan<float> h = d.Hbuf.Slice((b * hid) + j0, n);
+        for (int j = 0; j < n; j++)
         {
             rh[j] = gr[j] * h[j];
         }
@@ -550,45 +610,49 @@ internal static class RecurrentKernel
     //   linear_before_reset = 0: ht = g(Xt Wh + (rt (.) Ht-1) Rh + Rbh + Wbh)
     //   linear_before_reset = 1: ht = g(Xt Wh + rt (.) (Ht-1 Rh + Rbh) + Wbh)
     //   Ht = (1 - zt) (.) ht + zt (.) Ht-1.   Gate order in the weights is z, r, h.
-    private static void GruStep(ref RecurrentDirection d, int b, int t, int gh, VecIsa isa, bool exact)
+    private static void GruStep(ref RecurrentDirection d, int b, int t, int gh, int j0, int n, VecIsa isa, bool exact)
     {
         int hid = d.Hidden;
         Span<float> row = d.Rec.Slice(b * gh, gh);
         ReadOnlySpan<float> xw = XwRow(d, b, t, gh);
-        Span<float> h = d.Hbuf.Slice(b * hid, hid);
+        ReadOnlySpan<float> hp = d.Hbuf.Slice((b * hid) + j0, n);
+        Span<float> h = d.Hnext.Slice((b * hid) + j0, n);
+        Span<float> tmp = d.Tmp.Slice(j0, n);
+        Span<float> gz = row.Slice(j0, n);
         Span<float> cand;
         if (d.LinearBeforeReset)
         {
-            PreActivation(xw, row, d.Wb, default, 0, 2 * hid);
+            PreActivation(isa, xw, row, d.Wb, default, j0, n);
+            PreActivation(isa, xw, row, d.Wb, default, hid + j0, n);
             if (!d.Rb.IsEmpty)
             {
                 // Rb for z and r joins the sum in the canonical place, after Wb.
-                for (int j = 0; j < 2 * hid; j++)
+                for (int j = 0; j < n; j++)
                 {
-                    row[j] += d.Rb[j];
+                    row[j0 + j] += d.Rb[j0 + j];
+                    row[hid + j0 + j] += d.Rb[hid + j0 + j];
                 }
             }
 
-            Span<float> gz = row.Slice(0, hid);
-            Span<float> gr = row.Slice(hid, hid);
+            Span<float> gr = row.Slice(hid + j0, n);
             ClipSpan(gz, d.Clip);
             ClipSpan(gr, d.Clip);
-            d.F.Apply(gz, d.Tmp, exact, isa);
-            d.F.Apply(gr, d.Tmp, exact, isa);
-            cand = row.Slice(2 * hid, hid);
-            for (int j = 0; j < hid; j++)
+            d.F.Apply(gz, tmp, exact, isa);
+            d.F.Apply(gr, tmp, exact, isa);
+            cand = row.Slice((2 * hid) + j0, n);
+            for (int j = 0; j < n; j++)
             {
                 float rec = cand[j];
                 if (!d.Rb.IsEmpty)
                 {
-                    rec += d.Rb[(2 * hid) + j];
+                    rec += d.Rb[(2 * hid) + j0 + j];
                 }
 
                 float scaled = gr[j] * rec;
-                float v = xw[(2 * hid) + j] + scaled;
+                float v = xw[(2 * hid) + j0 + j] + scaled;
                 if (!d.Wb.IsEmpty)
                 {
-                    v += d.Wb[(2 * hid) + j];
+                    v += d.Wb[(2 * hid) + j0 + j];
                 }
 
                 cand[j] = v;
@@ -596,19 +660,19 @@ internal static class RecurrentKernel
         }
         else
         {
-            cand = d.Tmp3.Slice(b * hid, hid);
-            ReadOnlySpan<float> xh = xw.Slice(2 * hid, hid);
-            for (int j = 0; j < hid; j++)
+            cand = d.Tmp3.Slice((b * hid) + j0, n);
+            ReadOnlySpan<float> xh = xw.Slice((2 * hid) + j0, n);
+            for (int j = 0; j < n; j++)
             {
                 float v = xh[j] + cand[j];
                 if (!d.Wb.IsEmpty)
                 {
-                    v += d.Wb[(2 * hid) + j];
+                    v += d.Wb[(2 * hid) + j0 + j];
                 }
 
                 if (!d.Rb.IsEmpty)
                 {
-                    v += d.Rb[(2 * hid) + j];
+                    v += d.Rb[(2 * hid) + j0 + j];
                 }
 
                 cand[j] = v;
@@ -616,27 +680,27 @@ internal static class RecurrentKernel
         }
 
         ClipSpan(cand, d.Clip);
-        d.G.Apply(cand, d.Tmp, exact, isa);
-        for (int j = 0; j < hid; j++)
+        d.G.Apply(cand, tmp, exact, isa);
+        for (int j = 0; j < n; j++)
         {
-            float z = row[j];
+            float z = gz[j];
             float fresh = (1f - z) * cand[j];
-            float old = z * h[j];
+            float old = z * hp[j];
             h[j] = fresh + old;
         }
 
-        WriteY(ref d, b, t, exact);
+        WriteY(ref d, b, t, j0, n, exact);
     }
 
     // RNN, Operators.md: Ht = f(Xt Wi + Ht-1 Ri + Wbi + Rbi).
-    private static void RnnStep(ref RecurrentDirection d, int b, int t, int gh, VecIsa isa, bool exact)
+    private static void RnnStep(ref RecurrentDirection d, int b, int t, int gh, int j0, int n, VecIsa isa, bool exact)
     {
         int hid = d.Hidden;
-        Span<float> row = d.Rec.Slice(b * gh, gh);
-        PreActivation(XwRow(d, b, t, gh), row, d.Wb, d.Rb, 0, gh);
+        Span<float> row = d.Rec.Slice((b * gh) + j0, n);
+        PreActivation(isa, XwRow(d, b, t, gh), d.Rec.Slice(b * gh, gh), d.Wb, d.Rb, j0, n);
         ClipSpan(row, d.Clip);
-        d.F.Apply(row, d.Tmp.Length >= hid ? d.Tmp : default, exact, isa);
-        row.CopyTo(d.Hbuf.Slice(b * hid, hid));
-        WriteY(ref d, b, t, exact);
+        d.F.Apply(row, d.Tmp.Length >= hid ? d.Tmp.Slice(j0, n) : default, exact, isa);
+        row.CopyTo(d.Hnext.Slice((b * hid) + j0, n));
+        WriteY(ref d, b, t, j0, n, exact);
     }
 }

@@ -27,10 +27,25 @@ For one direction, with `G` gates and `H` hidden units:
 
 1. The input projections of **all** time steps are one matrix product, `XW = X · Wᵀ` of shape `[seq * batch, G * H]`, on the shared
    GEMM (accumulation order of `kernels-gemm.md`, one accumulator per output, increasing k from +0).
-2. For step `s` the recurrent product `Rec = H · Rᵀ` (`[batch, G * H]`, also the shared GEMM) is formed for the whole batch. For GRU with
-   `linear_before_reset = 0` only the `z` and `r` columns are formed at this point, and the candidate's product `(r ⊙ H) · Rhᵀ` is a second
-   small product after `r` is known.
+2. For step `s` the recurrent product `Rec = H · Rᵀ` (`[batch, G * H]`) is formed for the whole batch, one output per accumulator over increasing k from +0
+   (the order of `kernels-gemm.md`; unfused in exact mode). For GRU with `linear_before_reset = 0` only the `z` and `r` columns are formed at this
+   point, and the candidate's product `(r ⊙ H) · Rhᵀ` is a second small product after `r` is known.
 3. The gate arithmetic below runs per batch row.
+
+**Chunks of a step.** Steps are sequential, but inside a step the work splits by hidden unit: chunk `c` of a direction owns hidden units
+`[32c, min(32c + 32, H))` (`ChunkWidth` = 32, a constant), that is those columns of every gate. It forms its columns of the recurrent product, runs the
+gate arithmetic for those units of every batch row, and writes its part of the new hidden state, the cell state and Y. It reads the whole previous
+hidden state and writes only its own units, into a second buffer (the two hidden buffers swap every step), so chunks of a step need nothing from
+each other. A bidirectional layer steps both directions together, so one step is `2 * ceil(H / 32)` chunks. A GRU with `linear_before_reset = 0` runs
+two such phases per step (the second needs `r ⊙ H` for all units). The chunk boundaries come from `H` and the direction count only; which thread
+runs a chunk, and how many threads there are, never changes a bit. The number of threads used per step is limited by the step's estimated work (a
+step that would take less than about 20 µs per extra thread runs on fewer threads), which changes speed only.
+
+The product of a chunk uses the batch (at most 16 rows) as a register tile of four rows at a time, so each loaded piece of `Rᵀ` serves four rows;
+larger batches use the blocked GEMM on the chunk's columns. Each output is still its own accumulator, so exact mode gives the same bits as the
+exact GEMM, and the grouping of rows and columns changes no result in exact mode. In fast mode a multiply-add may be fused (as in the GEMM), and the
+last `n mod lanes` columns of a chunk's product are formed unfused, so a fast result depends on the kernel path and on `H`, as the GEMM's does, and not on
+threads.
 
 Weights are transposed once per plan when they are constants; otherwise on each run into scratch.
 
@@ -92,10 +107,10 @@ with 1 and 3 threads and require equal hashes.
 
 ## Fast mode
 
-Same order; the GEMM may fuse multiply-adds and the elementwise functions use the fast polynomials. Results do not depend on the thread count
-(the GEMM's chunking is fixed).
+Same order; the products may fuse multiply-adds and the elementwise functions use the fast polynomials. Results do not depend on the thread count
+(the chunking above is fixed by the shapes).
 
 ## Limits
 
-The per-direction scratch (`seq * batch * G * H` floats for the projections plus a few `batch * H` buffers and the transposed weights when not
-constant) must stay below 2^30 floats; a larger layer is refused with `Unsupported` at plan time.
+The scratch (per direction `seq * batch * G * H` floats for the projections plus a few `batch * H` buffers, and the transposed weights when not
+constant) must stay below 2^30 floats in total; a larger layer is refused with `Unsupported` at plan time.

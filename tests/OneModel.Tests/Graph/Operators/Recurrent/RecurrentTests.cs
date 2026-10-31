@@ -231,7 +231,7 @@ public class RecurrentTests
     public void StepProductEqualsTheExactGemmBitForBitOnEveryLaneWidth()
     {
         var rng = new Random(11);
-        foreach ((int m, int n, int k) in new[] { (1, 768, 192), (3, 37, 5), (8, 130, 64), (2, 1, 7), (5, 16, 0), (1, 4, 1), (4, 100, 33) })
+        foreach ((int m, int n, int k) in new[] { (1, 768, 192), (3, 37, 5), (8, 130, 64), (2, 1, 7), (5, 16, 0), (1, 4, 1), (4, 100, 33), (9, 70, 20), (13, 33, 7), (6, 35, 192) })
         {
             float[] a = new float[m * k], b = new float[k * n];
             for (int i = 0; i < a.Length; i++) { a[i] = (float)((rng.NextDouble() * 4) - 2); }
@@ -250,6 +250,39 @@ public class RecurrentTests
                     uint x = BitConverter.SingleToUInt32Bits(got[i]), y = BitConverter.SingleToUInt32Bits(expect[i]);
                     if (float.IsNaN(got[i]) && float.IsNaN(expect[i])) { continue; }
                     Assert.True(x == y, $"m{m} n{n} k{k} {isa} element {i}");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void ColumnBlocksGivenTogetherEqualTheSameBlocksOneByOne()
+    {
+        var rng = new Random(5);
+        foreach ((int m, int n, int k, int groups, int gs) in new[] { (1, 32, 192, 4, 70), (1, 32, 40, 3, 32), (2, 64, 17, 2, 96), (3, 32, 9, 4, 33), (1, 24, 5, 4, 24), (5, 32, 11, 4, 40), (8, 16, 8, 1, 0) })
+        {
+            int ldb = ((groups - 1) * gs) + n + 5, ldc = ldb;
+            float[] a = new float[m * k], b = new float[k * ldb];
+            for (int i = 0; i < a.Length; i++) { a[i] = (float)((rng.NextDouble() * 4) - 2); }
+            for (int i = 0; i < b.Length; i++) { b[i] = (float)((rng.NextDouble() * 4) - 2); }
+            foreach (bool exact in new[] { true, false })
+            {
+                foreach (VecIsa isa in new[] { VecIsa.Scalar, VecIsa.V128, VecIsa.V256, VecIsa.V512 })
+                {
+                    if (isa == VecIsa.V256 && !System.Runtime.Intrinsics.Vector256.IsHardwareAccelerated) { continue; }
+                    if (isa == VecIsa.V512 && !System.Runtime.Intrinsics.Vector512.IsHardwareAccelerated) { continue; }
+                    float[] together = new float[m * ldc], apart = new float[m * ldc];
+                    RecurrentGemv.Run(exact, isa, m, n, k, a, k, b, ldb, together, ldc, groups, gs);
+                    for (int g = 0; g < groups; g++)
+                    {
+                        RecurrentGemv.Run(exact, isa, m, n, k, a, k, b.AsSpan(g * gs), ldb, apart.AsSpan(g * gs), ldc);
+                    }
+
+                    for (int i = 0; i < together.Length; i++)
+                    {
+                        Assert.True(BitConverter.SingleToUInt32Bits(together[i]) == BitConverter.SingleToUInt32Bits(apart[i]),
+                            $"m{m} n{n} k{k} groups{groups} {isa} exact={exact} element {i}");
+                    }
                 }
             }
         }
