@@ -4,6 +4,8 @@ using RecursiveAI.OneModel.Training.Data;
 
 namespace RecursiveAI.OneModel.Tests.Training;
 
+// Serial: one test counts the process's threads, which tests running beside it would change.
+[Collection("autograd")]
 public class DataLoadingTests
 {
     private static List<ImageExample> MakeImages(int n, int height = 8, int minW = 5, int maxW = 40, int channels = 1)
@@ -272,11 +274,17 @@ public class DataLoadingTests
         using BatchSequence<ImageBatch> s = loader.Start();
         for (int i = 0; i < 400; i++) { s.TryNext(out ImageBatch? w); w.Dispose(); }
         long nativeBefore = pool.GetStats().NativeAllocations;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 200; i++) { s.TryNext(out ImageBatch? b); b.Dispose(); }
-        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        // The best of three windows: the runtime can make a one-off allocation on this thread (for example while recompiling a
+        // hot method at a higher tier), which is not a per-batch allocation. A real per-batch allocation shows in every window.
+        long best = long.MaxValue;
+        for (int window = 0; window < 3; window++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 200; i++) { s.TryNext(out ImageBatch? b); b.Dispose(); }
+            best = Math.Min(best, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
         Assert.Equal(nativeBefore, pool.GetStats().NativeAllocations);
-        Assert.Equal(0, bytes / 200);
+        Assert.Equal(0, best);
     }
 
     [Fact]
