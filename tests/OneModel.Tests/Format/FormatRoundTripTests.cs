@@ -42,7 +42,7 @@ public class FormatRoundTripTests
 
     private static float[] Run(string path, float[] input, int[] shape, int outputLength, bool exact = false)
     {
-        using Session s = Session.Load(path, new SessionOptions { IntraOpThreads = 1, Mode = exact ? ExecutionMode.Exact : ExecutionMode.Fast });
+        using Session s = Session.Load(path, new ModelOptions { IntraOpThreads = 1, Mode = exact ? ArithmeticMode.Exact : ArithmeticMode.Fast });
         var y = new float[outputLength];
         s.Run(s.Inputs[0].Name, input.AsSpan(), shape, s.Outputs[0].Name, y.AsSpan());
         return y;

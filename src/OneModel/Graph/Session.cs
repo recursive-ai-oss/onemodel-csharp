@@ -19,9 +19,9 @@ namespace RecursiveAI.OneModel.Graph;
 /// <remarks>
 /// <para>Shapes: a model may declare symbolic or unknown extents. The first run with a given set of input shapes builds an execution
 /// plan for exactly those shapes (shape inference, constant evaluation, buffer reuse) and caches it, up to
-/// <see cref="SessionOptions.MaxCachedPlans"/> plans; later runs with the same shapes reuse it.</para>
-/// <para>Determinism: in <see cref="ExecutionMode.Fast"/> results depend on the inputs, the options and the machine's kernel path,
-/// never on the thread count or on how concurrent runs interleave. <see cref="ExecutionMode.Exact"/> is bit-identical everywhere.</para>
+/// <see cref="ModelOptions.MaxCachedPlans"/> plans; later runs with the same shapes reuse it.</para>
+/// <para>Determinism: in <see cref="ArithmeticMode.Fast"/> results depend on the inputs, the options and the machine's kernel path,
+/// never on the thread count or on how concurrent runs interleave. <see cref="ArithmeticMode.Exact"/> is bit-identical everywhere.</para>
 /// </remarks>
 public sealed class Session : IDisposable
 {
@@ -33,7 +33,7 @@ public sealed class Session : IDisposable
     private ExecutionPlan[] _plans = [];
     private int _disposed;
 
-    private Session(CompiledGraph graph, SessionOptions options, SessionEnv env)
+    private Session(CompiledGraph graph, ModelOptions options, SessionEnv env)
     {
         _graph = graph;
         Options = options;
@@ -43,7 +43,7 @@ public sealed class Session : IDisposable
     }
 
     /// <summary>The options the session was created with.</summary>
-    public SessionOptions Options { get; }
+    public ModelOptions Options { get; }
 
     /// <summary>The inputs a caller must supply, in graph order. Weights stored as initializers are not listed.</summary>
     public ImmutableArray<TensorInfo> Inputs { get; }
@@ -68,13 +68,13 @@ public sealed class Session : IDisposable
     /// <exception cref="SessionException">An operator is not implemented (<see cref="SessionErrorKind.UnsupportedOperator"/>, listing every one), exact mode is
     /// requested but an operator has no exact kernel (<see cref="SessionErrorKind.ExactModeUnavailable"/>, listing them), or the model is inconsistent.</exception>
     /// <exception cref="OperationCanceledException">Cancelled.</exception>
-    public static Session Create(IrModel model, SessionOptions? options = null, CancellationToken cancellationToken = default) =>
+    public static Session Create(IrModel model, ModelOptions? options = null, CancellationToken cancellationToken = default) =>
         Create(model, options, OpRegistry.Default, null, cancellationToken);
 
-    internal static Session Create(IrModel model, SessionOptions? options, OpRegistry registry, KernelPath? path, CancellationToken cancellationToken)
+    internal static Session Create(IrModel model, ModelOptions? options, OpRegistry registry, KernelPath? path, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(model);
-        options ??= new SessionOptions();
+        options ??= new ModelOptions();
         options.Validate();
         KernelPath chosen = path ?? KernelPaths.Best();
         int threads = options.IntraOpThreads == 0 ? ParallelFor.DefaultThreads : options.IntraOpThreads;
@@ -84,10 +84,10 @@ public sealed class Session : IDisposable
     }
 
     // A body of If, Loop, Scan or SequenceMap: the graph's own inputs, then the outer values it reads, as inputs.
-    internal static Session CreateNested(IrGraph body, IReadOnlyList<IrValue> captures, OpRegistry registry, ExecutionMode mode, KernelPath path, int threads,
+    internal static Session CreateNested(IrGraph body, IReadOnlyList<IrValue> captures, OpRegistry registry, ArithmeticMode mode, KernelPath path, int threads,
         CancellationToken cancellationToken)
     {
-        var options = new SessionOptions { Mode = mode, IntraOpThreads = threads, OptimizationLevel = OptimizationLevel.None };
+        var options = new ModelOptions { Mode = mode, IntraOpThreads = threads, OptimizationLevel = OptimizationLevel.None };
         var env = new SessionEnv(mode, path, threads, BufferPool.Shared);
         CompiledGraph graph = CompiledGraph.CreateNested(body, captures, registry, mode, path, threads, cancellationToken);
         return new Session(graph, options, env);
@@ -96,21 +96,27 @@ public sealed class Session : IDisposable
     /// <summary>Imports an ONNX file, or a file in the OneModel format (chosen by its first eight bytes), and creates a session from it.</summary>
     /// <param name="path">The model file; external weight files are read from its directory.</param>
     /// <param name="options">Defaults to fast mode, one thread per core.</param>
+    /// <param name="loadOptions">Limits and file handling for reading the model (size limit, nesting, memory mapping, external-data directory); defaults when null.</param>
     /// <param name="cancellationToken">Checked while importing and between operators.</param>
-    /// <exception cref="OnnxImportException">The file is not a valid ONNX model.</exception>
+    /// <exception cref="OnnxImportException">The file is not a valid ONNX model, or is over the size limit.</exception>
     /// <exception cref="Format.ModelFormatException">The file is in the OneModel format and is truncated, corrupt or unsupported.</exception>
-    /// <exception cref="SessionException">As <see cref="Create(IrModel, SessionOptions?, CancellationToken)"/>.</exception>
-    public static Session Load(string path, SessionOptions? options = null, CancellationToken cancellationToken = default)
+    /// <exception cref="SessionException">As <see cref="Create(IrModel, ModelOptions?, CancellationToken)"/>.</exception>
+    /// <exception cref="IOException">The file is missing or cannot be read (<see cref="FileNotFoundException"/>, ...); <see cref="UnauthorizedAccessException"/> when access is denied.</exception>
+    public static Session Load(string path, ModelOptions? options = null, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default)
     {
-        using IrModel model = Format.ModelFormat.LoadAny(path, cancellationToken);
+        using IrModel model = Format.ModelFormat.LoadAny(path, loadOptions, cancellationToken);
         return Create(model, options, cancellationToken);
     }
 
-    /// <summary>Imports an ONNX model from a stream (read to the end; external data is not available) and creates a session from it.</summary>
-    /// <inheritdoc cref="Load(string, SessionOptions?, CancellationToken)"/>
-    public static Session Load(Stream stream, SessionOptions? options = null, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Imports an ONNX model, or a model in the OneModel format (chosen by the first eight bytes), from a stream and creates a
+    /// session from it. The stream is read to its end, but never past <see cref="ModelLoadOptions.MaxModelBytes"/>; external data is
+    /// not available unless <see cref="ModelLoadOptions.ExternalDataDirectory"/> is set.
+    /// </summary>
+    /// <inheritdoc cref="Load(string, ModelOptions?, ModelLoadOptions?, CancellationToken)"/>
+    public static Session Load(Stream stream, ModelOptions? options = null, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default)
     {
-        using IrModel model = Format.ModelFormat.LoadAny(stream, cancellationToken);
+        using IrModel model = Format.ModelFormat.LoadAny(stream, loadOptions, cancellationToken);
         return Create(model, options, cancellationToken);
     }
 
@@ -119,14 +125,17 @@ public sealed class Session : IDisposable
     /// <summary>
     /// Runs the model on tensors. Every model input must be supplied once, by name, in any order. Each element of
     /// <paramref name="outputs"/> receives the output named at the same position in <paramref name="outputNames"/>: an empty tensor is
-    /// replaced by a new one the caller owns and must dispose; a tensor of the right type and shape is overwritten in place.
+    /// replaced by a new tensor the caller owns and disposes (so is one whose storage was already released); a tensor of the right type and
+    /// shape is overwritten in place. To have the session hand back outputs in a container that owns them, use
+    /// <see cref="Run(IReadOnlyDictionary{string, Tensor}, IReadOnlyList{string}?)"/>.
     /// </summary>
     /// <param name="inputNames">Input names, one per model input.</param>
     /// <param name="inputs">Input tensors, same length. Read, never changed, and not kept after the call. Non-contiguous tensors are copied first.</param>
     /// <param name="outputNames">The outputs wanted.</param>
     /// <param name="outputs">Same length as <paramref name="outputNames"/>.</param>
     /// <exception cref="SessionException"><see cref="SessionErrorKind.InvalidInput"/> for an unknown or missing name, a wrong element type or shape, or a bad output
-    /// tensor; <see cref="SessionErrorKind.InvalidModel"/> if an operator cannot handle these shapes; <see cref="SessionErrorKind.Disposed"/>.</exception>
+    /// tensor; <see cref="SessionErrorKind.InvalidModel"/> if an operator cannot handle these shapes.</exception>
+    /// <exception cref="ObjectDisposedException">The session was disposed.</exception>
     public void Run(ReadOnlySpan<string> inputNames, ReadOnlySpan<Tensor> inputs, ReadOnlySpan<string> outputNames, Span<Tensor> outputs)
     {
         ThrowIfDisposed();
@@ -211,6 +220,52 @@ public sealed class Session : IDisposable
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Runs the model on named input tensors and returns the outputs in a container that owns them: one <c>using</c> releases all of
+    /// them. The ordinary way to call a model with several inputs or outputs.
+    /// </summary>
+    /// <param name="inputs">Every model input, by name. Read, never changed, and not kept after the call. Non-contiguous tensors are copied first.</param>
+    /// <param name="outputNames">The outputs wanted, in the order they are returned; null (the default) asks for every model output in graph order.</param>
+    /// <returns>The outputs, owned by the returned object; dispose it when done.</returns>
+    /// <exception cref="SessionException"><see cref="SessionErrorKind.InvalidInput"/> for an unknown or missing name, a wrong element type or shape;
+    /// <see cref="SessionErrorKind.InvalidModel"/> if an operator cannot handle these shapes.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="inputs"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">The session was disposed.</exception>
+    public SessionOutputs Run(IReadOnlyDictionary<string, Tensor> inputs, IReadOnlyList<string>? outputNames = null)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+        string[] inNames = new string[inputs.Count];
+        Tensor[] ins = new Tensor[inputs.Count];
+        int i = 0;
+        foreach (KeyValuePair<string, Tensor> kv in inputs)
+        {
+            inNames[i] = kv.Key;
+            ins[i++] = kv.Value;
+        }
+
+        string[] outNames;
+        if (outputNames is null)
+        {
+            outNames = new string[Outputs.Length];
+            for (int k = 0; k < outNames.Length; k++)
+            {
+                outNames[k] = Outputs[k].Name;
+            }
+        }
+        else
+        {
+            outNames = new string[outputNames.Count];
+            for (int k = 0; k < outNames.Length; k++)
+            {
+                outNames[k] = outputNames[k];
+            }
+        }
+
+        var outs = new Tensor[outNames.Length];
+        Run(inNames, ins, outNames, outs);
+        return new SessionOutputs(outNames, outs);
     }
 
     /// <summary>
@@ -312,7 +367,7 @@ public sealed class Session : IDisposable
                 }
 
                 Tensor v = state.Values[_graph.OutputIds[slot]];
-                if (outputs[k].IsEmpty)
+                if (outputs[k].IsEmpty || outputs[k].IsReleased)
                 {
                     Tensor t = Tensor.Create(v.DType, v.Shape, _env.Pool);
                     t.CopyFrom(v);
@@ -442,13 +497,13 @@ public sealed class Session : IDisposable
     {
         if (Volatile.Read(ref _disposed) != 0)
         {
-            throw new SessionException(SessionErrorKind.Disposed, "The session was disposed.");
+            throw new ObjectDisposedException(nameof(Session), "The session was disposed.");
         }
     }
 
     /// <summary>
-    /// Releases the weights and cached plans once every run in progress has finished. Calling <c>Run</c> afterwards throws
-    /// <see cref="SessionException"/> with <see cref="SessionErrorKind.Disposed"/>.
+    /// Releases the weights and cached plans once every run in progress has finished. Safe to call more than once. Calling <c>Run</c>
+    /// afterwards throws <see cref="ObjectDisposedException"/>; tensors the session returned stay valid.
     /// </summary>
     public void Dispose()
     {

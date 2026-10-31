@@ -13,14 +13,14 @@ internal static class CaseRunner
     /// <param name="opset">The model's default opset.</param>
     /// <param name="hash">If given, receives the raw bytes of every output, to compare runs bit for bit.</param>
     /// <param name="threads">Intra-op threads.</param>
-    public static string Run(string dir, ExecutionMode mode, bool scaled, out long opset, System.Security.Cryptography.IncrementalHash? hash = null, int threads = 2)
+    public static string Run(string dir, ArithmeticMode mode, bool scaled, out long opset, System.Security.Cryptography.IncrementalHash? hash = null, int threads = 2)
     {
         opset = 0;
         try
         {
             using IrModel model = OnnxImporter.Load(Path.Combine(dir, "model.onnx"));
             opset = model.DefaultOpset;
-            using var session = Session.Create(model, new SessionOptions { Mode = mode, IntraOpThreads = threads });
+            using var session = Session.Create(model, new ModelOptions { Mode = mode, IntraOpThreads = threads });
             int sets = 0;
             foreach (string setDir in Directory.GetDirectories(dir, "test_data_set_*").Order(StringComparer.Ordinal))
             {

@@ -13,8 +13,8 @@ public class ShapeGraphTests
     private static string[] StepsOf(byte[] model, DType type, params int[] shape)
     {
         using IrModel ir = OnnxImporter.Load(model);
-        using CompiledGraph g = CompiledGraph.Create(ir.Graph, OpRegistry.Default, ExecutionMode.Fast, default);
-        var env = new SessionEnv(ExecutionMode.Fast, KernelPaths.Best(), 1, RecursiveAI.OneModel.Tensors.BufferPool.Shared);
+        using CompiledGraph g = CompiledGraph.Create(ir.Graph, OpRegistry.Default, ArithmeticMode.Fast, default);
+        var env = new SessionEnv(ArithmeticMode.Fast, KernelPaths.Best(), 1, RecursiveAI.OneModel.Tensors.BufferPool.Shared);
         ExecutionPlan plan = ExecutionPlan.Build(g, env, [type], [Shape.Create(shape)], default);
         try
         {
@@ -124,7 +124,7 @@ public class ShapeGraphTests
             .Node("Concat", ["g", "g"], ["c"], ("axis", 2L))
             .Node("Pad", ["c", "pads"], ["p"], ("mode", "reflect"))
             .Node("TopK", ["p", "k"], ["vals", "idx"], ("axis", -1L)).Build();
-        using var s = Session.Load(new MemoryStream(model), new SessionOptions { IntraOpThreads = 1 });
+        using var s = Session.Load(new MemoryStream(model), new ModelOptions { IntraOpThreads = 1 });
         using Tensor x = Tensor.FromSpan<float>(Enumerable.Range(0, 4 * 6 * 8).Select(i => (float)((i * 7) % 31)).ToArray(), Shape.Create(4, 6, 8));
         Tensor[] ins = [x];
         string[] inNames = ["x"], outNames = ["vals", "idx"];

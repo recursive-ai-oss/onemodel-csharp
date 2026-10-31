@@ -208,7 +208,8 @@ or the header field name, and the file offset when there is one:
 | Malformed | not a well-formed file: bad magic, truncation, inconsistent header, invalid JSON, a value of the wrong JSON type, a range outside the file |
 | InvalidModel | well formed but impossible: duplicate or undefined names, a byte length that does not match dims and dtype, a negative dimension |
 | Unsupported | something this reader does not handle: a newer version, nonzero flags, an unknown dtype, attribute type or type kind, too much nesting, a tensor over 2^31 − 1 bytes |
-| Io | the file could not be read or written |
+
+File-system failures (a missing file, a denied access, a full disk) are not format errors: they surface as the platform exceptions (`FileNotFoundException`, `IOException`, ...) unwrapped.
 
 ## 4. Writing rules
 
@@ -227,7 +228,7 @@ choose between this format and ONNX. Files of 1 MiB or more are memory-mapped (w
 view of the mapping, copied only when a session builds its weights; smaller files, streams and platforms without mapping read the
 file into memory. Alignment to 64 bytes lets a consumer use mapped weights in place with any vector width.
 
-Saving: `ModelFormat.Save(model, path | stream)` and `ModelFormat.Convert(onnxPath, outputPath)`.
+Saving: `ModelFormat.Save(model, path | stream)` and `ModelFormat.Convert(inputPath, outputPath)`, which refuses to write over its input and also accepts a file already in this format. `ModelFormat.Detect(path | bytes)` says whether a file is ONNX, this format or neither by its first bytes. Loading takes `ModelLoadOptions`; its `MaxModelBytes` (default 2^31 − 1) is enforced while a stream is read, so an endless stream fails with an `Unsupported` error instead of exhausting memory.
 
 ## 6. Checks that back this text
 

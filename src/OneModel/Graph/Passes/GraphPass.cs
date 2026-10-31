@@ -22,7 +22,7 @@ internal interface IGraphPass
 
     /// <summary>
     /// True when results are bit-identical with and without the pass in both modes. A pass that returns false is skipped in
-    /// <see cref="ExecutionMode.Exact"/> (it may still change fast-mode results in the last bits).
+    /// <see cref="ArithmeticMode.Exact"/> (it may still change fast-mode results in the last bits).
     /// </summary>
     bool PreservesBits { get; }
 
@@ -42,7 +42,7 @@ internal sealed class PassGraph
     private readonly List<OpKernel> _ownedKernels;
 
     internal PassGraph(List<CompiledNode> nodes, List<string> names, List<Tensor> constants, int[] inputIds, int[] outputIds,
-        List<OpKernel> kernels, ExecutionMode mode, KernelPath path, int threads)
+        List<OpKernel> kernels, ArithmeticMode mode, KernelPath path, int threads)
     {
         Nodes = nodes;
         _names = names;
@@ -62,7 +62,7 @@ internal sealed class PassGraph
 
     public int[] OutputIds { get; }
 
-    public ExecutionMode Mode { get; }
+    public ArithmeticMode Mode { get; }
 
     /// <summary>The instruction set the session runs on; passes that lay data out for a kernel (packing) need it.</summary>
     public KernelPath Path { get; }
@@ -203,7 +203,7 @@ internal static class GraphPasses
     ];
 
     /// <summary>The names of the passes that run for a level and mode, in order.</summary>
-    public static IEnumerable<string> Selected(OptimizationLevel level, ExecutionMode mode)
+    public static IEnumerable<string> Selected(OptimizationLevel level, ArithmeticMode mode)
     {
         foreach (IGraphPass p in s_all)
         {
@@ -214,8 +214,8 @@ internal static class GraphPasses
         }
     }
 
-    private static bool Applies(IGraphPass p, OptimizationLevel level, ExecutionMode mode) =>
-        level >= p.MinLevel && (mode != ExecutionMode.Exact || p.PreservesBits);
+    private static bool Applies(IGraphPass p, OptimizationLevel level, ArithmeticMode mode) =>
+        level >= p.MinLevel && (mode != ArithmeticMode.Exact || p.PreservesBits);
 
     /// <summary>Runs the passes that apply, then drops nodes nothing reads.</summary>
     public static void Run(PassGraph graph, OptimizationLevel level, CancellationToken ct)

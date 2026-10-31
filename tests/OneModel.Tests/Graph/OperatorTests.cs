@@ -9,10 +9,10 @@ namespace RecursiveAI.OneModel.Tests.Graph;
 /// <summary>The first operator set checked through the whole stack (model bytes, session, plan, kernel) against naive references.</summary>
 public class OperatorTests
 {
-    private static (float[] Data, Shape Shape) Run(byte[] model, ExecutionMode mode, KernelPath? path, params (float[] Data, int[] Shape)[] inputs)
+    private static (float[] Data, Shape Shape) Run(byte[] model, ArithmeticMode mode, KernelPath? path, params (float[] Data, int[] Shape)[] inputs)
     {
         using IrModel ir = OnnxImporter.Load(model);
-        using var s = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = 1 }, OpRegistry.Default, path, default);
+        using var s = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = 1 }, OpRegistry.Default, path, default);
         var tensors = new Tensor[inputs.Length];
         var names = new string[inputs.Length];
         for (int i = 0; i < inputs.Length; i++)
@@ -121,7 +121,7 @@ public class OperatorTests
                 .Output("y", 1, [.. outDims.Cast<object>()]).Node(op, ["a", "b"], ["y"]).Build();
             float[] want = NaiveBinary(f, a, sa, b, sb, outDims);
 
-            (float[] fast, Shape fs) = Run(model, ExecutionMode.Fast, null, (a, sa), (b, sb));
+            (float[] fast, Shape fs) = Run(model, ArithmeticMode.Fast, null, (a, sa), (b, sb));
             Assert.Equal(so, fs);
             for (int i = 0; i < want.Length; i++)
             {
@@ -130,7 +130,7 @@ public class OperatorTests
 
             foreach (KernelPath path in KernelPaths.All.Where(KernelPaths.IsSupported))
             {
-                (float[] exact, _) = Run(model, ExecutionMode.Exact, path, (a, sa), (b, sb));
+                (float[] exact, _) = Run(model, ArithmeticMode.Exact, path, (a, sa), (b, sb));
                 for (int i = 0; i < want.Length; i++)
                 {
                     Assert.True(Bits(exact[i]) == Bits(want[i]) && (!float.IsNaN(exact[i]) || BitConverter.SingleToUInt32Bits(exact[i]) == 0x7FC00000u),
@@ -150,7 +150,7 @@ public class OperatorTests
             byte[] model = new ModelBuilder().Input("x", 1, n).Output("y", 1, n).Node("Relu", ["x"], ["y"]).Build();
             foreach (KernelPath path in KernelPaths.All.Where(KernelPaths.IsSupported))
             {
-                (float[] y, _) = Run(model, ExecutionMode.Exact, path, (x, [n]));
+                (float[] y, _) = Run(model, ArithmeticMode.Exact, path, (x, [n]));
                 for (int i = 0; i < n; i++)
                 {
                     float want = float.IsNaN(x[i]) ? float.NaN : (x[i] > 0 ? x[i] : 0f);
@@ -262,13 +262,13 @@ public class OperatorTests
         byte[] model = new ModelBuilder().Input("a", 1, [.. sa.Cast<object>()]).Input("b", 1, [.. sb.Cast<object>()])
             .Output("y", 1, [.. outDims.Cast<object>()]).Node("MatMul", ["a", "b"], ["y"]).Build();
         float[] want = NaiveMatMul(a, sa, b, sb, outDims);
-        (float[] fast, Shape fs) = Run(model, ExecutionMode.Fast, null, (a, sa), (b, sb));
+        (float[] fast, Shape fs) = Run(model, ArithmeticMode.Fast, null, (a, sa), (b, sb));
         Assert.Equal(Shape.Create(outDims), fs);
         Assert.True(SessionTests.ScaledError(fast, want) <= 1e-5);
         string? first = null;
         foreach (KernelPath path in KernelPaths.All.Where(KernelPaths.IsSupported))
         {
-            (float[] exact, _) = Run(model, ExecutionMode.Exact, path, (a, sa), (b, sb));
+            (float[] exact, _) = Run(model, ArithmeticMode.Exact, path, (a, sa), (b, sb));
             Assert.True(SessionTests.ScaledError(exact, want) <= 1e-5);
             first ??= SessionTests.Hash(exact);
             Assert.True(first == SessionTests.Hash(exact), $"exact {path} differs");
@@ -317,11 +317,11 @@ public class OperatorTests
         }
 
         string? first = null;
-        (float[] fast, _) = Run(model, ExecutionMode.Fast, null, (a, sa), (b, sb), (c, cShape));
+        (float[] fast, _) = Run(model, ArithmeticMode.Fast, null, (a, sa), (b, sb), (c, cShape));
         Assert.True(SessionTests.ScaledError(fast, want) <= 1e-5);
         foreach (KernelPath path in KernelPaths.All.Where(KernelPaths.IsSupported))
         {
-            (float[] exact, _) = Run(model, ExecutionMode.Exact, path, (a, sa), (b, sb), (c, cShape));
+            (float[] exact, _) = Run(model, ArithmeticMode.Exact, path, (a, sa), (b, sb), (c, cShape));
             Assert.True(SessionTests.ScaledError(exact, want) <= 1e-5);
             first ??= SessionTests.Hash(exact);
             Assert.True(first == SessionTests.Hash(exact), $"exact {path} differs");
@@ -349,7 +349,7 @@ public class OperatorTests
             .Node("Constant", [], ["t"], ("value", ModelBuilder.Int64Tensor("t", [0, -1], 2)))
             .Node("Reshape", ["x", "t"], ["y"]).Build();
         float[] x = Random(new Random(1), 24, false);
-        (float[] y, Shape s) = Run(model, ExecutionMode.Fast, null, (x, [2, 3, 4]));
+        (float[] y, Shape s) = Run(model, ArithmeticMode.Fast, null, (x, [2, 3, 4]));
         Assert.Equal(Shape.Create(2, 12), s);
         Assert.Equal(x, y);
 
@@ -357,7 +357,7 @@ public class OperatorTests
         byte[] model2 = new ModelBuilder(14).Input("x", 1, 0, 3).Output("y", 1, 2, 0, 3)
             .Node("Constant", [], ["t"], ("value", ModelBuilder.Int64Tensor("t", [2, 0, 3], 3)))
             .Node("Reshape", ["x", "t"], ["y"], ("allowzero", 1L)).Build();
-        (float[] y2, Shape s2) = Run(model2, ExecutionMode.Fast, null, ([], [0, 3]));
+        (float[] y2, Shape s2) = Run(model2, ArithmeticMode.Fast, null, ([], [0, 3]));
         Assert.Equal(Shape.Create(2, 0, 3), s2);
         Assert.Empty(y2);
     }
@@ -371,7 +371,7 @@ public class OperatorTests
             .Node("Constant", [], ["t"], ("value_ints", new long[] { 3, 2 }))
             .Node("Mul", ["x", "k"], ["m"])
             .Node("Reshape", ["m", "t"], ["y"]).Build();
-        (float[] y, Shape s) = Run(model, ExecutionMode.Fast, null, (new float[] { 1, 2, 3, 4, 5, 6 }, [2, 3]));
+        (float[] y, Shape s) = Run(model, ArithmeticMode.Fast, null, (new float[] { 1, 2, 3, 4, 5, 6 }, [2, 3]));
         Assert.Equal(Shape.Create(3, 2), s);
         Assert.Equal([2.5f, 5f, 7.5f, 10f, 12.5f, 15f], y);
     }
@@ -393,7 +393,7 @@ public class OperatorTests
         float[] x = [1, 2, 3, -4, -5, 6];
         // g = x*w + c: [4.5, 4.5], [2.5, 0.5]; relu keeps both rows; then + c and * c.
         float[] want = [(4.5f + 0.5f) * 0.5f, (4.5f - 0.5f) * -0.5f, (2.5f + 0.5f) * 0.5f, (0.5f - 0.5f) * -0.5f];
-        (float[] y, Shape s) = Run(model, ExecutionMode.Exact, null, (x, [2, 3]));
+        (float[] y, Shape s) = Run(model, ArithmeticMode.Exact, null, (x, [2, 3]));
         Assert.Equal(Shape.Create(2, 2), s);
         Assert.Equal(want, y);
     }

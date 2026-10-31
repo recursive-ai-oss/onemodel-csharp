@@ -55,7 +55,7 @@ public class ArgAndCumSumTests
                         int[] outDims = [.. shape.Select((d, i) => i == axis ? (keep ? 1 : -1) : d).Where(d => d >= 0)];
                         byte[] model = new ModelBuilder(13).Input("x", 1, Dims(shape)).Output("y", 7, Dims(outDims))
                             .Node(op, ["x"], ["y"], ("axis", (long)(axis - shape.Length)), ("keepdims", keep ? 1L : 0L), ("select_last_index", last ? 1L : 0L)).Build();
-                        Out[] got = Run(model, ExecutionMode.Fast, null, 1, 1, (x, shape));
+                        Out[] got = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, shape));
                         Assert.Equal(Shape.Create(outDims), got[0].Shape);
                         Assert.Equal(ArgRef(op == "ArgMax", last, x, shape, axis), got[0].L!);
                     }
@@ -70,7 +70,7 @@ public class ArgAndCumSumTests
         // Probed with ONNX Runtime: [1, nan, 3] -> 2, [nan, nan, nan] -> 0, [nan, nan, 5] -> 0.
         float n = float.NaN;
         byte[] model = new ModelBuilder(13).Input("x", 1, 3, 3).Output("y", 7, 3).Node("ArgMax", ["x"], ["y"], ("axis", 1L), ("keepdims", 0L)).Build();
-        Assert.Equal([2L, 0L, 0L], Run(model, ExecutionMode.Fast, null, 1, 1, ([1, n, 3, n, n, n, n, n, 5], [3, 3]))[0].L!);
+        Assert.Equal([2L, 0L, 0L], Run(model, ArithmeticMode.Fast, null, 1, 1, ([1, n, 3, n, n, n, n, n, 5], [3, 3]))[0].L!);
     }
 
     private static float[] CumRef(float[] x, int[] shape, int axis, bool exclusive, bool reverse)
@@ -117,7 +117,7 @@ public class ArgAndCumSumTests
                 {
                     byte[] model = new ModelBuilder(14).Input("x", 1, 3, 4, 5).Initializer("a", new long[] { axis }).Output("y", 1, 3, 4, 5)
                         .Node("CumSum", ["x", "a"], ["y"], ("exclusive", exclusive ? 1L : 0L), ("reverse", reverse ? 1L : 0L)).Build();
-                    float[] got = Run(model, ExecutionMode.Exact, null, 1, 1, (x, shape))[0].F!;
+                    float[] got = Run(model, ArithmeticMode.Exact, null, 1, 1, (x, shape))[0].F!;
                     AssertSameBits(got, CumRef(x, shape, axis < 0 ? axis + 3 : axis, exclusive, reverse), $"axis {axis} exclusive {exclusive} reverse {reverse}");
                 }
             }

@@ -35,12 +35,12 @@ public class QuantizedFusionTests
         byte[] model = m.Build();
         float[] x = PassTestKit.RandomFloats(n, 5, 6f);
         x[0] = float.NaN;
-        string[] kernels = PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast);
+        string[] kernels = PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast);
         Assert.Equal(["QuantizeLinearOp", "QLutOp", "DequantizeLinearOp"], kernels);
-        float[] want = PassTestKit.Run(model, x, [1, 1, n], OptimizationLevel.None, ExecutionMode.Fast);
+        float[] want = PassTestKit.Run(model, x, [1, 1, n], OptimizationLevel.None, ArithmeticMode.Fast);
         foreach (int threads in new[] { 1, 3 })
         {
-            float[] got = PassTestKit.Run(model, x, [1, 1, n], OptimizationLevel.All, ExecutionMode.Fast, threads);
+            float[] got = PassTestKit.Run(model, x, [1, 1, n], OptimizationLevel.All, ArithmeticMode.Fast, threads);
             Assert.True(PassTestKit.BitEqual(want, got), $"op={op} threads={threads}");
         }
     }
@@ -65,11 +65,11 @@ public class QuantizedFusionTests
         m.Node("DequantizeLinear", ["qc", "cs", "cz"], ["y"]);
         byte[] model = m.Build();
         float[] x = PassTestKit.RandomFloats(n * c * h * w, 8, 4f);
-        Assert.Contains("QLinearMulOp", PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast));
-        float[] want = PassTestKit.Run(model, x, [n, c, h, w], OptimizationLevel.None, ExecutionMode.Fast);
+        Assert.Contains("QLinearMulOp", PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast));
+        float[] want = PassTestKit.Run(model, x, [n, c, h, w], OptimizationLevel.None, ArithmeticMode.Fast);
         foreach (int threads in new[] { 1, 3 })
         {
-            float[] got = PassTestKit.Run(model, x, [n, c, h, w], OptimizationLevel.All, ExecutionMode.Fast, threads);
+            float[] got = PassTestKit.Run(model, x, [n, c, h, w], OptimizationLevel.All, ArithmeticMode.Fast, threads);
             Assert.True(PassTestKit.BitEqual(want, got), $"threads={threads}");
         }
     }
@@ -90,9 +90,9 @@ public class QuantizedFusionTests
         m.Node("DequantizeLinear", ["qc", "cs", "cz"], ["y"]);
         byte[] model = m.Build();
         float[] x = PassTestKit.RandomFloats(n * c * h * w, 12, 3f);
-        Assert.Contains("QLinearGlobalAveragePoolOp", PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast));
-        float[] want = PassTestKit.Run(model, x, [n, c, h, w], OptimizationLevel.None, ExecutionMode.Fast);
-        float[] got = PassTestKit.Run(model, x, [n, c, h, w], OptimizationLevel.All, ExecutionMode.Fast);
+        Assert.Contains("QLinearGlobalAveragePoolOp", PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast));
+        float[] want = PassTestKit.Run(model, x, [n, c, h, w], OptimizationLevel.None, ArithmeticMode.Fast);
+        float[] got = PassTestKit.Run(model, x, [n, c, h, w], OptimizationLevel.All, ArithmeticMode.Fast);
         for (int i = 0; i < want.Length; i++)
         {
             Assert.True(Math.Abs(want[i] - got[i]) <= 0.011f * 1.001f, $"element {i}: {want[i]} vs {got[i]}");

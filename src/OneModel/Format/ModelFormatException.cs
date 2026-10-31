@@ -14,17 +14,14 @@ public enum ModelFormatErrorKind
 
     /// <summary>The file uses something this reader does not support: a newer format version, unknown flags, an unknown element type, a tensor over 2^31-1 bytes.</summary>
     Unsupported,
-
-    /// <summary>The file could not be read or written.</summary>
-    Io,
 }
 
 /// <summary>
 /// The one exception the OneModel format reader and writer throw for bad input, bad files or unusable models.
-/// The message names what was expected and where: <see cref="FieldPath"/> is a path into the manifest such as
-/// <c>graph.nodes[3].attributes[0].value</c>, and <see cref="Offset"/> is a byte offset in the file when one applies.
+/// The message names what was expected and where: <see cref="OneModelException.FieldPath"/> is a path into the manifest such as
+/// <c>graph.nodes[3].attributes[0].value</c>, and <see cref="OneModelException.Offset"/> is a byte offset in the file when one applies.
 /// </summary>
-public sealed class ModelFormatException : Exception
+public sealed class ModelFormatException : OneModelException
 {
     /// <summary>Creates the exception.</summary>
     /// <param name="kind">What went wrong.</param>
@@ -34,39 +31,11 @@ public sealed class ModelFormatException : Exception
     /// <param name="fieldPath">A manifest path or header field name, or null.</param>
     /// <param name="inner">The exception that caused this one.</param>
     public ModelFormatException(ModelFormatErrorKind kind, string message, string? source = null, long offset = -1, string? fieldPath = null, Exception? inner = null)
-        : base(Compose(message, source, offset, fieldPath), inner)
+        : base(OneModelErrorCategory.ModelFormat, message, source, offset, fieldPath, inner)
     {
         Kind = kind;
-        InputName = source;
-        Offset = offset;
-        FieldPath = fieldPath;
     }
 
     /// <summary>What went wrong.</summary>
     public ModelFormatErrorKind Kind { get; }
-
-    /// <summary>The file path, or <c>&lt;stream&gt;</c> or <c>&lt;memory&gt;</c>; null when unknown.</summary>
-    public string? InputName { get; }
-
-    /// <summary>A byte offset in the file, or -1.</summary>
-    public long Offset { get; }
-
-    /// <summary>The header field or manifest path the problem is at, or null.</summary>
-    public string? FieldPath { get; }
-
-    private static string Compose(string message, string? source, long offset, string? path)
-    {
-        string where = source ?? "";
-        if (offset >= 0)
-        {
-            where += (where.Length > 0 ? " " : "") + "at byte " + offset.ToString(CultureInfo.InvariantCulture);
-        }
-
-        if (path is not null)
-        {
-            where += (where.Length > 0 ? ", " : "") + path;
-        }
-
-        return where.Length > 0 ? message + " (" + where + ")" : message;
-    }
 }

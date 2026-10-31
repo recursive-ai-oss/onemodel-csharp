@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The code in docs/guide, built and run. Every code block in the guide is copied from a #region in this project
+       (tools/sync_guide.py checks they match), so the guide compiles and its examples run in CI. It does not reference the
+       OneModel preview-API suppression: it sees the library as a consumer does. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>$(PackagePrefix).$(LibName).Guide</RootNamespace>
+    <OneModelSamples>true</OneModelSamples>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+    <ProjectReference Include="../../src/OneModel.Training/OneModel.Training.csproj" />
+  </ItemGroup>
+
+</Project>

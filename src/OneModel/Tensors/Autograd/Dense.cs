@@ -73,7 +73,7 @@ internal static class Dense
 /// The default tensor kernels: the reference semantics for everything but <see cref="MatMul"/>, which runs on the blocked GEMM
 /// (fast or exact per <see cref="TensorCompute.Mode"/>) instead of a double-accumulating triple loop.
 /// </summary>
-public sealed class DenseKernels : ITensorKernels
+internal sealed class DenseKernels : ITensorKernels
 {
     /// <summary>The shared instance.</summary>
     public static DenseKernels Instance { get; } = new();

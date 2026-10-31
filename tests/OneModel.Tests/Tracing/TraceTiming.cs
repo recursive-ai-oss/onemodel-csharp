@@ -45,7 +45,7 @@ public class TraceTiming
                 using var scope = new ActivationScope();
                 net.Forward(example);
             });
-            using Session s = tm.CreateSession(new SessionOptions { IntraOpThreads = threads });
+            using Session s = tm.CreateSession(new ModelOptions { IntraOpThreads = threads });
             Tensor[] outs = new Tensor[1];
             double traced = MedianMs(() => s.Run(["input"], [example], ["output"], outs));
             File.AppendAllText(Path.Combine(dir, "timing.txt"), $"{name} threads={threads} eager={eager:F2}ms session={traced:F2}ms ratio={eager / traced:F2}\n");

@@ -276,9 +276,8 @@ public class FormatHostileTests
     }
 
     [Fact]
-    public void NonexistentFileIsAnIoError()
+    public void NonexistentFileIsTheBclsFileNotFound()
     {
-        var e = Assert.Throws<ModelFormatException>(() => ModelFormat.Load(Path.Combine(Path.GetTempPath(), "onemodel-none-" + Guid.NewGuid().ToString("N"))));
-        Assert.Equal(ModelFormatErrorKind.Io, e.Kind);
+        Assert.Throws<FileNotFoundException>(() => ModelFormat.Load(Path.Combine(Path.GetTempPath(), "onemodel-none-" + Guid.NewGuid().ToString("N"))));
     }
 }

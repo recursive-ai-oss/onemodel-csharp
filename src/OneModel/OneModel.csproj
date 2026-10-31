@@ -20,6 +20,9 @@
     <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Tests" />
     <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Fuzz" />
     <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Micro" />
+    <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Training" />
+    <InternalsVisibleTo Include="AotSmoke" />
+    <InternalsVisibleTo Include="WasmSmoke" />
   </ItemGroup>
 
   <ItemGroup>

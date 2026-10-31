@@ -12,7 +12,7 @@ namespace RecursiveAI.OneModel.Graph.Runtime;
 /// </summary>
 /// <remarks>
 /// Weights that are constants are widened once when the plan is made and kept as binary32, unless the session asked to keep them in
-/// half precision (<see cref="SessionOptions.WeightStorage"/>): those are widened for each run, from the compact copy, into run scratch.
+/// half precision (<see cref="ModelOptions.WeightStorage"/>): those are widened for each run, from the compact copy, into run scratch.
 /// A node with no half-precision input is passed straight to the kernel, as are the few operators (<c>Add, Sub, Mul, Div</c> on
 /// binary16) that already compute in half precision.
 /// </remarks>

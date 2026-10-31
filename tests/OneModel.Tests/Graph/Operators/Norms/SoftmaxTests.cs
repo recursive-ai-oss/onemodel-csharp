@@ -87,17 +87,17 @@ public class SoftmaxTests
             {
                 byte[] model = new ModelBuilder(13).Input("x", 1, Dims(shape)).Output("y", 1, Dims(shape)).Node(op, ["x"], ["y"], ("axis", (long)axis)).Build();
                 double[] want = Ref(op, x, shape, axis < 0 ? axis + shape.Length : axis);
-                Out[] fast = Run(model, ExecutionMode.Fast, null, 1, 1, (x, shape));
+                Out[] fast = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, shape));
                 Assert.True(ScaledError(fast[0].F!, want) < 1e-5, $"{op} {string.Join('x', shape)} axis {axis}: {ScaledError(fast[0].F!, want)}");
-                Out[] many = Run(model, ExecutionMode.Fast, null, 8, 1, (x, shape));
+                Out[] many = Run(model, ArithmeticMode.Fast, null, 8, 1, (x, shape));
                 AssertSameBits(many[0].F!, fast[0].F!, "threads");
                 if (op != "Hardmax")
                 {
-                    Out[] exact = Run(model, ExecutionMode.Exact, null, 1, 1, (x, shape));
+                    Out[] exact = Run(model, ArithmeticMode.Exact, null, 1, 1, (x, shape));
                     Assert.True(ScaledError(exact[0].F!, want) < 1e-5);
                     foreach (var path in Paths)
                     {
-                        AssertSameBits(Run(model, ExecutionMode.Exact, path, 3, 1, (x, shape))[0].F!, exact[0].F!, $"{op} exact {path}");
+                        AssertSameBits(Run(model, ArithmeticMode.Exact, path, 3, 1, (x, shape))[0].F!, exact[0].F!, $"{op} exact {path}");
                     }
                 }
             }
@@ -118,14 +118,14 @@ public class SoftmaxTests
             for (int axis = 0; axis < 3; axis++)
             {
                 byte[] model = new ModelBuilder(opset).Input("x", 1, 3, 4, 5).Output("y", 1, 3, 4, 5).Node(op, ["x"], ["y"], ("axis", (long)axis)).Build();
-                Out[] got = Run(model, ExecutionMode.Fast, null, 1, 1, (x, shape));
+                Out[] got = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, shape));
                 Assert.True(ScaledError(got[0].F!, RefCoerce(op, x, shape, axis)) < 1e-5, $"{op} opset {opset} axis {axis}");
             }
         }
 
         // The default axis is 1 up to opset 12.
         byte[] def = new ModelBuilder(11).Input("x", 1, 3, 4, 5).Output("y", 1, 3, 4, 5).Node(op, ["x"], ["y"]).Build();
-        Assert.True(ScaledError(Run(def, ExecutionMode.Fast, null, 1, 1, (x, shape))[0].F!, RefCoerce(op, x, shape, 1)) < 1e-5);
+        Assert.True(ScaledError(Run(def, ArithmeticMode.Fast, null, 1, 1, (x, shape))[0].F!, RefCoerce(op, x, shape, 1)) < 1e-5);
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public class SoftmaxTests
         byte[] soft = new ModelBuilder(13).Input("x", 1, 4, 2).Output("y", 1, 4, 2).Node("Softmax", ["x"], ["y"]).Build();
         foreach (var path in Paths)
         {
-            foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+            foreach (ArithmeticMode mode in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
             {
                 float[] l = Run(log, mode, path, 1, 1, (x, [4, 2]))[0].F!;
                 float[] s = Run(soft, mode, path, 1, 1, (x, [4, 2]))[0].F!;
@@ -159,7 +159,7 @@ public class SoftmaxTests
     {
         float[] x = [float.NaN, 1, 1, 2, 2, 1];
         byte[] model = new ModelBuilder(13).Input("x", 1, 2, 3).Output("y", 1, 2, 3).Node("Hardmax", ["x"], ["y"]).Build();
-        float[] y = Run(model, ExecutionMode.Fast, null, 1, 1, (x, [2, 3]))[0].F!;
+        float[] y = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, [2, 3]))[0].F!;
         Assert.Equal([0f, 0f, 0f, 1f, 0f, 0f], y);
     }
 }

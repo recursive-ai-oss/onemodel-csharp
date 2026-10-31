@@ -52,10 +52,10 @@ public class NormAllocationTests
         }
 
         float[] y = new float[outLength];
-        foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+        foreach (ArithmeticMode mode in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
         {
             using IrModel ir = OnnxImporter.Load(model);
-            using var s = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = 1 }, OpRegistry.Default, null, default);
+            using var s = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = 1 }, OpRegistry.Default, null, default);
             for (int i = 0; i < 20; i++)
             {
                 s.Run("x", input.AsSpan(), shape, "y", y.AsSpan());

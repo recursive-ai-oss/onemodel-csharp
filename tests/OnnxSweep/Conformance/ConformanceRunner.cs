@@ -36,7 +36,7 @@ public enum CaseStatus
 /// <param name="Mode">The session mode.</param>
 /// <param name="Status">The outcome.</param>
 /// <param name="Reason">Empty for a pass; otherwise one line saying what was wrong.</param>
-public readonly record struct CaseResult(string Group, string Name, long Opset, string Ops, ExecutionMode Mode, CaseStatus Status, string Reason);
+public readonly record struct CaseResult(string Group, string Name, long Opset, string Ops, ArithmeticMode Mode, CaseStatus Status, string Reason);
 
 /// <summary>
 /// Runs the frozen onnx/backend/test cases (node, simple, pytorch-converted, pytorch-operator) through a <see cref="Session"/> and
@@ -77,7 +77,7 @@ public static class ConformanceRunner
     }
 
     /// <summary>Runs one case in one mode. Never throws for a case's own faults.</summary>
-    public static CaseResult RunCase(string group, string dir, ExecutionMode mode, int threads = 1)
+    public static CaseResult RunCase(string group, string dir, ArithmeticMode mode, int threads = 1)
     {
         CaseResult r = RunCaseCore(group, dir, mode, threads);
         if (r.Status == CaseStatus.Fail && KnownDifferences.TryGetValue(r.Name, out string? why))
@@ -99,7 +99,7 @@ public static class ConformanceRunner
         ["test_dft_inverse_opset19"] = "expected data carries 1.9e-7 float32 FFT noise, above the case's 1e-7 absolute tolerance",
     };
 
-    private static CaseResult RunCaseCore(string group, string dir, ExecutionMode mode, int threads)
+    private static CaseResult RunCaseCore(string group, string dir, ArithmeticMode mode, int threads)
     {
         string name = Path.GetFileName(dir);
         long opset = 0;
@@ -122,7 +122,7 @@ public static class ConformanceRunner
             Session session;
             try
             {
-                session = Session.Create(model, new SessionOptions { Mode = mode, IntraOpThreads = threads });
+                session = Session.Create(model, new ModelOptions { Mode = mode, IntraOpThreads = threads });
             }
             catch (SessionException e) when (Classify(e, typeGap) is { } status)
             {
@@ -165,7 +165,7 @@ public static class ConformanceRunner
         foreach (CaseResult r in results)
         {
             sb.Append(r.Group).Append('\t').Append(r.Name).Append('\t').Append(r.Opset.ToString(CultureInfo.InvariantCulture)).Append('\t')
-              .Append(r.Ops).Append('\t').Append(r.Mode == ExecutionMode.Exact ? "exact" : "fast").Append('\t')
+              .Append(r.Ops).Append('\t').Append(r.Mode == ArithmeticMode.Exact ? "exact" : "fast").Append('\t')
               .Append(StatusName(r.Status)).Append('\t').Append(r.Reason).Append('\n');
         }
 

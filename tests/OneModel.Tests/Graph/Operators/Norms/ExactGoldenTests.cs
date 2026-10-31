@@ -41,7 +41,7 @@ public class ExactGoldenTests
     {
         var rng = new Random(2026);
         using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        ExecutionMode m = ExecutionMode.Exact;
+        ArithmeticMode m = ArithmeticMode.Exact;
 
         foreach (int cols in new[] { 1, 5, 16, 17, 33, 100, 384 })
         {

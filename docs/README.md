@@ -2,6 +2,8 @@
 
 Normative, language-neutral notes live here, one file per topic, so a port can follow them without the C# code.
 
+Looking for how to use the library? See the [usage guide](guide/README.md).
+
 | Topic | File |
 |---|---|
 | Tensors, memory, layouts, fp16/bf16 rounding, gradient records | [tensors.md](tensors.md) |

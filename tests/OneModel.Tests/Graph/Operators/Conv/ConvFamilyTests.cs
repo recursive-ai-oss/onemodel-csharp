@@ -15,9 +15,9 @@ namespace RecursiveAI.OneModel.Tests.Graph.Operators.ConvFamily;
 public partial class ConvFamilyTests
 {
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void GeneratedCasesMatchOnnxRuntime(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void GeneratedCasesMatchOnnxRuntime(ArithmeticMode mode)
     {
         string? dir = Environment.GetEnvironmentVariable("ONEMODEL_OPS_CONV");
         if (string.IsNullOrEmpty(dir))
@@ -78,7 +78,7 @@ public partial class ConvFamilyTests
             using var h = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
             foreach (string c in Directory.GetDirectories(dir).Order(StringComparer.Ordinal))
             {
-                string outcome = CaseRunner.Run(c, ExecutionMode.Exact, scaled: true, out _, h, threads[k]);
+                string outcome = CaseRunner.Run(c, ArithmeticMode.Exact, scaled: true, out _, h, threads[k]);
                 Assert.True(outcome == "PASS", $"{Path.GetFileName(c)}: {outcome}");
             }
 
@@ -251,16 +251,16 @@ public partial class ConvFamilyTests
     // MaxPool with indices, a depthwise Conv, Resize, ConvTranspose, AveragePool, GlobalAveragePool. A steady-state run on one thread
     // allocates nothing.
     [Theory]
-    [InlineData(ExecutionMode.Fast, 1)]
-    [InlineData(ExecutionMode.Fast, 2)]
-    [InlineData(ExecutionMode.Fast, 3)]
-    [InlineData(ExecutionMode.Fast, 4)]
-    [InlineData(ExecutionMode.Fast, 5)]
-    [InlineData(ExecutionMode.Fast, 6)]
-    [InlineData(ExecutionMode.Fast, 7)]
-    [InlineData(ExecutionMode.Fast, 8)]
-    [InlineData(ExecutionMode.Exact, 8)]
-    public void SteadyStateRunAllocatesNothing(ExecutionMode mode, int nodes)
+    [InlineData(ArithmeticMode.Fast, 1)]
+    [InlineData(ArithmeticMode.Fast, 2)]
+    [InlineData(ArithmeticMode.Fast, 3)]
+    [InlineData(ArithmeticMode.Fast, 4)]
+    [InlineData(ArithmeticMode.Fast, 5)]
+    [InlineData(ArithmeticMode.Fast, 6)]
+    [InlineData(ArithmeticMode.Fast, 7)]
+    [InlineData(ArithmeticMode.Fast, 8)]
+    [InlineData(ArithmeticMode.Exact, 8)]
+    public void SteadyStateRunAllocatesNothing(ArithmeticMode mode, int nodes)
     {
         var rng = new Random(9);
         var model = new ModelBuilder(17)
@@ -293,7 +293,7 @@ public partial class ConvFamilyTests
 
         var cut = model.Output(last[nodes - 1], 1, "a", "b", "c", "d");
         using IrModel ir = OnnxImporter.Load(cut.Build());
-        using var s = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = 1 });
+        using var s = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = 1 });
         float[] input = Fill(rng, 4 * 16 * 16), y = new float[8 * 16 * 16 * 4];
         int[] shape = [1, 4, 16, 16];
         for (int i = 0; i < 20; i++)

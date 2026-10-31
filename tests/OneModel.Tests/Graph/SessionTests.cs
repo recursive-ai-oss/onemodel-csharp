@@ -43,19 +43,19 @@ public class SessionTests
         return max == 0 ? diff : diff / max;
     }
 
-    internal static SessionOptions Options(ExecutionMode mode, int threads = 0) => new() { Mode = mode, IntraOpThreads = threads };
+    internal static ModelOptions Options(ArithmeticMode mode, int threads = 0) => new() { Mode = mode, IntraOpThreads = threads };
 
     internal static string Hash(ReadOnlySpan<float> data) =>
         Convert.ToHexString(SHA256.HashData(System.Runtime.InteropServices.MemoryMarshal.AsBytes(data)));
 
     [Theory]
-    [InlineData(ExecutionMode.Fast, "mlp-1")]
-    [InlineData(ExecutionMode.Fast, "mlp-5")]
-    [InlineData(ExecutionMode.Exact, "mlp-1")]
-    [InlineData(ExecutionMode.Exact, "mlp-5")]
-    [InlineData(ExecutionMode.Fast, "chain-5")]
-    [InlineData(ExecutionMode.Exact, "chain-5")]
-    public void ModelMatchesOnnxRuntime(ExecutionMode mode, string caseName)
+    [InlineData(ArithmeticMode.Fast, "mlp-1")]
+    [InlineData(ArithmeticMode.Fast, "mlp-5")]
+    [InlineData(ArithmeticMode.Exact, "mlp-1")]
+    [InlineData(ArithmeticMode.Exact, "mlp-5")]
+    [InlineData(ArithmeticMode.Fast, "chain-5")]
+    [InlineData(ArithmeticMode.Exact, "chain-5")]
+    public void ModelMatchesOnnxRuntime(ArithmeticMode mode, string caseName)
     {
         Case c = LoadCase(caseName);
         using var m = Model.Load(GraphPath(caseName.StartsWith("mlp", StringComparison.Ordinal) ? "mlp.onnx" : "chain.onnx"), Options(mode));
@@ -98,7 +98,7 @@ public class SessionTests
     [Fact]
     public void PlanCacheIsBounded()
     {
-        using var s = Session.Load(GraphPath("mlp.onnx"), new SessionOptions { MaxCachedPlans = 3 });
+        using var s = Session.Load(GraphPath("mlp.onnx"), new ModelOptions { MaxCachedPlans = 3 });
         float[] y = new float[64 * 8];
         for (int n = 1; n <= 6; n++)
         {
@@ -118,7 +118,7 @@ public class SessionTests
         byte[] model = new ModelBuilder()
             .Input("x", 1, "N", 300).Output("y", 1, "N", 300).Initializer("w", w, 300, 300)
             .Node("MatMul", ["x", "w"], ["m"]).Node("Relu", ["m"], ["y"]).Build();
-        foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+        foreach (ArithmeticMode mode in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
         {
             string? first = null;
             foreach (int threads in new[] { 1, 2, 5, 32 })
@@ -141,7 +141,7 @@ public class SessionTests
         foreach (KernelPath path in KernelPaths.All.Where(KernelPaths.IsSupported))
         {
             using IrModel ir = OnnxImporter.Load(GraphPath("mlp.onnx"));
-            using var s = Session.Create(ir, Options(ExecutionMode.Exact, 1), OpRegistry.Default, path, default);
+            using var s = Session.Create(ir, Options(ArithmeticMode.Exact, 1), OpRegistry.Default, path, default);
             float[] y = new float[40];
             s.Run("x", c.Input.AsSpan(), c.Shape, "y", y.AsSpan());
             first ??= Hash(y);
@@ -219,9 +219,9 @@ public class SessionTests
     }
 
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void SteadyStateRunAllocatesNothing(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void SteadyStateRunAllocatesNothing(ArithmeticMode mode)
     {
         Case c = LoadCase("mlp-5");
         using var s = Session.Load(GraphPath("mlp.onnx"), Options(mode, 1));
@@ -259,7 +259,7 @@ public class SessionTests
     public void TensorRunWithCallerOutputIsAllocationFreeToo()
     {
         Case c = LoadCase("mlp-5");
-        using var s = Session.Load(GraphPath("mlp.onnx"), Options(ExecutionMode.Fast, 1));
+        using var s = Session.Load(GraphPath("mlp.onnx"), Options(ArithmeticMode.Fast, 1));
         using Tensor x = Tensor.FromSpan<float>(c.Input, Shape.Create(c.Shape));
         using Tensor y = Tensor.Create(DType.F32, Shape.Create(5, 2, 4));
         string[] inNames = ["x"], outNames = ["y"];
@@ -315,13 +315,13 @@ public class SessionTests
             new OpDef("Relu", 6, int.MaxValue, static _ => new NotExactRelu())).ToArray();
         using IrModel ir = OnnxImporter.Load(GraphPath("mlp.onnx"));
         SessionException e = Assert.Throws<SessionException>(() =>
-            Session.Create(ir, Options(ExecutionMode.Exact), new OpRegistry(defs), null, default));
+            Session.Create(ir, Options(ArithmeticMode.Exact), new OpRegistry(defs), null, default));
         Assert.Equal(SessionErrorKind.ExactModeUnavailable, e.Kind);
         Assert.Contains("Relu", e.Message);
         Assert.Equal(["Relu"], e.Operators);
 
         // The same kernel is fine in fast mode.
-        using var s = Session.Create(ir, Options(ExecutionMode.Fast), new OpRegistry(defs), null, default);
+        using var s = Session.Create(ir, Options(ArithmeticMode.Fast), new OpRegistry(defs), null, default);
         Assert.Single(s.Inputs);
     }
 
@@ -375,8 +375,7 @@ public class SessionTests
         var s = Session.Load(GraphPath("mlp.onnx"));
         s.Dispose();
         s.Dispose();
-        SessionException e = Assert.Throws<SessionException>(() => s.Run("x", new float[16].AsSpan(), [1, 16], "y", new float[8].AsSpan()));
-        Assert.Equal(SessionErrorKind.Disposed, e.Kind);
+        Assert.Throws<ObjectDisposedException>(() => s.Run("x", new float[16].AsSpan(), [1, 16], "y", new float[8].AsSpan()));
     }
 
     [Fact]
@@ -384,7 +383,7 @@ public class SessionTests
     {
         using var cts = new CancellationTokenSource();
         cts.Cancel();
-        Assert.ThrowsAny<OperationCanceledException>(() => Session.Load(GraphPath("mlp.onnx"), null, cts.Token));
+        Assert.ThrowsAny<OperationCanceledException>(() => Session.Load(GraphPath("mlp.onnx"), null, null, cts.Token));
     }
 
     [Fact]
@@ -460,7 +459,7 @@ public class SessionTests
             .Initializer("one", [1f], 1)
             .Node("PositiveValues", ["x"], ["p"]).Node("Add", ["p", "one"], ["a"]).Node("Relu", ["a"], ["y"]).Build();
         using IrModel ir = OnnxImporter.Load(model);
-        using var s = Session.Create(ir, Options(ExecutionMode.Fast), new OpRegistry(defs), null, default);
+        using var s = Session.Create(ir, Options(ArithmeticMode.Fast), new OpRegistry(defs), null, default);
         float[] y = new float[16];
         Shape r = s.Run("x", new float[] { -1, 2, -3, 4, 5 }.AsSpan(), [5], "y", y.AsSpan());
         Assert.Equal(Shape.Create(3), r);

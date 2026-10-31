@@ -92,7 +92,7 @@ Plan-time constant evaluation (`graph-runtime.md`) folds those chains per input-
 
 ## 5. Exactness
 
-The traced graph runs the graph layer's operators, so exact mode is the graph layer's: a session in `ExecutionMode.Exact` fails at
+The traced graph runs the graph layer's operators, so exact mode is the graph layer's: a session in `ArithmeticMode.Exact` fails at
 creation naming any operator without an exact kernel, and otherwise is bit-identical across machines. Traced and eager results are
 equal to the last bits in fast mode (checked to 1e-5 scaled; measured ~1e-7) and in exact mode where both layers share the kernel
 (convolution, matrix product, pooling, activations); they differ in the last bits where the layers sum differently (eager norms and

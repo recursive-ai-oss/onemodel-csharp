@@ -18,9 +18,9 @@ public class ShapeIndexingOracleTests
     private static readonly string[] Lenient = ["_reflect", "_negative", "_num", "_scalar_indices"];
 
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void MatchesOnnxRuntime(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void MatchesOnnxRuntime(ArithmeticMode mode)
     {
         string? root = Environment.GetEnvironmentVariable("ONEMODEL_OPS_ORACLE");
         if (string.IsNullOrEmpty(root))
@@ -98,13 +98,13 @@ public class ShapeIndexingOracleTests
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures.Take(40)));
     }
 
-    private static string RunExpectingError(string dir, ExecutionMode mode)
+    private static string RunExpectingError(string dir, ArithmeticMode mode)
     {
         string name = Path.GetFileName(dir);
         try
         {
             using IrModel model = OnnxImporter.Load(Path.Combine(dir, "model.onnx"));
-            using var session = Session.Create(model, new SessionOptions { Mode = mode });
+            using var session = Session.Create(model, new ModelOptions { Mode = mode });
             var inputs = new Tensor[session.Inputs.Length];
             var names = new string[inputs.Length];
             for (int i = 0; i < inputs.Length; i++)

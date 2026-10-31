@@ -95,17 +95,17 @@ public class AttentionFusionTests
         byte[] model = Model(h, d, mask, div, merge);
         float[] x = PassTestKit.RandomFloats(B * S * h * d, 21, 1.5f);
         int[] shape = [B, S, h * d];
-        float[] none = PassTestKit.Run(model, x, shape, OptimizationLevel.None, ExecutionMode.Fast);
-        float[] one = PassTestKit.Run(model, x, shape, OptimizationLevel.All, ExecutionMode.Fast, 1);
-        float[] many = PassTestKit.Run(model, x, shape, OptimizationLevel.All, ExecutionMode.Fast, 8);
+        float[] none = PassTestKit.Run(model, x, shape, OptimizationLevel.None, ArithmeticMode.Fast);
+        float[] one = PassTestKit.Run(model, x, shape, OptimizationLevel.All, ArithmeticMode.Fast, 1);
+        float[] many = PassTestKit.Run(model, x, shape, OptimizationLevel.All, ArithmeticMode.Fast, 8);
         Assert.True(PassTestKit.BitEqual(one, many));
         for (int i = 0; i < none.Length; i++)
         {
             Assert.True(Math.Abs(none[i] - one[i]) <= 1e-5f * (1f + Math.Abs(none[i])), $"element {i}: {none[i]} vs {one[i]}");
         }
 
-        Assert.Contains("AttentionOp", PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast));
-        Assert.DoesNotContain("AttentionOp", PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Exact));
-        Assert.DoesNotContain("SoftmaxOp", PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast));
+        Assert.Contains("AttentionOp", PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast));
+        Assert.DoesNotContain("AttentionOp", PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Exact));
+        Assert.DoesNotContain("SoftmaxOp", PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast));
     }
 }

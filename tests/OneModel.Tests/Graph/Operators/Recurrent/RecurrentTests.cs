@@ -67,9 +67,9 @@ public class RecurrentTests
         };
     }
 
-    private static Tensor[] RunCase(Case c, ExecutionMode mode, KernelPath? path, int threads)
+    private static Tensor[] RunCase(Case c, ArithmeticMode mode, KernelPath? path, int threads)
     {
-        using var s = Session.Create(c.Model, new SessionOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
+        using var s = Session.Create(c.Model, new ModelOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
         var outs = new Tensor[s.Outputs.Length];
         s.Run(Names(s.Inputs), c.Inputs, Names(s.Outputs), outs);
         return outs;
@@ -111,9 +111,9 @@ public class RecurrentTests
     }
 
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void MatchesOnnxRuntimeOnRecordedCases(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void MatchesOnnxRuntimeOnRecordedCases(ArithmeticMode mode)
     {
         int n = 0;
         var failures = new List<string>();
@@ -150,7 +150,7 @@ public class RecurrentTests
             {
                 foreach (int threads in new[] { 1, 3 })
                 {
-                    Tensor[] outs = RunCase(c, ExecutionMode.Exact, path, threads);
+                    Tensor[] outs = RunCase(c, ArithmeticMode.Exact, path, threads);
                     string h = Hash(outs);
                     DisposeAll(outs);
                     first ??= h;
@@ -172,9 +172,9 @@ public class RecurrentTests
         foreach (string dir in CaseDirs())
         {
             using Case c = Load(dir);
-            Tensor[] a = RunCase(c, ExecutionMode.Fast, null, 1);
-            Tensor[] b = RunCase(c, ExecutionMode.Fast, null, 4);
-            Tensor[] again = RunCase(c, ExecutionMode.Fast, null, 4);
+            Tensor[] a = RunCase(c, ArithmeticMode.Fast, null, 1);
+            Tensor[] b = RunCase(c, ArithmeticMode.Fast, null, 4);
+            Tensor[] again = RunCase(c, ArithmeticMode.Fast, null, 4);
             if (Hash(a) != Hash(b) || Hash(b) != Hash(again))
             {
                 failures.Add(Path.GetFileName(dir));
@@ -189,15 +189,15 @@ public class RecurrentTests
     }
 
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void SteadyStateRunAllocatesNothing(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void SteadyStateRunAllocatesNothing(ArithmeticMode mode)
     {
         foreach (string dir in CaseDirs().Where(d => d.Contains("_lstm_bidirectional_", StringComparison.Ordinal) ||
                                                       d.Contains("_gru_forward_", StringComparison.Ordinal)).Take(4))
         {
             using Case c = Load(dir);
-            using var s = Session.Create(c.Model, new SessionOptions { Mode = mode, IntraOpThreads = 1 }, OpRegistry.Default, null, default);
+            using var s = Session.Create(c.Model, new ModelOptions { Mode = mode, IntraOpThreads = 1 }, OpRegistry.Default, null, default);
             string[] inNames = Names(s.Inputs), outNames = Names(s.Outputs);
             var outs = new Tensor[outNames.Length];
             for (int i = 0; i < outs.Length; i++)

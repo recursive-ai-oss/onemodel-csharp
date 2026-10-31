@@ -4,6 +4,30 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Breaking changes
+
+The public API is reshaped for 1.0. Every change below lists its replacement.
+
+- **Tensor ownership (`Tensor`).** `Dispose` is idempotent: disposing a tensor again, on any copy, on a default tensor, or after a method that disposed it, does nothing instead of throwing `StaleTensorException`, and a stale handle can never release memory that was re-rented to someone else. Reading data through a released handle still throws `StaleTensorException`, which now derives from `ObjectDisposedException` (was `InvalidOperationException`). New: `Tensor.IsReleased`. `Session.Run` treats an already released output tensor as an empty slot. The ownership rule is in `docs/guide/tensors.md`.
+- **Named runs and results.** New `Session.Run(IReadOnlyDictionary<string, Tensor> inputs, IReadOnlyList<string>? outputNames = null)` returns `SessionOutputs`, a disposable container that owns the output tensors (by position or name). The span overloads stay as the allocation-free path.
+- **One exception base.** `SessionException`, `OnnxImportException`, `ModelFormatException`, `TraceException` and (training package) `CheckpointException` derive from the new `OneModelException` (`Category`, `InputName`, `Offset`, `FieldPath`). `TraceException` no longer derives from `InvalidOperationException`. Long field paths are shortened in the message; the property keeps the full path.
+- **File-system errors are the BCL's.** The `Io` kinds are gone (`OnnxErrorKind.Io`, `ModelFormatErrorKind.Io`): a missing or unreadable file or a failing stream throws `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException` or `IOException` unwrapped, from `Model.Load`, `Session.Load`, `OnnxImporter.Load`, `ModelFormat.Load/Save/Convert` alike (as `Checkpoint.Load` already did). Replace `catch (OnnxImportException e) when (e.Kind == OnnxErrorKind.Io)` with `catch (IOException)`.
+- **Use after dispose** throws `ObjectDisposedException` from `Session`, `Model` and `TracedModel`. `SessionErrorKind.Disposed` is removed.
+- **Load options reach every entry point.** `OnnxLoadOptions` (namespace `Onnx`) is now `ModelLoadOptions` (namespace `RecursiveAI.OneModel`) and gains `MaxModelBytes` (default and maximum 2^31 − 1). `Model.Load`, `Session.Load`, `ModelFormat.Load` and `Convert` take it (`Model.Load(path, options, loadOptions, cancellationToken)`; a positional `CancellationToken` third argument must become the fourth). `MaxNesting` is validated when set (8 to 250). A stream is read only up to the limit: an endless or huge stream fails with an `Unsupported` import or format error, never `OutOfMemoryException`.
+- **Names that collide with ONNX Runtime.** `SessionOptions` is now `ModelOptions` and `ExecutionMode` is now `ArithmeticMode` (namespace `RecursiveAI.OneModel`); the values are unchanged (`Fast`, `Exact`).
+- **Smaller public surface.** Internal now: `BackwardRecord`, `AutogradMeta`, `SavedTensor`, `OpKind`, `Tensor.Autograd`, `GradMode.ShouldRecord`, `TensorBuffer.Address`, `BufferPool.ClassSize`, `OneModelInfo`, and the kernel plumbing `ITensorKernels`, `KernelSet`, `DenseKernels`, `ReferenceKernels`, `UnaryOp`, `BinaryOp` (the `kernels` argument of `Ops.Add/Sub/Mul/Div/Neg/Relu/MatMul/MaxPool2d` is gone; the `Ops` functions take the default kernels). `PackedValue` and `PackedKind` are marked `[Experimental("ONEMODEL0001")]`: sequences and optionals as packed values may change.
+- **`ModelFormat.Convert`** refuses an output that is its input (`ArgumentException`) and now also accepts a file already in the OneModel format (it is read and rewritten). Parameter names are `inputPath` and `outputPath`.
+- Eager `Ops` on an empty tensor throw `ArgumentException` saying so, instead of the float32-only message.
+
+### Added
+
+- A usage guide, `docs/guide`: getting started, tensors and ownership, errors, the format, training and checkpoints, tracing, and migration notes from Microsoft.ML.OnnxRuntime and TorchSharp. Its code is built and run in CI (`tests/GuideSamples`, `tools/sync_guide.py`).
+- Operators on `Tensor` (`+ - * /`, unary `-`, with `float` scalars) routed to the differentiable `Ops`; `Tensor.Item<T>()`; `Tensor.Zeros(dtype, dims)` and `Tensor.FromSpan(data, dims)` with the dimensions as `params`.
+- `ActivationScope.Keep(tensor)` moves a result out of a scope. `TensorCompute.Use(mode, threads)` scopes the eager compute settings to a flow of execution.
+- `ModelFormat.Detect(path | bytes)` returns `ModelFileKind` (`Onnx`, `OneModel`, `Unknown`).
+- `Model.Run(input, shape, out Shape outputShape)` reports the output's shape.
+- `TensorInfo.ToString()` prints `x: F32[N, 16]`.
+
 ### Changed
 
 - Fast-mode erf `Gelu` (the operator, the fused erf chain and the matrix-product epilogue) uses a degree 5 over degree 5 rational function instead of the accurate exponential form: 3.5 to 5 times faster, absolute error below 1e-6 (`docs/exact-transcendentals.md`). Exact mode and training are unchanged. int8 and fp32 transformers gain 5 to 20 percent end to end.

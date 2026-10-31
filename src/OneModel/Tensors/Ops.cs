@@ -12,14 +12,18 @@ namespace RecursiveAI.OneModel.Tensors;
 public static partial class Ops
 {
     /// <summary><c>a + b</c> with broadcasting. Record: no saved tensors; backward sums the output gradient down to each input's shape.</summary>
-    public static Tensor Add(in Tensor a, in Tensor b, BufferPool? pool = null, ITensorKernels? kernels = null)
+    public static Tensor Add(in Tensor a, in Tensor b, BufferPool? pool = null) => AddWith(a, b, pool, null);
+
+    internal static Tensor AddWith(in Tensor a, in Tensor b, BufferPool? pool, ITensorKernels? kernels)
     {
         Tensor r = Binary(BinaryOp.Add, a, b, pool, kernels);
         return GradMode.ShouldRecord(a, b) ? BackwardRecord.Create(OpKind.Add, 0, a, b).Attach(r) : r;
     }
 
     /// <summary><c>a - b</c> with broadcasting. Record: as <see cref="Add"/>; the gradient of b is negated.</summary>
-    public static Tensor Sub(in Tensor a, in Tensor b, BufferPool? pool = null, ITensorKernels? kernels = null)
+    public static Tensor Sub(in Tensor a, in Tensor b, BufferPool? pool = null) => SubWith(a, b, pool, null);
+
+    internal static Tensor SubWith(in Tensor a, in Tensor b, BufferPool? pool, ITensorKernels? kernels)
     {
         Tensor r = Binary(BinaryOp.Sub, a, b, pool, kernels);
         return GradMode.ShouldRecord(a, b) ? BackwardRecord.Create(OpKind.Sub, 0, a, b).Attach(r) : r;
@@ -29,7 +33,9 @@ public static partial class Ops
     /// <c>a * b</c> with broadcasting. Record: slot 0 holds <c>a</c> when <c>b</c> requires a gradient, slot 1 holds <c>b</c> when
     /// <c>a</c> does (each gradient is the other operand times the output gradient, summed to the input's shape).
     /// </summary>
-    public static Tensor Mul(in Tensor a, in Tensor b, BufferPool? pool = null, ITensorKernels? kernels = null)
+    public static Tensor Mul(in Tensor a, in Tensor b, BufferPool? pool = null) => MulWith(a, b, pool, null);
+
+    internal static Tensor MulWith(in Tensor a, in Tensor b, BufferPool? pool, ITensorKernels? kernels)
     {
         Tensor r = Binary(BinaryOp.Mul, a, b, pool, kernels);
         if (!GradMode.ShouldRecord(a, b))
@@ -55,7 +61,9 @@ public static partial class Ops
     /// <c>a / b</c> with broadcasting. Record: slot 0 holds <c>a</c> when <c>b</c> requires a gradient; slot 1 holds <c>b</c> when
     /// either does.
     /// </summary>
-    public static Tensor Div(in Tensor a, in Tensor b, BufferPool? pool = null, ITensorKernels? kernels = null)
+    public static Tensor Div(in Tensor a, in Tensor b, BufferPool? pool = null) => DivWith(a, b, pool, null);
+
+    internal static Tensor DivWith(in Tensor a, in Tensor b, BufferPool? pool, ITensorKernels? kernels)
     {
         Tensor r = Binary(BinaryOp.Div, a, b, pool, kernels);
         if (!GradMode.ShouldRecord(a, b))
@@ -74,14 +82,18 @@ public static partial class Ops
     }
 
     /// <summary><c>-x</c>. Record: nothing saved.</summary>
-    public static Tensor Neg(in Tensor x, BufferPool? pool = null, ITensorKernels? kernels = null)
+    public static Tensor Neg(in Tensor x, BufferPool? pool = null) => NegWith(x, pool, null);
+
+    internal static Tensor NegWith(in Tensor x, BufferPool? pool, ITensorKernels? kernels)
     {
         Tensor r = Unary(UnaryOp.Neg, x, pool, kernels);
         return GradMode.ShouldRecord(x) ? BackwardRecord.Create(OpKind.Neg, 0, x).Attach(r) : r;
     }
 
     /// <summary><c>max(x, 0)</c>. Record: slot 0 holds the output (the gradient passes where it is positive).</summary>
-    public static Tensor Relu(in Tensor x, BufferPool? pool = null, ITensorKernels? kernels = null)
+    public static Tensor Relu(in Tensor x, BufferPool? pool = null) => ReluWith(x, pool, null);
+
+    internal static Tensor ReluWith(in Tensor x, BufferPool? pool, ITensorKernels? kernels)
     {
         Tensor r = Unary(UnaryOp.Relu, x, pool, kernels);
         if (!GradMode.ShouldRecord(x))
@@ -100,7 +112,9 @@ public static partial class Ops
     /// (dA = g·bᵀ); the transposes are views of the saved tensors.
     /// </summary>
     /// <exception cref="TensorShapeException">Not rank 2, or inner extents differ.</exception>
-    public static Tensor MatMul(in Tensor a, in Tensor b, BufferPool? pool = null, ITensorKernels? kernels = null)
+    public static Tensor MatMul(in Tensor a, in Tensor b, BufferPool? pool = null) => MatMulWith(a, b, pool, null);
+
+    internal static Tensor MatMulWith(in Tensor a, in Tensor b, BufferPool? pool, ITensorKernels? kernels)
     {
         RequireFloat32(a, b);
         if (a.Rank != 2 || b.Rank != 2 || a.Shape[1] != b.Shape[0])
@@ -134,7 +148,9 @@ public static partial class Ops
     /// record), Ints = [kernelH, kernelW, strideH, strideW, padH, padW]; backward scatters each output gradient to its index and
     /// needs the input shape from <see cref="BackwardRecord.InputShape"/>. When nothing is recorded the indices are not computed.
     /// </summary>
-    public static Tensor MaxPool2d(in Tensor x, Pool2dParams p, BufferPool? pool = null, ITensorKernels? kernels = null)
+    public static Tensor MaxPool2d(in Tensor x, Pool2dParams p, BufferPool? pool = null) => MaxPool2dWith(x, p, pool, null);
+
+    internal static Tensor MaxPool2dWith(in Tensor x, Pool2dParams p, BufferPool? pool, ITensorKernels? kernels)
     {
         RequireFloat32(x);
         if (x.Rank != 4)
@@ -192,9 +208,14 @@ public static partial class Ops
 
     private static void RequireFloat32(in Tensor a)
     {
-        if (a.IsEmpty || a.DType != DType.F32 || a.IsBlocked)
+        if (a.IsEmpty)
         {
-            throw new NotSupportedException("The eager operations take plain float32 tensors.");
+            throw new ArgumentException("The tensor is empty (a default Tensor). Was it never assigned, or an output array not yet filled?");
+        }
+
+        if (a.DType != DType.F32 || a.IsBlocked)
+        {
+            throw new NotSupportedException($"The eager operations take plain float32 tensors, not {(a.IsBlocked ? "blocked-layout " : "")}{a.DType}.");
         }
     }
 

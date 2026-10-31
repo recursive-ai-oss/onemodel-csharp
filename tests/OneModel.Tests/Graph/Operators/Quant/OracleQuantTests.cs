@@ -47,10 +47,10 @@ public class OracleQuantTests
         };
     }
 
-    private static Tensor[] RunCase(string dir, List<Spec> ins, int outputs, ExecutionMode mode, KernelPath? path, int threads)
+    private static Tensor[] RunCase(string dir, List<Spec> ins, int outputs, ArithmeticMode mode, KernelPath? path, int threads)
     {
         using IrModel ir = OnnxImporter.Load(Path.Combine(dir, "model.onnx"));
-        using var s = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
+        using var s = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
         var inputs = new Tensor[ins.Count];
         var names = new string[inputs.Length];
         for (int i = 0; i < inputs.Length; i++)
@@ -157,9 +157,9 @@ public class OracleQuantTests
             try
             {
                 (List<Spec> ins, List<Spec> outs, int tol, double floatTol) = ReadMeta(dir);
-                Tensor[] fast = RunCase(dir, ins, outs.Count, ExecutionMode.Fast, null, 1);
-                Tensor[] many = RunCase(dir, ins, outs.Count, ExecutionMode.Fast, null, 7);
-                Tensor[] exact = RunCase(dir, ins, outs.Count, ExecutionMode.Exact, null, 3);
+                Tensor[] fast = RunCase(dir, ins, outs.Count, ArithmeticMode.Fast, null, 1);
+                Tensor[] many = RunCase(dir, ins, outs.Count, ArithmeticMode.Fast, null, 7);
+                Tensor[] exact = RunCase(dir, ins, outs.Count, ArithmeticMode.Exact, null, 3);
                 for (int i = 0; i < outs.Count; i++)
                 {
                     byte[] raw = File.ReadAllBytes(Path.Combine(dir, $"output_{i}.bin"));
@@ -178,7 +178,7 @@ public class OracleQuantTests
 
                 foreach (KernelPath path in KernelPaths.All.Where(KernelPaths.IsSupported).Where(p => p != KernelPath.Scalar))
                 {
-                    Tensor[] other = RunCase(dir, ins, outs.Count, ExecutionMode.Fast, path, 3);
+                    Tensor[] other = RunCase(dir, ins, outs.Count, ArithmeticMode.Fast, path, 3);
                     for (int i = 0; i < other.Length; i++)
                     {
                         if (!Bytes(fast[i]).SequenceEqual(Bytes(other[i])))

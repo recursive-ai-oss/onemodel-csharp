@@ -33,9 +33,9 @@ float[] input = [.. c.GetProperty("input").EnumerateArray().Select(e => (float)e
 float[] expected = [.. c.GetProperty("output").EnumerateArray().Select(e => (float)e.GetDouble())];
 int[] shape = [.. c.GetProperty("shape").EnumerateArray().Select(e => e.GetInt32())];
 
-foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+foreach (ArithmeticMode mode in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
 {
-    using Model m = Model.Load(Open("mlp.onnx"), new SessionOptions { Mode = mode });
+    using Model m = Model.Load(Open("mlp.onnx"), new ModelOptions { Mode = mode });
     float[] y = m.Run(input, shape);
     double max = 0, diff = 0;
     for (int i = 0; i < y.Length; i++)
@@ -79,9 +79,9 @@ using JsonDocument moveDoc = JsonDocument.Parse(Open("shape_ops.json"));
 float[] moveInput = [.. moveDoc.RootElement.GetProperty("input").EnumerateArray().Select(e => (float)e.GetDouble())];
 float[] moveExpected = [.. moveDoc.RootElement.GetProperty("output").EnumerateArray().Select(e => (float)e.GetDouble())];
 int[] moveShape = [.. moveDoc.RootElement.GetProperty("shape").EnumerateArray().Select(e => e.GetInt32())];
-foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+foreach (ArithmeticMode mode in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
 {
-    using Model m = Model.Load(Open("shape_ops.onnx"), new SessionOptions { Mode = mode });
+    using Model m = Model.Load(Open("shape_ops.onnx"), new ModelOptions { Mode = mode });
     float[] y = m.Run(moveInput, moveShape);
     bool same = y.AsSpan().SequenceEqual(moveExpected);
     Console.WriteLine($"{mode}: shape and indexing operators {(same ? "equal" : "DIFFER")} to ONNX Runtime");
@@ -141,9 +141,60 @@ foreach (string name in new[] { "mlp", "int8_qdq" })
     }
 }
 
+// The public API shape: a result container that owns its outputs, idempotent Dispose, operators, a compute scope, format detection,
+// load limits and the exception base.
+{
+    byte[] mlpBytes;
+    using (var ms = new MemoryStream())
+    {
+        Open("mlp.onnx").CopyTo(ms);
+        mlpBytes = ms.ToArray();
+    }
+
+    using Session apiSession = Session.Load(new MemoryStream(mlpBytes));
+    using Tensor apiX = Tensor.FromSpan<float>(new float[16], 1, 16);
+    Tensor apiY;
+    using (SessionOutputs apiOut = apiSession.Run(new System.Collections.Generic.Dictionary<string, Tensor> { ["x"] = apiX }))
+    {
+        apiY = apiOut["y"];
+        apiY.Dispose();
+    }
+
+    Tensor apiAlias = apiX;
+    apiAlias.Dispose();
+    using (TensorCompute.Use(ArithmeticMode.Exact, threads: 1))
+    using (new ActivationScope())
+    {
+        Tensor apiA = Tensor.FromSpan<float>([1f, 2f], 2);
+        float apiSum = Ops.Sum(apiA * 2f - 1f).Item<float>();
+        apiA.Dispose();
+        if (apiSum != 4f)
+        {
+            return 8;
+        }
+    }
+
+    bool limited = false;
+    try
+    {
+        Model.Load(new MemoryStream(mlpBytes), null, new ModelLoadOptions { MaxModelBytes = 64 }).Dispose();
+    }
+    catch (OneModelException e) when (e.Category == OneModelErrorCategory.OnnxImport)
+    {
+        limited = true;
+    }
+
+    bool kinds = ModelFormat.Detect(mlpBytes) == ModelFileKind.Onnx && ModelFormat.Detect("ONEMODEL"u8) == ModelFileKind.OneModel;
+    Console.WriteLine($"api shape: owned outputs released {apiY.IsReleased}, limit enforced {limited}, format detection {kinds}");
+    if (!apiY.IsReleased || !limited || !kinds)
+    {
+        return 8;
+    }
+}
+
 // Reverse-mode autodiff: a small conv / norm / attention net, analytic gradients against central finite differences, in fast and
 // exact arithmetic (float32 finite differences on a small net: noise of a few 1e-3, while a wrong gradient is off by order one).
-foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+foreach (ArithmeticMode gm in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
 {
     TensorCompute.Mode = gm;
     var rng = new Random(7);
@@ -177,7 +228,7 @@ foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
 
 // Training: a small conv net and a transformer layer learn a toy task with AdamW, a cosine schedule, clipping and dropout, and a
 // checkpoint saved mid-run reloads to the same bits, in fast and exact arithmetic.
-foreach (ExecutionMode tm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+foreach (ArithmeticMode tm in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
 {
     TensorCompute.Mode = tm;
     var gen = new Generator(5);
@@ -240,7 +291,7 @@ foreach (ExecutionMode tm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
 }
 
 // Recurrent, CTC, transposed-convolution and resize gradients: a bidirectional LSTM and a GRU into a CTC loss, and a small decoder.
-foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+foreach (ArithmeticMode gm in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
 {
     TensorCompute.Mode = gm;
     var rng = new Random(11);
@@ -379,7 +430,7 @@ foreach (ExecutionMode gm in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
     }
 }
 
-TensorCompute.Mode = ExecutionMode.Fast;
+TensorCompute.Mode = ArithmeticMode.Fast;
 return 0;
 
 Stream Open(string name) =>

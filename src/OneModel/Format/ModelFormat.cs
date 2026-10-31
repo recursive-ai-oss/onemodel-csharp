@@ -16,7 +16,7 @@ namespace RecursiveAI.OneModel.Format;
 /// one file.
 /// </para>
 /// <para>
-/// <see cref="Model.Load(string, SessionOptions?, CancellationToken)"/> and <see cref="Session.Load(string, SessionOptions?, CancellationToken)"/>
+/// <see cref="Model.Load(string, ModelOptions?, ModelLoadOptions?, CancellationToken)"/> and <see cref="Session.Load(string, ModelOptions?, ModelLoadOptions?, CancellationToken)"/>
 /// recognise these files by their first eight bytes, so a saved model loads through the same entry points as an ONNX file.
 /// </para>
 /// </summary>
@@ -58,22 +58,14 @@ public static class ModelFormat
     /// <param name="model">The model to save.</param>
     /// <param name="path">The file to create or overwrite. If saving fails the partial file is deleted.</param>
     /// <param name="cancellationToken">Checked between graphs and tensors.</param>
-    /// <exception cref="ModelFormatException">The file cannot be written (<see cref="ModelFormatErrorKind.Io"/>) or the model has an attribute without a type.</exception>
+    /// <exception cref="ModelFormatException">The model has an attribute without a type.</exception>
+    /// <exception cref="IOException">The file cannot be created or written (<see cref="DirectoryNotFoundException"/>, a full disk, ...); <see cref="UnauthorizedAccessException"/> when access is denied.</exception>
     /// <exception cref="OperationCanceledException">Cancelled.</exception>
     public static void Save(IrModel model, string path, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(path);
-        FileStream fs;
-        try
-        {
-            fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            throw new ModelFormatException(ModelFormatErrorKind.Io, "The file cannot be created: " + e.Message, path, -1, null, e);
-        }
-
+        FileStream fs = new(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
         bool ok = false;
         try
         {
@@ -83,10 +75,6 @@ public static class ModelFormat
             }
 
             ok = true;
-        }
-        catch (IOException e)
-        {
-            throw new ModelFormatException(ModelFormatErrorKind.Io, "The file cannot be written: " + e.Message, path, -1, null, e);
         }
         finally
         {
@@ -117,17 +105,40 @@ public static class ModelFormat
         FormatWriter.Write(model, output, cancellationToken);
     }
 
-    /// <summary>Converts an ONNX file to the OneModel format: imports it (reading external data next to it) and saves it.</summary>
-    /// <param name="onnxPath">The <c>.onnx</c> file.</param>
-    /// <param name="outputPath">The file to create.</param>
+    /// <summary>
+    /// Converts a model file to the OneModel format: imports it (an ONNX file, reading external data next to it; a file already in the
+    /// OneModel format is read and rewritten, which normalizes it) and saves it.
+    /// </summary>
+    /// <param name="inputPath">The <c>.onnx</c> or OneModel file.</param>
+    /// <param name="outputPath">The file to create. It must not be the input file: the input is read lazily and overwriting it would destroy the model.</param>
+    /// <param name="loadOptions">Limits for reading the input; defaults when null.</param>
     /// <param name="cancellationToken">Checked while importing and saving.</param>
-    /// <exception cref="OnnxImportException">The ONNX file is not a valid model.</exception>
-    /// <exception cref="ModelFormatException">The output cannot be written.</exception>
+    /// <exception cref="ArgumentException"><paramref name="outputPath"/> is the same file as <paramref name="inputPath"/>.</exception>
+    /// <exception cref="OnnxImportException">The input is not a valid ONNX model.</exception>
+    /// <exception cref="ModelFormatException">The input in the OneModel format is invalid.</exception>
+    /// <exception cref="IOException">A file cannot be read or written.</exception>
     /// <exception cref="OperationCanceledException">Cancelled.</exception>
-    public static void Convert(string onnxPath, string outputPath, CancellationToken cancellationToken = default)
+    public static void Convert(string inputPath, string outputPath, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default)
     {
-        using IrModel model = OnnxImporter.Load(onnxPath, null, cancellationToken);
+        ArgumentNullException.ThrowIfNull(inputPath);
+        ArgumentNullException.ThrowIfNull(outputPath);
+        if (string.Equals(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
+            || (File.Exists(inputPath) && File.Exists(outputPath) && SameFile(inputPath, outputPath)))
+        {
+            throw new ArgumentException("The output file is the input file; choose another path.", nameof(outputPath));
+        }
+
+        using IrModel model = LoadAny(inputPath, loadOptions, cancellationToken);
         Save(model, outputPath, cancellationToken);
+    }
+
+    // Catches the same file reached through a link or a different spelling.
+    private static bool SameFile(string a, string b)
+    {
+        FileSystemInfo fa = new FileInfo(a), fb = new FileInfo(b);
+        string ta = fa.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fa.FullName;
+        string tb = fb.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fb.FullName;
+        return string.Equals(ta, tb, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -135,73 +146,106 @@ public static class ModelFormat
     /// files. Dispose the model when done.
     /// </summary>
     /// <param name="path">The file.</param>
+    /// <param name="loadOptions">Limits (<see cref="ModelLoadOptions.MaxModelBytes"/>) and <see cref="ModelLoadOptions.MemoryMap"/>; defaults when null.</param>
     /// <param name="cancellationToken">Checked while reading the manifest.</param>
-    /// <returns>The model, ready for <see cref="Session.Create(IrModel, SessionOptions?, CancellationToken)"/>.</returns>
-    /// <exception cref="ModelFormatException">The file is truncated, corrupt, of a newer version or inconsistent; the message names the field.</exception>
+    /// <returns>The model, ready for <see cref="Session.Create(IrModel, ModelOptions?, CancellationToken)"/>.</returns>
+    /// <exception cref="ModelFormatException">The file is truncated, corrupt, of a newer version, inconsistent or over the size limit; the message names the field.</exception>
+    /// <exception cref="IOException">The file is missing or cannot be read; <see cref="UnauthorizedAccessException"/> when access is denied.</exception>
     /// <exception cref="OperationCanceledException">Cancelled.</exception>
-    public static IrModel Load(string path, CancellationToken cancellationToken = default)
+    public static IrModel Load(string path, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(path);
-        ByteSource source;
-        try
-        {
-            source = ByteSource.OpenFile(path, allowMap: true, MapThreshold, readWholeIfUnmapped: true);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
-        {
-            throw new ModelFormatException(ModelFormatErrorKind.Io, "The model file cannot be read: " + e.Message, path, -1, null, e);
-        }
-
-        return ReadOwning(source, path, cancellationToken);
+        loadOptions ??= new ModelLoadOptions();
+        ByteSource source = ByteSource.OpenFile(path, loadOptions.MemoryMap, MapThreshold, readWholeIfUnmapped: true);
+        return ReadOwning(source, path, loadOptions, cancellationToken);
     }
 
-    /// <summary>Loads a model from a stream, read to its end.</summary>
+    /// <summary>Loads a model from a stream, read to its end (or until <see cref="ModelLoadOptions.MaxModelBytes"/> is passed, which is an error).</summary>
     /// <param name="stream">The stream, positioned at the start of the file.</param>
+    /// <param name="loadOptions">Limits; defaults when null.</param>
     /// <param name="cancellationToken">Checked while reading.</param>
-    /// <exception cref="ModelFormatException">As <see cref="Load(string, CancellationToken)"/>.</exception>
+    /// <exception cref="ModelFormatException">As <see cref="Load(string, ModelLoadOptions?, CancellationToken)"/>.</exception>
+    /// <exception cref="IOException">The stream cannot be read.</exception>
     /// <exception cref="OperationCanceledException">Cancelled.</exception>
-    public static IrModel Load(Stream stream, CancellationToken cancellationToken = default)
+    public static IrModel Load(Stream stream, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        return Load(ReadAll(stream, cancellationToken), cancellationToken);
+        loadOptions ??= new ModelLoadOptions();
+        return Load(ReadAll(stream, loadOptions, cancellationToken), loadOptions, cancellationToken);
     }
 
     /// <summary>Loads a model from bytes already in memory. The array is used in place and must not change while the model is in use.</summary>
     /// <param name="data">The whole file.</param>
+    /// <param name="loadOptions">Limits; defaults when null.</param>
     /// <param name="cancellationToken">Checked while reading the manifest.</param>
-    /// <exception cref="ModelFormatException">As <see cref="Load(string, CancellationToken)"/>.</exception>
+    /// <exception cref="ModelFormatException">As <see cref="Load(string, ModelLoadOptions?, CancellationToken)"/>.</exception>
     /// <exception cref="OperationCanceledException">Cancelled.</exception>
-    public static IrModel Load(byte[] data, CancellationToken cancellationToken = default)
+    public static IrModel Load(byte[] data, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(data);
-        return ReadOwning(ByteSource.FromArray(data), "<memory>", cancellationToken);
+        return ReadOwning(ByteSource.FromArray(data), "<memory>", loadOptions ?? new ModelLoadOptions(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Says what kind of model file the first bytes of a file are, from the format's magic or the first protobuf key of an ONNX
+    /// <c>ModelProto</c>. A look at the first bytes only: a file can be detected as ONNX and still fail to import.
+    /// </summary>
+    /// <param name="start">At least the first eight bytes of the file (fewer give <see cref="ModelFileKind.Unknown"/> unless they are a recognisable ONNX start).</param>
+    public static ModelFileKind Detect(ReadOnlySpan<byte> start)
+    {
+        if (IsModelFormat(start))
+        {
+            return ModelFileKind.OneModel;
+        }
+
+        // ModelProto fields: ir_version(1) varint, producer_name(2), producer_version(3), domain(4), model_version(5) varint,
+        // doc_string(6), graph(7), opset_import(8), metadata_props(14), training_info(20), functions(25).
+        if (start.IsEmpty)
+        {
+            return ModelFileKind.Unknown;
+        }
+
+        return start[0] is 0x08 or 0x12 or 0x1a or 0x22 or 0x28 or 0x32 or 0x3a or 0x42 or 0x72
+            || (start.Length > 1 && start[1] == 0x01 && start[0] is 0xa2 or 0xca)
+            ? ModelFileKind.Onnx
+            : ModelFileKind.Unknown;
+    }
+
+    /// <summary>Says what kind of model file <paramref name="path"/> is, by its first bytes (see <see cref="Detect(ReadOnlySpan{byte})"/>).</summary>
+    /// <param name="path">The file.</param>
+    /// <exception cref="IOException">The file is missing or cannot be read.</exception>
+    public static ModelFileKind Detect(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 1);
+        Span<byte> head = stackalloc byte[8];
+        int n = fs.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
+        return Detect(head[..n]);
     }
 
     /// <summary>Loads an ONNX or OneModel file, whichever <paramref name="path"/> is, chosen by the first eight bytes.</summary>
-    internal static IrModel LoadAny(string path, CancellationToken ct) =>
-        IsModelFormatFile(path) ? Load(path, ct) : OnnxImporter.Load(path, null, ct);
+    internal static IrModel LoadAny(string path, ModelLoadOptions? options, CancellationToken ct) =>
+        IsModelFormatFile(path) ? Load(path, options, ct) : OnnxImporter.Load(path, options, ct);
 
     /// <summary>Loads an ONNX or OneModel stream, whichever it is, chosen by the first eight bytes.</summary>
-    internal static IrModel LoadAny(Stream stream, CancellationToken ct)
+    internal static IrModel LoadAny(Stream stream, ModelLoadOptions? options, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        if (stream.CanSeek)
-        {
-            long start = stream.Position;
-            Span<byte> head = new byte[FormatWriter.Magic.Length];
-            int n = stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
-            stream.Position = start;
-            return n == head.Length && IsModelFormat(head) ? Load(stream, ct) : OnnxImporter.Load(stream, null, ct);
-        }
-
-        byte[] bytes = ReadAll(stream, ct);
-        return IsModelFormat(bytes) ? Load(bytes, ct) : OnnxImporter.Load(bytes, null, ct);
+        options ??= new ModelLoadOptions();
+        byte[] bytes = ReadAll(stream, options, ct, forAny: true);
+        return IsModelFormat(bytes) ? Load(bytes, options, ct) : OnnxImporter.Load(bytes, options, ct);
     }
 
-    private static IrModel ReadOwning(ByteSource source, string name, CancellationToken ct)
+    private static IrModel ReadOwning(ByteSource source, string name, ModelLoadOptions options, CancellationToken ct)
     {
         try
         {
+            if (source.Length > options.MaxModelBytes)
+            {
+                throw new ModelFormatException(ModelFormatErrorKind.Unsupported,
+                    $"The model is {source.Length} bytes; the limit is {options.MaxModelBytes} (ModelLoadOptions.MaxModelBytes).", name);
+            }
+
             return FormatReader.Read(source, name, ct);
         }
         catch
@@ -211,29 +255,8 @@ public static class ModelFormat
         }
     }
 
-    private static byte[] ReadAll(Stream stream, CancellationToken ct)
-    {
-        try
-        {
-            using var ms = new MemoryStream();
-            var buffer = new byte[81920];
-            int n;
-            while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (ms.Length + n > Array.MaxLength)
-                {
-                    throw new ModelFormatException(ModelFormatErrorKind.Unsupported, "The stream is larger than 2 GB; load large models from a path.", "<stream>");
-                }
-
-                ms.Write(buffer, 0, n);
-            }
-
-            return ms.ToArray();
-        }
-        catch (Exception e) when (e is IOException or NotSupportedException or ObjectDisposedException)
-        {
-            throw new ModelFormatException(ModelFormatErrorKind.Io, "The stream cannot be read: " + e.Message, "<stream>", -1, null, e);
-        }
-    }
+    private static byte[] ReadAll(Stream stream, ModelLoadOptions options, CancellationToken ct, bool forAny = false) =>
+        StreamBytes.ReadAll(stream, options.MaxModelBytes, (m, head) => !forAny || IsModelFormat(head)
+            ? new ModelFormatException(ModelFormatErrorKind.Unsupported, m, "<stream>")
+            : new OnnxImportException(OnnxErrorKind.Unsupported, m, "<stream>"), ct);
 }

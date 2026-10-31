@@ -11,10 +11,10 @@ internal static class NormHarness
 {
     public sealed record Out(Shape Shape, float[]? F, long[]? L);
 
-    public static Out[] Run(byte[] model, ExecutionMode mode, KernelPath? path, int threads, int outputs, params (float[] Data, int[] Shape)[] inputs)
+    public static Out[] Run(byte[] model, ArithmeticMode mode, KernelPath? path, int threads, int outputs, params (float[] Data, int[] Shape)[] inputs)
     {
         using IrModel ir = OnnxImporter.Load(model);
-        using var s = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
+        using var s = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
         var tensors = new Tensor[inputs.Length];
         var names = new string[inputs.Length];
         for (int i = 0; i < inputs.Length; i++)

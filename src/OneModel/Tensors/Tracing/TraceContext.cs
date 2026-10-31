@@ -25,12 +25,12 @@ public enum TraceErrorKind
 }
 
 /// <summary>A model could not be traced. <see cref="Kind"/> says why; the message names the operation or read.</summary>
-public sealed class TraceException : InvalidOperationException
+public sealed class TraceException : OneModelException
 {
     /// <summary>Creates the exception.</summary>
     /// <param name="kind">Why tracing failed.</param>
     /// <param name="message">What was wrong and where.</param>
-    public TraceException(TraceErrorKind kind, string message) : base(message)
+    public TraceException(TraceErrorKind kind, string message) : base(OneModelErrorCategory.Tracing, message)
     {
         Kind = kind;
     }

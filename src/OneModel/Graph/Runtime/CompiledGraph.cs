@@ -64,15 +64,15 @@ internal sealed class CompiledGraph : IDisposable
     /// Resolves operators, checks the mode, and loads initializers.
     /// </summary>
     /// <exception cref="SessionException">An operator is missing, or exact mode lacks a kernel, or the model is malformed.</exception>
-    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ExecutionMode mode, CancellationToken ct) =>
+    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ArithmeticMode mode, CancellationToken ct) =>
         Create(graph, registry, mode, WeightStorage.Original, ct);
 
     /// <summary>As above, also storing large float32 weights as <paramref name="storage"/> says.</summary>
-    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ExecutionMode mode, WeightStorage storage, CancellationToken ct) =>
+    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ArithmeticMode mode, WeightStorage storage, CancellationToken ct) =>
         Create(graph, registry, mode, storage, OptimizationLevel.None, KernelPath.Scalar, 1, ct);
 
     /// <summary>As above, then runs the graph passes the level and mode select (Graph/Passes) for a session on <paramref name="path"/>.</summary>
-    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ExecutionMode mode, WeightStorage storage, OptimizationLevel level,
+    public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ArithmeticMode mode, WeightStorage storage, OptimizationLevel level,
         KernelPath path, int threads, CancellationToken ct)
     {
         var g = new CompiledGraph();
@@ -89,7 +89,7 @@ internal sealed class CompiledGraph : IDisposable
     }
 
     /// <summary>A body of a control-flow node: its own inputs, then <paramref name="captures"/> (outer values it reads) as inputs. No graph passes.</summary>
-    public static CompiledGraph CreateNested(IrGraph body, IReadOnlyList<IrValue> captures, OpRegistry registry, ExecutionMode mode, KernelPath path,
+    public static CompiledGraph CreateNested(IrGraph body, IReadOnlyList<IrValue> captures, OpRegistry registry, ArithmeticMode mode, KernelPath path,
         int threads, CancellationToken ct)
     {
         var g = new CompiledGraph();
@@ -145,7 +145,7 @@ internal sealed class CompiledGraph : IDisposable
 
     private readonly List<OpKernel> _kernels = [];
 
-    private void Build(IrGraph graph, OpRegistry registry, ExecutionMode mode, WeightStorage storage, OptimizationLevel level, KernelPath path,
+    private void Build(IrGraph graph, OpRegistry registry, ArithmeticMode mode, WeightStorage storage, OptimizationLevel level, KernelPath path,
         int threads, IReadOnlyList<IrValue> captures, CancellationToken ct)
     {
         // A body also knows the outer values it reads: they come after its own values.
@@ -242,7 +242,7 @@ internal sealed class CompiledGraph : IDisposable
             }
 
             _kernels.Add(kernel);
-            if (mode == ExecutionMode.Exact && !kernel.SupportsExact && !notExact.Contains(n.OpType))
+            if (mode == ArithmeticMode.Exact && !kernel.SupportsExact && !notExact.Contains(n.OpType))
             {
                 notExact.Add(n.OpType);
             }
@@ -274,7 +274,7 @@ internal sealed class CompiledGraph : IDisposable
         if (notExact.Count > 0)
         {
             throw new SessionException(SessionErrorKind.ExactModeUnavailable,
-                $"Exact mode is not available: no exact kernel exists for {string.Join(", ", notExact)}. Use ExecutionMode.Fast or remove these operators.",
+                $"Exact mode is not available: no exact kernel exists for {string.Join(", ", notExact)}. Use ArithmeticMode.Fast or remove these operators.",
                 null, [.. notExact]);
         }
 
@@ -392,7 +392,7 @@ internal sealed class CompiledGraph : IDisposable
 
     // Graph passes (Graph/Passes): they edit the node list, add values and constants, and may add kernels. Whatever happens, the
     // arrays this graph disposes from are rebuilt from what the pass graph holds, so nothing leaks if a pass throws.
-    private void RunPasses(List<CompiledNode> nodes, OptimizationLevel level, ExecutionMode mode, KernelPath path, int threads, CancellationToken ct)
+    private void RunPasses(List<CompiledNode> nodes, OptimizationLevel level, ArithmeticMode mode, KernelPath path, int threads, CancellationToken ct)
     {
         var pg = new PassGraph(nodes, [.. ValueNames], [.. Constants], InputIds, OutputIds, _kernels, mode, path, threads);
         try

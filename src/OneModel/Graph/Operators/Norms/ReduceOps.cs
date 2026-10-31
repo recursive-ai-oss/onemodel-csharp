@@ -202,7 +202,7 @@ internal sealed class ReduceKernel : OpKernel
     // float64 ReduceLogSum and ReduceLogSumExp use the platform's math library (ReduceExtra), which exact mode may not.
     public override object? Prepare(PrepareContext ctx)
     {
-        if (ctx.Mode == ExecutionMode.Exact && _op is ReduceOp.LogSum or ReduceOp.LogSumExp && ctx.InputTypes.Length > 0 && ctx.InputTypes[0] == DType.F64)
+        if (ctx.Mode == ArithmeticMode.Exact && _op is ReduceOp.LogSum or ReduceOp.LogSumExp && ctx.InputTypes.Length > 0 && ctx.InputTypes[0] == DType.F64)
         {
             throw new SessionException(SessionErrorKind.ExactModeUnavailable, "Exact mode is not available: float64 ReduceLogSum and ReduceLogSumExp have no exact kernel.");
         }

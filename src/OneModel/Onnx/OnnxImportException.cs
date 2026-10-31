@@ -13,8 +13,6 @@ public enum OnnxErrorKind
     Unsupported,
     /// <summary>An external-data reference is unsafe or cannot be satisfied: a path outside the model's directory, a missing file, a range outside the file.</summary>
     ExternalData,
-    /// <summary>The file or stream could not be read.</summary>
-    Io,
 }
 
 /// <summary>
@@ -23,7 +21,7 @@ public enum OnnxErrorKind
 /// Malformed input never surfaces as an <see cref="IndexOutOfRangeException"/>, <see cref="NullReferenceException"/> or
 /// <see cref="OverflowException"/>.
 /// </summary>
-public sealed class OnnxImportException : Exception
+public sealed class OnnxImportException : OneModelException
 {
     /// <summary>Creates the exception.</summary>
     /// <param name="kind">What went wrong.</param>
@@ -33,44 +31,11 @@ public sealed class OnnxImportException : Exception
     /// <param name="fieldPath">The path of the message field being read, or null.</param>
     /// <param name="inner">The underlying exception, if any.</param>
     public OnnxImportException(OnnxErrorKind kind, string message, string? source = null, long offset = -1, string? fieldPath = null, Exception? inner = null)
-        : base(Compose(message, source, offset, fieldPath), inner)
+        : base(OneModelErrorCategory.OnnxImport, message, source, offset, fieldPath, inner)
     {
         Kind = kind;
-        InputName = source;
-        Offset = offset;
-        FieldPath = fieldPath;
     }
 
     /// <summary>The category of the failure.</summary>
     public OnnxErrorKind Kind { get; }
-
-    /// <summary>The file path or stream description, or null when not known.</summary>
-    public string? InputName { get; }
-
-    /// <summary>The byte offset into <see cref="InputName"/>, or -1 when not known.</summary>
-    public long Offset { get; }
-
-    /// <summary>The field path inside the model, or null when not known.</summary>
-    public string? FieldPath { get; }
-
-    private static string Compose(string message, string? source, long offset, string? path)
-    {
-        string where = "";
-        if (source is not null)
-        {
-            where += source;
-        }
-
-        if (offset >= 0)
-        {
-            where += (where.Length > 0 ? " " : "") + "at byte " + offset.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        }
-
-        if (path is not null)
-        {
-            where += (where.Length > 0 ? ", " : "") + path;
-        }
-
-        return where.Length > 0 ? message + " (" + where + ")" : message;
-    }
 }
