@@ -4,6 +4,7 @@
     <AssemblyName>$(PackagePrefix).$(LibName).Training</AssemblyName>
     <RootNamespace>$(PackagePrefix).$(LibName).Training</RootNamespace>
     <PackageId>$(PackagePrefix).$(LibName).Training</PackageId>
+    <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
     <Description>Training for the OneModel runtime, on the tensor layer's reverse-mode autodiff: modules (linear, convolution, batch and layer norm, embedding, dropout, multi-head attention, transformer encoder layer), losses, SGD, Adam and AdamW with gradient clipping and learning-rate schedules, bit-exact checkpoints, and gradient checking.</Description>
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
