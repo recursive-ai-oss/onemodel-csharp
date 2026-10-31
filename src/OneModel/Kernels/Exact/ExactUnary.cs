@@ -44,7 +44,7 @@ internal readonly struct ErfUnary : IFloatUnary
 internal readonly struct GeluUnary(bool tanhForm) : IFloatUnary
 {
     public TV Apply<TV, TO>(TV x) where TV : struct where TO : IVecOps<TV> =>
-        tanhForm ? Transcendental.GeluTanh<TV, TO>(x) : Transcendental.GeluErf<TV, TO>(x);
+        tanhForm ? Transcendental.GeluTanh<TV, TO>(x) : TO.Fused ? Transcendental.GeluErfFast<TV, TO>(x) : Transcendental.GeluErf<TV, TO>(x);
 }
 
 /// <summary>LeakyRelu: x for x &gt;= 0 (and NaN), alpha * x for x &lt; 0.</summary>

@@ -58,6 +58,9 @@ internal readonly struct Int8Format
 
     public int ABytes { get; }
 
+    /// <summary>The same flavour with another chunk size (<paramref name="mc"/> and <paramref name="nc"/> multiples of Mr and Nr). The packed layouts do not depend on it.</summary>
+    public Int8Format WithTile(int mc, int nc) => new(Isa, Mr, Nr, mc, nc, G, ABytes);
+
     /// <summary>k rounded up to a whole number of k groups.</summary>
     public int KPad(int k) => (k + G - 1) / G * G;
 
@@ -457,8 +460,12 @@ internal static unsafe class Int8Gemm
             a2.RowSums = rs;
         }
 
+        // The work estimate and the number of threads worth using come first: they pick the chunk size.
+        long work = ((long)m * n * k / 50) + ((long)m * n / 2);
+        int usable = (int)Math.Clamp(work / ParallelFor.MinWorkPerThread, 1, Math.Max(1, threads));
+        Int8Format fe = source == null && usable > 1 ? ChooseTile(in f, m, n, k, usable) : f;
         TileJob job = t_tileJob ??= new TileJob();
-        job.F = f;
+        job.F = fe;
         job.M = m;
         job.N = n;
         job.K = k;
@@ -468,7 +475,7 @@ internal static unsafe class Int8Gemm
         job.ZeroA = zeroA;
         job.ZeroB = zeroB;
         job.Ep = ep;
-        job.TilesN = (n + f.Nc - 1) / f.Nc;
+        job.TilesN = (n + fe.Nc - 1) / fe.Nc;
         job.Source = source;
         job.Micro = f.Isa switch
         {
@@ -477,14 +484,12 @@ internal static unsafe class Int8Gemm
             Int8Isa.Dot => &Int8GemmDot.Kernel,
             _ => &ScalarKernel,
         };
-        int tilesM = (m + f.Mc - 1) / f.Mc;
+        int tilesM = (m + fe.Mc - 1) / fe.Mc;
         job.TilesM = tilesM;
         // With an on-demand B a chunk packs its panel of columns once and multiplies it with a group of row tiles. Packing a panel costs a
         // good fraction of one tile's product, so the groups are as large as can be while there are still two chunks per usable thread.
         // The choice moves work between chunks and never changes a result (every output is one exact integer computed by one chunk).
         // Plus about half a nanosecond per output for the epilogue, which is most of the time when k is small.
-        long work = ((long)m * n * k / 50) + ((long)m * n / 2);
-        int usable = (int)Math.Clamp(work / ParallelFor.MinWorkPerThread, 1, Math.Max(1, threads));
         int group = tilesM;
         while (group > 1 && ((tilesM + group - 1) / group * job.TilesN) < 2 * usable)
         {
@@ -496,6 +501,47 @@ internal static unsafe class Int8Gemm
         // About 50 multiply-adds per nanosecond per thread at the measured 100 giga-operations per second.
         ParallelFor.Run(job, groups * job.TilesN, threads, work);
         job.Source = null;
+    }
+
+    // Per-chunk fixed cost (claiming the chunk, slab lookup, tile set-up) in nanoseconds, and the product rate in multiply-adds per
+    // nanosecond per thread (the measured 100 giga-operations per second, as in the work estimate), used by ChooseTile.
+    private const double ChunkOverheadNs = 1500;
+    private const double MacsPerNs = 50;
+
+    /// <summary>
+    /// Picks the chunk size (a multiple of the register tile, at most the flavour's default) that finishes soonest on
+    /// <paramref name="usable"/> threads, as the number of rounds of equal chunks times the cost of one chunk. A product with few
+    /// large chunks (128 x 768 x 768 is 36 chunks of 48 x 64) leaves most of 32 threads idle in the last round; cutting it into 96
+    /// chunks of 32 x 32 fills three rounds. Every int8 output is one exact integer computed by one chunk, so the choice, which
+    /// depends on the thread count, never changes a result. The default is kept unless another size is at least 3% faster in the model.
+    /// </summary>
+    internal static Int8Format ChooseTile(in Int8Format f, int m, int n, int k, int usable)
+    {
+        double Span(int mc, int nc)
+        {
+            long chunks = (long)((m + mc - 1) / mc) * ((n + nc - 1) / nc);
+            long rounds = (chunks + usable - 1) / usable;
+            double cost = (Math.Min(mc, m) * (double)Math.Min(nc, n) * ((k / MacsPerNs) + 0.5)) + ChunkOverheadNs;
+            return rounds * cost;
+        }
+
+        int bestMc = f.Mc, bestNc = f.Nc;
+        double best = Span(f.Mc, f.Nc) * 0.97;
+        for (int mc = f.Mc; mc >= f.Mr; mc -= f.Mr)
+        {
+            for (int nc = f.Nc; nc >= f.Nr; nc -= f.Nr)
+            {
+                double span = Span(mc, nc);
+                if (span < best)
+                {
+                    best = span;
+                    bestMc = mc;
+                    bestNc = nc;
+                }
+            }
+        }
+
+        return bestMc == f.Mc && bestNc == f.Nc ? f : f.WithTile(bestMc, bestNc);
     }
 
     // The reference microkernel: a 4x4 tile over k pairs, A as bytes (k pair per row), B as bytes (k pair per column).

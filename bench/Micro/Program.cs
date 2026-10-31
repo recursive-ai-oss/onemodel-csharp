@@ -33,6 +33,11 @@ internal static class Program
             return ConvScale.Run(args[1..]);
         }
 
+        if (args.Length > 0 && args[0] == "unary")
+        {
+            return UnaryBench.Run(args[1..]);
+        }
+
         if (args.Length > 0 && args[0] == "mixed")
         {
             return MixedPrecision.Run(args[1..]);

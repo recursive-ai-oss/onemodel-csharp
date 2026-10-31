@@ -73,6 +73,18 @@ The sign bit is OR-ed onto `erf`. `erf(+-inf) = +-1`; NaN gives the canonical Na
   `1 + tanh(u) = 2 sigmoid(2u)`.
 * Both: `gelu(-inf) = -0`, `gelu(+inf) = +inf`, NaN gives the canonical NaN.
 
+### Fast-mode erf GELU
+
+Exact mode and the tensor layer always use the erf form above. A fast-mode session evaluates the erf-form GELU (the `Gelu` operator, the fused erf chain, and the Gelu applied in a matrix product's tile epilogue) with a cheaper rational function, because the accurate form costs an exponential, a degree-16 polynomial, a division and an error-free square (about 4 ns per element on a 128-bit Arm core, 2 ns on x64):
+
+```
+c = min(|x|, 5.6);  z = c*c
+erf(x/sqrt 2) = copysign(c * P(z) / Q(z), x)          P, Q of degree 5, Q(0) = 1, evaluated by Horner with fused multiply-adds
+gelu = (0.5*x) * (1 + erf);   gelu(x) = -0 for x < -5.6;   NaN gives the canonical NaN
+```
+
+The coefficients are in `Transcendental.GeluErfFast` and come from `tools/transcendentals/gelu_rational.py` (minimax fit, error 1.9e-8 in exact arithmetic, 3.1e-7 in fp32, about six units in the last place of erf near 1). That is the accuracy of the separate Erf, Add and Mul operators of an fp32 model: unlike the accurate form it forms `1 + erf` with the cancellation for negative arguments, so for x between -5.6 and -2 the absolute error stays below 1e-6 while the value is below 1e-2. Measured against the exact kernel on a dense grid over [-14, 14]: absolute error at most 9.5e-7, and at most 2.4e-7 relative to max(1, |x|). The fast result is the same on every path (scalar, 128, 256 and 512 bit) up to the fused multiply-add and division that all of them do, and does not depend on the thread count.
+
 ## Measured error
 
 Error is `|got - reference| / spacing`, where the reference is computed in double (`Math.Exp/Log/Tanh`, erf by series and continued

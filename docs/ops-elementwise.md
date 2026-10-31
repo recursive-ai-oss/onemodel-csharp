@@ -98,7 +98,7 @@ fast lane operations (fused multiply-add where the CPU has it) in fast mode; the
 - LeakyRelu: `x < 0 ? alpha * x : x` (default alpha 0.01); NaN passes through.
 - HardSigmoid: `clamp(alpha * x + beta, 0, 1)` with a rounded product and then a rounded sum (defaults 0.2 and 0.5).
 - HardSwish: `x * clamp(x * 0.16666667f + 0.5f, 0, 1)`.
-- Gelu: erf form `0.5 * x * (1 + erf(x / sqrt 2))` or the tanh form, both from `exact-transcendentals.md`.
+- Gelu: erf form `0.5 * x * (1 + erf(x / sqrt 2))` or the tanh form, both from `exact-transcendentals.md`. In fast mode the erf form uses the rational variant described there.
 
 Lane widths: the widest group the kernel path allows (512, 256 or 128 bits) runs first and a one-lane instantiation of the same
 code finishes the tail, so an element's result does not depend on its position. There is no threading in these kernels yet; they

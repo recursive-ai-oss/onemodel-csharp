@@ -122,4 +122,43 @@ public class Int8GemmTests
 
         Assert.True(cases > 0);
     }
+
+    [Fact]
+    public void ChunkSizeDependsOnThreadsButTheProductDoesNot()
+    {
+        var rng = new Random(77);
+        foreach (KernelPath path in Paths)
+        {
+            Int8Format f = Int8Format.For(path);
+            // Large enough that several threads are worth using, so the chunk size is the model's choice rather than the default.
+            int m = 130, n = 301, k = 700;
+            byte[] a = new byte[m * k], b = new byte[k * n];
+            rng.NextBytes(a);
+            rng.NextBytes(b);
+            byte[] packed = new byte[f.PackedBBytes(k, n)];
+            int[] sums = new int[n];
+            Int8Matmul.PackB(in f, b, n, true, k, n, packed, sums, 1);
+            int[]? first = null;
+            foreach (int threads in new[] { 1, 3, 8, 32 })
+            {
+                int[] got = new int[m * n];
+                var call = new Int8Call
+                {
+                    Format = f, M = m, N = n, K = k, ARaw = a, Lda = k, AU8 = true, BPacked = packed, BSums = sums,
+                    ZaScalar = 5, ZbScalar = 3, Ldc = n, Mult = 1f, OutInt32 = got, Threads = threads,
+                };
+                Int8Matmul.Run(ref call);
+                first ??= got;
+                Assert.True(first.AsSpan().SequenceEqual(got), $"{path}: {threads} threads differ from 1");
+            }
+
+            // 128 x 768 x 768 on 32 threads: the default would be 36 chunks, two rounds with the second nearly empty.
+            Int8Format t = Int8Gemm.ChooseTile(in f, 128, 768, 768, 32);
+            Assert.True(t.Mc % f.Mr == 0 && t.Nc % f.Nr == 0 && t.Mc <= f.Mc && t.Nc <= f.Nc && t.Mc >= f.Mr && t.Nc >= f.Nr);
+            long chunks = (long)((128 + t.Mc - 1) / t.Mc) * ((768 + t.Nc - 1) / t.Nc);
+            Assert.True(chunks > 36, $"{path}: {chunks} chunks of {t.Mc} x {t.Nc}");
+            // One thread keeps the default.
+            Assert.Equal(f.Mc, Int8Gemm.ChooseTile(in f, 128, 768, 768, 1).Mc);
+        }
+    }
 }

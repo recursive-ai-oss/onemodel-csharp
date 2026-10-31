@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Changed
+
+- Fast-mode erf `Gelu` (the operator, the fused erf chain and the matrix-product epilogue) uses a degree 5 over degree 5 rational function instead of the accurate exponential form: 3.5 to 5 times faster, absolute error below 1e-6 (`docs/exact-transcendentals.md`). Exact mode and training are unchanged. int8 and fp32 transformers gain 5 to 20 percent end to end.
+
 ## [0.5.0-preview.1] - 2026-10-31
 
 Training arrives as a second package, `RecursiveAI.OneModel.Training`: reverse-mode automatic differentiation on the tensor layer, modules, losses, SGD/Adam/AdamW with schedules, deterministic data loading, bit-exact checkpoints, and tracing a model into a graph that runs and saves like an imported one. Inference got faster across convolution, int8 and transformer graphs, especially at higher thread counts (`docs/kernels-conv.md`, `docs/int8.md`, `docs/kernels-gemm.md`). The README and package readme describe what works today.
