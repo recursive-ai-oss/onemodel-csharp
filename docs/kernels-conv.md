@@ -49,6 +49,24 @@ The epilogue (bias, then activation) is applied to each finished tile exactly as
 group's first output channel. Tile shapes are constants of the shape, so where an activation's vector body hands over to its scalar tail
 does not depend on the thread count.
 
+## Register tile and in-place input (AVX-512)
+
+On AVX-512 a convolution does not use the matrix product's 12x32 tile. It uses 16x16, or 8x32 when the output channels per group leave a
+remainder of 1 to 8 modulo 16 (24, 40, 72, 88, ...), so the rows are padded as little as possible: 12-row strips padded a 64-channel layer to 72
+rows, and 16-column strips pad small maps less (196 columns are 12.25 strips of 16 and 6.1 of 32). The choice depends on the channel count alone,
+because the weights are packed when the model is loaded, before any input size is known. Every output is still summed in increasing tap order
+with one fused multiply-add per tap, so the bits do not depend on the tile (the tests compare packed against unpacked weights and 1 against
+several threads). Other paths keep the matrix product's tile.
+
+With a 1x1 kernel, unit strides and no padding the patch matrix B is the input itself: row `p` is input plane `p`, `OutH*OutW` floats long. A full
+strip of columns is then read where it lies (the microkernel takes the plane length as the row stride of B) instead of being copied into a packed
+strip, and only a ragged last strip of columns is packed. There is no gathering phase, so the shared-strip second phase of the several-row-tile
+case is not needed either: a layer is one parallel phase. On ResNet-50 (x64, 16 threads, indicative, shared host) the whole network went from
+12.2 to 10.9 ms and 8 threads from 15.4 to 14.1 ms; on one thread it did not change.
+
+Gathering with a stride of two columns (the 7x7 stem, 3x3 stride-2 layers, 1x1 downsampling) picks every other element of eight with one
+shuffle on SSE and Arm64, and the padded gather finds the columns inside the plane without integer divisions for unit strides.
+
 ## Threads
 
 The work estimate given to the pool is the multiply-add count divided by 8 per nanosecond (a core does about 40). The pool wakes at most

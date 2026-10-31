@@ -40,6 +40,15 @@ paths on that machine). Output columns that a path computes twice (see the last 
   vector column, so that each tap's weight is shared by four multiply-adds. Remaining rows use the row-wise form.
 * **Fallback.** Kernels with more than 64 taps or a column stride above 8 take a plain per-output loop in the same tap order.
 
+## Narrow planes
+
+A plane no wider than one vector (the 7x7 and 14x14 maps at the end of MobileNet-style networks, on AVX-512; 7x7 on AVX2) with unit column stride
+and a padding copy runs with its lanes along the padded plane as one flat row: a vector holds the end of one output row and the start of the next,
+so a tap is one full-width load instead of one per row. The positions that land in the padding columns are computed as well and are dropped when
+the rows are copied out of a staging buffer (at most 512 floats; larger planes use the row-wise form). Each lane is still one output summed over
+the taps in row-major order from +0, so the bits are those of the row-wise form on every path, exact mode included. The scratch plane has 64 floats
+of slack after it, which only the dropped lanes read. MobileNetV3-large, one thread, x64, indicative: the four 5x5 stride-1 layers (7x7 and 14x14 maps) 0.49 -> 0.42 ms; the whole depthwise share 1.64 -> 1.60 ms.
+
 ## Chunks
 
 A chunk is `clamp(4096 / (OutH * OutW), 1, 32)` output planes: a constant of the shape, never of the thread count. A chunk writes only

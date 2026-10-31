@@ -34,6 +34,9 @@ internal static unsafe class Depthwise
     private const int MaxTaps = 64;
     private const int MaxPhases = 8;
 
+    // Floats of staging for Flat: its vectors may run up to one width past the last output.
+    private const int FlatStage = 512;
+
     // Output elements per chunk of planes; the planes per chunk follow from the plane size alone (never the thread count).
     private const int ElementsPerChunk = 4096;
     private const int MaxPlanesPerChunk = 32;
@@ -141,7 +144,7 @@ internal static unsafe class Depthwise
             // Phase plane geometry: pitch is the row length of one phase plane, phaseSize its element count.
             int pitch = copy ? (wp + phases - 1) / phases : s.W;
             long phaseSize = (long)hp * pitch;
-            float* scratch = simple && copy ? Scratch.Get(Scratch.Plane, (phaseSize * phases) + 16) : null;
+            float* scratch = simple && copy ? Scratch.Get(Scratch.Plane, (phaseSize * phases) + 64) : null;
 
             // Tap table: offset of each tap from the first element of the plane (its phase plane included), in row-major tap order.
             int* tapOff = stackalloc int[MaxTaps];
@@ -156,6 +159,10 @@ internal static unsafe class Depthwise
                     }
                 }
             }
+
+            // Narrow planes, unit column stride, padded copy in scratch: see Flat. The result is staged in tmp (at most 512 floats).
+            bool flat = simple && copy && phases == 1 && outW <= T0.Width && ((long)outH * pitch) + T0.Width <= FlatStage;
+            float* tmp = stackalloc float[FlatStage];
 
             int firstPlane = chunk * _planesPerChunk;
             int endPlane = Math.Min(planes, firstPlane + _planesPerChunk);
@@ -180,7 +187,11 @@ internal static unsafe class Depthwise
                     }
 
                     long rowStride = (long)s.StrideH * pitch;
-                    if (T0.Width <= outW)
+                    if (flat)
+                    {
+                        Flat<T0>(src, tapOff, w, taps, dst, tmp, outH, outW, pitch);
+                    }
+                    else if (T0.Width <= outW)
                     {
                         Compute<T0>(src, rowStride, tapOff, w, taps, dst, outH, outW);
                     }
@@ -304,6 +315,56 @@ internal static unsafe class Depthwise
                 {
                     odd[x >> 1] = srcRow[x];
                 }
+            }
+        }
+
+        /// <summary>
+        /// Planes narrower than one vector (the 7x7 and 14x14 maps at the end of MobileNet-style networks): the lanes run along the
+        /// padded plane as one flat row, so a vector holds the end of one output row and the start of the next, and every tap is one
+        /// full-width load instead of one per row. The positions that fall in the padding columns are computed too and dropped when
+        /// the rows are copied out; each lane is still an independent output summed over the taps in the usual order, so the bits are those
+        /// of the row-wise form. The loads stay inside the scratch plane for the valid lanes; the others read the slack after it.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private static void Flat<T>(float* src, int* tapOff, float* w, int taps, float* dst, float* tmp, int outH, int outW, int pitch)
+            where T : struct, ILanes<T>
+        {
+            int width = T.Width;
+            int total = ((outH - 1) * pitch) + outW;
+            int v = 0;
+            for (; v + (4 * width) <= total; v += 4 * width)
+            {
+                T a0 = T.Zero, a1 = T.Zero, a2 = T.Zero, a3 = T.Zero;
+                for (int t = 0; t < taps; t++)
+                {
+                    T wv = T.Broadcast(w[t]);
+                    float* p = src + tapOff[t] + v;
+                    a0 = T.MulAdd(wv, T.Load(p), a0);
+                    a1 = T.MulAdd(wv, T.Load(p + width), a1);
+                    a2 = T.MulAdd(wv, T.Load(p + (2 * width)), a2);
+                    a3 = T.MulAdd(wv, T.Load(p + (3 * width)), a3);
+                }
+
+                a0.Store(tmp + v);
+                a1.Store(tmp + v + width);
+                a2.Store(tmp + v + (2 * width));
+                a3.Store(tmp + v + (3 * width));
+            }
+
+            for (; v < total; v += width)
+            {
+                T a = T.Zero;
+                for (int t = 0; t < taps; t++)
+                {
+                    a = T.MulAdd(T.Broadcast(w[t]), T.Load(src + tapOff[t] + v), a);
+                }
+
+                a.Store(tmp + v);
+            }
+
+            for (int oy = 0; oy < outH; oy++)
+            {
+                Buffer.MemoryCopy(tmp + ((long)oy * pitch), dst + ((long)oy * outW), outW * sizeof(float), outW * sizeof(float));
             }
         }
 

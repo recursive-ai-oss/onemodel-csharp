@@ -42,20 +42,31 @@ internal static unsafe class ConvPacked
     [ThreadStatic]
     private static RowJob? t_rowJob;
 
-    // The register tile of a convolution. On AVX-512 it is 16x16 rather than the matrix product's 12x32: output-channel counts are
-    // almost always multiples of 8 or 16 (64, 128, 256, ...), where 12-row strips leave up to 12% of the rows as padding, and 16-column
-    // strips pad the small feature maps (196 = 12.25 strips of 16, 6.1 of 32) less. Every output is summed in the same order whatever the
-    // tile, so the result does not change. Measured on ResNet-50, one thread: about 5% faster.
-    internal static Gemm.Blocking GetBlocking(KernelPath path) =>
-        path == KernelPath.Avx512 ? new(FastConvAvx512M16.Mr, FastConvAvx512M16.Nr, 96, 128) : Gemm.GetBlocking(path);
+    // The register tile of a convolution. On AVX-512 it is 16x16, or 8x32 when that pads the output channels less (a count whose
+    // remainder modulo 16 is 1 to 8: 24, 40, 72, 88, ...). The matrix product's 12x32 leaves up to 12% of the rows of a 64-channel
+    // layer as padding, and 16-column strips pad small feature maps less (196 columns are 6.1 strips of 32, 12.25 of 16). Every output
+    // is summed in the same order whatever the tile, so the result does not change. The choice depends on the channel count alone
+    // because the weights are packed when the model is loaded, before any input size is known.
+    internal static Gemm.Blocking GetBlocking(KernelPath path, int coutPerGroup)
+    {
+        if (path != KernelPath.Avx512)
+        {
+            return Gemm.GetBlocking(path);
+        }
 
-    private static delegate*<int, float*, float*, float*, nint, int, void> SelectMicro(KernelPath path) =>
-        path == KernelPath.Avx512 ? &FastConvAvx512M16.Kernel : Gemm.SelectMicro(KernelMode.Fast, path);
+        int rest = coutPerGroup % FastConvAvx512M16.Mr;
+        return rest is >= 1 and <= FastConvAvx512M8.Mr
+            ? new(FastConvAvx512M8.Mr, FastConvAvx512M8.Nr, 96, 128)
+            : new(FastConvAvx512M16.Mr, FastConvAvx512M16.Nr, 96, 128);
+    }
+
+    private static delegate*<int, float*, float*, float*, nint, int, void> SelectMicro(KernelPath path, Gemm.Blocking blk) =>
+        path != KernelPath.Avx512 ? Gemm.SelectMicro(KernelMode.Fast, path) : blk.Mr == FastConvAvx512M8.Mr ? &FastConvAvx512M8.Kernel : &FastConvAvx512M16.Kernel;
 
     /// <summary>Floats <see cref="PackWeights"/> writes for weights of <paramref name="s"/> packed for <paramref name="path"/>.</summary>
     public static long PackedWeightsLength(KernelPath path, in ConvShape s)
     {
-        int mr = GetBlocking(path).Mr;
+        int mr = GetBlocking(path, s.Cout / s.Groups).Mr;
         long coutG = s.Cout / s.Groups;
         long k = (long)(s.Cin / s.Groups) * s.KH * s.KW;
         return s.Groups * ((coutG + mr - 1) / mr) * mr * k;
@@ -85,7 +96,7 @@ internal static unsafe class ConvPacked
             throw new ArgumentException("The destination is smaller than PackedWeightsLength.", nameof(dst));
         }
 
-        int mr = GetBlocking(path).Mr;
+        int mr = GetBlocking(path, coutG).Mr;
         fixed (float* pw = weights, pd = dst)
         {
             for (int g = 0; g < s.Groups; g++)
@@ -109,9 +120,9 @@ internal static unsafe class ConvPacked
         KernelPath path, in ConvShape s, float* input, float* weights, float* packedWeights, float* output, int threads,
         IGemmEpilogue? epilogue)
     {
-        Gemm.Blocking blk = GetBlocking(path);
-        int cinG = s.Cin / s.Groups;
         int coutG = s.Cout / s.Groups;
+        Gemm.Blocking blk = GetBlocking(path, coutG);
+        int cinG = s.Cin / s.Groups;
         int k = cinG * s.KH * s.KW;
         int n = s.OutH * s.OutW;
         if (n == 1 && packedWeights is not null && blk.Mr % 4 == 0 && s.KH == 1 && s.KW == 1 && s.H == 1 && s.W == 1)
@@ -135,9 +146,9 @@ internal static unsafe class ConvPacked
         try
         {
             long tileWork = (long)tilesM * tilesN;
-            if (tilesM == 1)
+            if (tilesM == 1 || job.ReadsInputInPlace)
             {
-                // One tile covers all the rows: each tile gathers its own columns.
+                // One tile covers all the rows (each tile gathers its own columns), or the input needs no gathering at all.
                 long chunks = tileWork * s.Groups * s.N;
                 ParallelFor.Run(job, checked((int)chunks), threads, macs / MacsPerNs);
             }
@@ -395,6 +406,7 @@ internal static unsafe class ConvPacked
         private float* _output;
         private IGemmEpilogue? _epilogue;
         private delegate*<int, float*, float*, float*, nint, int, void> _micro;
+        private delegate*<int, float*, float*, nint, float*, nint, int, void> _microInPlace;
 
         // The shared-gathering mode: the strips and the (image, group) being computed.
         public float* SharedPanels;
@@ -403,6 +415,9 @@ internal static unsafe class ConvPacked
         public int Group;
 
         public int Nr { get; private set; }
+
+        /// <summary>True when B is the input planes themselves (1x1 kernel, unit strides, no padding): no gathering, one parallel phase.</summary>
+        public bool ReadsInputInPlace => _microInPlace != null;
 
         public int K { get; private set; }
 
@@ -450,7 +465,14 @@ internal static unsafe class ConvPacked
             _packedWeights = packedWeights;
             _output = output;
             _epilogue = epilogue;
-            _micro = SelectMicro(path);
+            _micro = SelectMicro(path, blk);
+            // With a 1x1 kernel, unit strides and no padding, the patch matrix B is the input planes: row p (an input channel) is plane p,
+            // N floats long. A full strip of columns is then read where it lies, with the plane length as row stride, instead of being
+            // copied into a packed strip first (the copy costs about as much as 1/16 of the multiply-adds it feeds when there are few
+            // output channels, and needs its own parallel phase when the rows take several tiles). A ragged last strip is still packed.
+            _microInPlace = path == KernelPath.Avx512 && !direct && s.KH == 1 && s.KW == 1 && s.StrideH == 1 && s.StrideW == 1
+                ? (blk.Mr == FastConvAvx512M8.Mr ? &FastConvAvx512M8.KernelStrided : &FastConvAvx512M16.KernelStrided)
+                : null;
             SharedPanels = null;
         }
 
@@ -471,8 +493,119 @@ internal static unsafe class ConvPacked
             }
         }
 
+        // RunTile for ReadsInputInPlace: full strips of columns are read from the planes, a ragged last strip is packed.
+        private void RunTileInPlace(int img, int g, int tile)
+        {
+            int i0 = (tile / _tilesN) * _mc;
+            int j0 = (tile % _tilesN) * _nc;
+            int mc = Math.Min(_mc, _coutG - i0);
+            int nc = Math.Min(_nc, N - j0);
+            int mr = _mr;
+            int nr = Nr;
+            int kTotal = K;
+            long n = N;
+
+            float* planes = PlanesOf(img, g);
+            float* c = _output + ((((long)img * _cout) + ((long)g * _coutG) + i0) * n) + j0;
+            nint ldc = N;
+            int fullCols = nc / nr * nr;
+            int tailCols = nc - fullCols;
+            float* tailPanel = tailCols > 0 ? Scratch.Get(Scratch.PackPanel, (long)nr * Gemm.Kc) : null;
+            float* packedA = _packedWeights is null ? Scratch.Get(Scratch.PackA, (long)_mc * Gemm.Kc) : null;
+            float* edge = stackalloc float[mr * nr];
+
+            for (int pc = 0; pc < kTotal; pc += Gemm.Kc)
+            {
+                int kc = Math.Min(Gemm.Kc, kTotal - pc);
+                float* aBlock;
+                if (_packedWeights is not null)
+                {
+                    aBlock = _packedWeights + ((long)g * _mPad * kTotal) + (pc * _mPad) + ((long)(i0 / mr) * kc * mr);
+                }
+                else
+                {
+                    GemmPack.PackA(_weights + ((((long)g * _coutG) + i0) * kTotal) + pc, kTotal, mc, kc, mr, packedA);
+                    aBlock = packedA;
+                }
+
+                if (tailCols > 0)
+                {
+                    PackPanel(tailPanel, planes, pc, kc, j0 + fullCols, tailCols);
+                }
+
+                int accumulate = pc > 0 ? 1 : 0;
+                for (int jr = 0; jr < nc; jr += nr)
+                {
+                    int nb = Math.Min(nr, nc - jr);
+                    bool full = nb == nr;
+                    float* bp = full ? planes + (pc * n) + j0 + jr : tailPanel;
+                    for (int ir = 0; ir < mc; ir += mr)
+                    {
+                        int mb = Math.Min(mr, mc - ir);
+                        float* ap = aBlock + ((long)(ir / mr) * kc * mr);
+                        float* cp = c + (ir * ldc) + jr;
+                        if (mb == mr && full)
+                        {
+                            _microInPlace(kc, ap, bp, (nint)n, cp, ldc, accumulate);
+                        }
+                        else if (mb == mr)
+                        {
+                            // Ragged last strip of columns: full tile on a scratch copy, then move the valid columns.
+                            RunEdge(kc, ap, bp, nr, false, edge, cp, ldc, mb, nb, accumulate);
+                        }
+                        else
+                        {
+                            RunEdge(kc, ap, bp, (nint)n, full, edge, cp, ldc, mb, nb, accumulate);
+                        }
+                    }
+                }
+            }
+
+            _epilogue?.Apply(c, ldc, (g * _coutG) + i0, j0, mc, nc, KernelMode.Fast);
+        }
+
+        // A tile with fewer than mr rows or nr columns: run the full tile on a scratch copy and move only the valid part.
+        // inPlace: b is the plane (row stride ldb) rather than a packed strip.
+        private void RunEdge(int kc, float* ap, float* bp, nint ldb, bool inPlace, float* edge, float* cp, nint ldc, int mb, int nb, int accumulate)
+        {
+            int nr = Nr;
+            if (accumulate != 0)
+            {
+                for (int r = 0; r < mb; r++)
+                {
+                    for (int j = 0; j < nb; j++)
+                    {
+                        edge[(r * nr) + j] = cp[(r * ldc) + j];
+                    }
+                }
+            }
+
+            if (inPlace)
+            {
+                _microInPlace(kc, ap, bp, ldb, edge, nr, accumulate);
+            }
+            else
+            {
+                _micro(kc, ap, bp, edge, nr, accumulate);
+            }
+
+            for (int r = 0; r < mb; r++)
+            {
+                for (int j = 0; j < nb; j++)
+                {
+                    cp[(r * ldc) + j] = edge[(r * nr) + j];
+                }
+            }
+        }
+
         private void RunTile(int img, int g, int tile, float* shared)
         {
+            if (_microInPlace != null)
+            {
+                RunTileInPlace(img, g, tile);
+                return;
+            }
+
             int i0 = (tile / _tilesN) * _mc;
             int j0 = (tile % _tilesN) * _nc;
             int mc = Math.Min(_mc, _coutG - i0);
@@ -635,10 +768,7 @@ internal static unsafe class ConvPacked
                         float* sp = tap + runSrc[r];
                         float* dp = row + runDst[r];
                         int len = runLen[r];
-                        for (int j = 0; j < len; j++)
-                        {
-                            dp[j] = sp[j * _strideW];
-                        }
+                        GatherStrided(sp, dp, len, _strideW, (_strideW * len) - 1);
                     }
                 }
 
@@ -718,8 +848,20 @@ internal static unsafe class ConvPacked
                     }
 
                     int ix0 = (runOx[r] * _strideW) + dx;
-                    int jlo = ix0 >= 0 ? 0 : (-ix0 + _strideW - 1) / _strideW;
-                    int jhi = ix0 >= _w ? 0 : Math.Min(len, (_w - ix0 + _strideW - 1) / _strideW);
+                    int jlo;
+                    int jhi;
+                    if (_strideW == 1)
+                    {
+                        // The common case without the divisions: the first and last columns of the run that fall inside the plane.
+                        jlo = ix0 >= 0 ? 0 : -ix0;
+                        jhi = ix0 >= _w ? 0 : Math.Min(len, _w - ix0);
+                    }
+                    else
+                    {
+                        jlo = ix0 >= 0 ? 0 : (-ix0 + _strideW - 1) / _strideW;
+                        jhi = ix0 >= _w ? 0 : Math.Min(len, (_w - ix0 + _strideW - 1) / _strideW);
+                    }
+
                     jlo = Math.Min(jlo, len);
                     jhi = Math.Max(jhi, jlo);
                     if (jlo > 0)
@@ -736,10 +878,7 @@ internal static unsafe class ConvPacked
                         }
                         else
                         {
-                            for (int j = jlo; j < jhi; j++)
-                            {
-                                d[j] = sp[(j - jlo) * _strideW];
-                            }
+                            GatherStrided(sp, d + jlo, jhi - jlo, _strideW, (int)(plane + ((long)(iy + 1) * _w) - sp));
                         }
                     }
 
@@ -763,6 +902,39 @@ internal static unsafe class ConvPacked
                         ci++;
                     }
                 }
+            }
+        }
+
+        // dst[j] = src[j * stride] for j < count. For stride 2 on SSE or Arm64 four outputs come from eight inputs with one shuffle;
+        // available is the number of floats readable at src (to the end of its row), so the eighth input is never read past the row.
+        private static void GatherStrided(float* src, float* dst, int count, int stride, int available)
+        {
+            int j = 0;
+            if (stride == 2)
+            {
+                if (System.Runtime.Intrinsics.X86.Sse.IsSupported)
+                {
+                    for (; j + 4 <= count && (2 * j) + 8 <= available; j += 4)
+                    {
+                        Vector128<float> lo = Vector128.Load(src + (2 * j));
+                        Vector128<float> hi = Vector128.Load(src + (2 * j) + 4);
+                        Vector128.Store(System.Runtime.Intrinsics.X86.Sse.Shuffle(lo, hi, 0x88), dst + j);
+                    }
+                }
+                else if (System.Runtime.Intrinsics.Arm.AdvSimd.Arm64.IsSupported)
+                {
+                    for (; j + 4 <= count && (2 * j) + 8 <= available; j += 4)
+                    {
+                        Vector128<float> lo = Vector128.Load(src + (2 * j));
+                        Vector128<float> hi = Vector128.Load(src + (2 * j) + 4);
+                        Vector128.Store(System.Runtime.Intrinsics.Arm.AdvSimd.Arm64.UnzipEven(lo, hi), dst + j);
+                    }
+                }
+            }
+
+            for (; j < count; j++)
+            {
+                dst[j] = src[j * stride];
             }
         }
 
