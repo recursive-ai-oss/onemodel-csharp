@@ -1,6 +1,6 @@
 # Golden hashes
 
-Exact mode (see [exact-mode.md](exact-mode.md)) promises the same bits on every OS, CPU, instruction set, thread count and runtime. This file records the check of that promise: the SHA-256 of every output of the reference models, run in `ExecutionMode.Exact`, and how the rows compared. Only hashes appear here.
+Exact mode (see [exact-mode.md](exact-mode.md)) promises the same bits on every OS, CPU, instruction set, thread count and runtime. This file records the check of that promise: the SHA-256 of every output of the reference models, run in `ArithmeticMode.Exact`, and how the rows compared. Only hashes appear here.
 
 ## Method
 

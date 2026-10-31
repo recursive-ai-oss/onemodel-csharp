@@ -15,8 +15,12 @@ namespace RecursiveAI.OneModel;
 /// row-major order. Threading is chosen for you (one thread per core inside an operator) and results do not depend on it. The
 /// <c>Run</c> methods are safe to call from any number of threads at once. For several inputs or outputs, named access, tensors,
 /// exact mode or a thread limit, use <see cref="Session"/> (reachable through <see cref="Session"/>) with
-/// <see cref="SessionOptions"/>.</para>
-/// <para>The typed <c>Run</c> overloads need a model with exactly one input and one output.</para>
+/// <see cref="ModelOptions"/>.</para>
+/// <para>The typed <c>Run</c> overloads need a model with exactly one output and one input that carries the values. A text encoder
+/// with the usual three inputs also works: the values feed input 0 (the token ids), an input named <c>attention_mask</c> is filled
+/// with ones (nothing is padding) and one named <c>token_type_ids</c> with zeros, both shaped like the ids. Any other extra input
+/// makes the typed overloads fail; use <see cref="Session"/> with named tensors then.</para>
+/// <para>Disposing the model more than once is harmless; running it afterwards throws <see cref="ObjectDisposedException"/>.</para>
 /// </remarks>
 public sealed class Model : IDisposable
 {
@@ -33,18 +37,23 @@ public sealed class Model : IDisposable
     /// <summary>Loads an ONNX model from a file, or a model saved in the OneModel format (see <see cref="Format.ModelFormat"/>); weights stored in ONNX external data files next to it are read too.</summary>
     /// <param name="path">The <c>.onnx</c> file.</param>
     /// <param name="options">Defaults to fast mode and one thread per core. Pass options for exact mode or a thread limit.</param>
+    /// <param name="loadOptions">Limits for reading the file (size, nesting, memory mapping, external-data directory); pass tighter ones for files you do not trust. Defaults when null.</param>
     /// <param name="cancellationToken">Cancels loading.</param>
+    /// <exception cref="IOException">The file is missing or cannot be read (<see cref="FileNotFoundException"/>, ...); <see cref="UnauthorizedAccessException"/> when access is denied. The library does not wrap these.</exception>
     /// <exception cref="Onnx.OnnxImportException">The file is not a valid ONNX model.</exception>
     /// <exception cref="Format.ModelFormatException">The file is in the OneModel format and is truncated, corrupt or unsupported.</exception>
     /// <exception cref="SessionException">The model uses an operator this library does not implement (the exception lists all of them), or exact mode was requested and an operator is not exact.</exception>
     /// <exception cref="OperationCanceledException">Cancelled.</exception>
-    public static Model Load(string path, SessionOptions? options = null, CancellationToken cancellationToken = default) =>
-        new(Session.Load(path, options, cancellationToken));
+    public static Model Load(string path, ModelOptions? options = null, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default) =>
+        new(Session.Load(path, options, loadOptions, cancellationToken));
 
-    /// <summary>Loads an ONNX model from a stream, read to its end. Models with external data files must be loaded from a path.</summary>
-    /// <inheritdoc cref="Load(string, SessionOptions?, CancellationToken)"/>
-    public static Model Load(Stream stream, SessionOptions? options = null, CancellationToken cancellationToken = default) =>
-        new(Session.Load(stream, options, cancellationToken));
+    /// <summary>
+    /// Loads an ONNX model, or a model in the OneModel format (chosen by the first eight bytes), from a stream, read to its end but
+    /// never past <see cref="ModelLoadOptions.MaxModelBytes"/>. Models with external data files must be loaded from a path.
+    /// </summary>
+    /// <inheritdoc cref="Load(string, ModelOptions?, ModelLoadOptions?, CancellationToken)"/>
+    public static Model Load(Stream stream, ModelOptions? options = null, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default) =>
+        new(Session.Load(stream, options, loadOptions, cancellationToken));
 
     /// <summary>Runs the model on float values. The input's shape comes from the model's declared shape (see <see cref="Run{TIn, TOut}(ReadOnlySpan{TIn}, ReadOnlySpan{int})"/>).</summary>
     /// <param name="input">The values in row-major order.</param>
@@ -85,6 +94,15 @@ public sealed class Model : IDisposable
     /// <exception cref="SessionException">As <see cref="Run(float[])"/>; also if the shape is ambiguous and none was given.</exception>
     public TOut[] Run<TIn, TOut>(ReadOnlySpan<TIn> input, ReadOnlySpan<int> shape = default)
         where TIn : unmanaged
+        where TOut : unmanaged => Run<TIn, TOut>(input, shape, out _);
+
+    /// <summary>As <see cref="Run{TIn, TOut}(ReadOnlySpan{TIn}, ReadOnlySpan{int})"/>, also reporting the output's shape.</summary>
+    /// <param name="input">The values in row-major order.</param>
+    /// <param name="shape">The input's shape; empty takes it from the model.</param>
+    /// <param name="outputShape">The shape of the returned values, for example <c>[1, 2, 4]</c>.</param>
+    /// <exception cref="SessionException">As <see cref="Run(float[])"/>.</exception>
+    public TOut[] Run<TIn, TOut>(ReadOnlySpan<TIn> input, ReadOnlySpan<int> shape, out Shape outputShape)
+        where TIn : unmanaged
         where TOut : unmanaged
     {
         int primary = PrimaryInput();
@@ -112,6 +130,7 @@ public sealed class Model : IDisposable
                 throw new SessionException(SessionErrorKind.InvalidInput, $"Output '{outName}' holds {outT.DType}, not {DTypes.Of<TOut>()}.");
             }
 
+            outputShape = outT.Shape;
             return outT.ToArray<TOut>();
         }
         finally

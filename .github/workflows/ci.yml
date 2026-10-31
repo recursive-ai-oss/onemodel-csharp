@@ -37,14 +37,21 @@ jobs:
       - name: Restore
         shell: bash
         run: |
-          for p in tests/OneModel.Tests tests/AotSmoke bench/Micro fuzz/OneModel.Fuzz; do dotnet restore "$p"; done
+          for p in tests/OneModel.Tests tests/AotSmoke tests/GuideSamples bench/Micro fuzz/OneModel.Fuzz; do dotnet restore "$p"; done
       - name: Build and test (Release, then Checked)
         shell: bash
         run: |
           for c in Release Checked; do
-            for p in tests/OneModel.Tests tests/AotSmoke bench/Micro fuzz/OneModel.Fuzz; do dotnet build "$p" -c "$c" --no-restore; done
+            for p in tests/OneModel.Tests tests/AotSmoke tests/GuideSamples bench/Micro fuzz/OneModel.Fuzz; do dotnet build "$p" -c "$c" --no-restore; done
             dotnet test --project tests/OneModel.Tests -c "$c" --no-build
           done
+      # The usage guide's code blocks are copied from tests/GuideSamples; they must be current and the samples must run.
+      - name: Guide examples run
+        shell: bash
+        run: dotnet run --no-build -c Release --project tests/GuideSamples -- testdata/graphs
+      - name: Guide code blocks match the samples
+        if: runner.os == 'Linux'
+        run: python3 tools/sync_guide.py --check
       # Exact mode promises the same bits on every OS and CPU: the hashes are committed, so any runner that differs fails.
       - name: Exact-mode golden hashes (JIT)
         shell: bash

@@ -29,9 +29,9 @@ public class TrainingDeterminismTests
         return TrainCase.StateHash(tc.Model, tc.Opt) + ":" + BitConverter.SingleToInt32Bits(losses[^1]).ToString("x8", System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    private static void WithMode(ExecutionMode mode, int threads, Action body)
+    private static void WithMode(ArithmeticMode mode, int threads, Action body)
     {
-        ExecutionMode m = TensorCompute.Mode;
+        ArithmeticMode m = TensorCompute.Mode;
         int t = TensorCompute.Threads;
         try
         {
@@ -54,10 +54,10 @@ public class TrainingDeterminismTests
     public void FastTrainingIsIndependentOfThreadCount()
     {
         string c1 = "", e1 = "";
-        WithMode(ExecutionMode.Fast, 1, () => { c1 = Cnn(20); e1 = Encoder(20); });
+        WithMode(ArithmeticMode.Fast, 1, () => { c1 = Cnn(20); e1 = Encoder(20); });
         foreach (int threads in new[] { 3, 8 })
         {
-            WithMode(ExecutionMode.Fast, threads, () =>
+            WithMode(ArithmeticMode.Fast, threads, () =>
             {
                 Assert.Equal(c1, Cnn(20));
                 Assert.Equal(e1, Encoder(20));
@@ -76,9 +76,9 @@ public class TrainingDeterminismTests
     public void ExactTrainingHashesArePinnedAndIndependentOfThreads()
     {
         string c = "", e = "";
-        WithMode(ExecutionMode.Exact, 1, () => { c = Cnn(20); e = Encoder(20); });
+        WithMode(ArithmeticMode.Exact, 1, () => { c = Cnn(20); e = Encoder(20); });
         Log($"exact training hashes: cnn {c} encoder {e}");
-        WithMode(ExecutionMode.Exact, 8, () =>
+        WithMode(ArithmeticMode.Exact, 8, () =>
         {
             Assert.Equal(c, Cnn(20));
             Assert.Equal(e, Encoder(20));

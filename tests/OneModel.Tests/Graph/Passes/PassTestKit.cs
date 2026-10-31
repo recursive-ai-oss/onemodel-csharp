@@ -20,14 +20,14 @@ internal static class PassTestKit
     }
 
     /// <summary>Runs a one-input, one-output float model at a level and returns its output.</summary>
-    public static float[] Run(byte[] model, float[] input, int[] shape, OptimizationLevel level, ExecutionMode mode, int threads = 1)
+    public static float[] Run(byte[] model, float[] input, int[] shape, OptimizationLevel level, ArithmeticMode mode, int threads = 1)
     {
-        using var m = Model.Load(new MemoryStream(model), new SessionOptions { OptimizationLevel = level, Mode = mode, IntraOpThreads = threads });
+        using var m = Model.Load(new MemoryStream(model), new ModelOptions { OptimizationLevel = level, Mode = mode, IntraOpThreads = threads });
         return m.Run(input, shape);
     }
 
     /// <summary>The kernels of the nodes that remain after the passes of a level (in node order).</summary>
-    public static string[] Kernels(byte[] model, OptimizationLevel level, ExecutionMode mode)
+    public static string[] Kernels(byte[] model, OptimizationLevel level, ArithmeticMode mode)
     {
         using IrModel ir = OnnxImporter.Load(new MemoryStream(model), null, default);
         using CompiledGraph g = CompiledGraph.Create(ir.Graph, OpRegistry.Default, mode, WeightStorage.Original, level, KernelPaths.Best(), 1, default);

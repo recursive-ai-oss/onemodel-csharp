@@ -12,9 +12,9 @@ namespace RecursiveAI.OneModel.Tests.Conformance;
 public class ConformanceTests
 {
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void NoBackendCaseFails(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void NoBackendCaseFails(ArithmeticMode mode)
     {
         string? root = Environment.GetEnvironmentVariable("ONEMODEL_BACKEND_TEST");
         if (string.IsNullOrEmpty(root))

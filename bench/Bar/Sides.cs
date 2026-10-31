@@ -94,7 +94,7 @@ internal sealed class OrtSide : ISide
 /// <summary>This library through its session: the same model file and inputs, intra-op threads as given, no other tuning.</summary>
 internal sealed class OursSide : ISide
 {
-    private readonly RecursiveAI.OneModel.Graph.ExecutionMode _mode;
+    private readonly RecursiveAI.OneModel.ArithmeticMode _mode;
     private RecursiveAI.OneModel.Graph.Session? _session;
     private string[] _inputNames = [];
     private string[] _outputNames = [];
@@ -123,8 +123,8 @@ internal sealed class OursSide : ISide
         };
         _mode = mode switch
         {
-            "fast" => RecursiveAI.OneModel.Graph.ExecutionMode.Fast,
-            "exact" => RecursiveAI.OneModel.Graph.ExecutionMode.Exact,
+            "fast" => RecursiveAI.OneModel.ArithmeticMode.Fast,
+            "exact" => RecursiveAI.OneModel.ArithmeticMode.Exact,
             _ => throw new ArgumentException($"unknown mode {mode} (fast or exact)"),
         };
     }
@@ -138,7 +138,7 @@ internal sealed class OursSide : ISide
     public void Load(string modelPath, int threads)
     {
         _session = RecursiveAI.OneModel.Graph.Session.Load(modelPath,
-            new RecursiveAI.OneModel.Graph.SessionOptions { Mode = _mode, IntraOpThreads = threads, WeightStorage = _weights, OptimizationLevel = _opt });
+            new RecursiveAI.OneModel.Graph.ModelOptions { Mode = _mode, IntraOpThreads = threads, WeightStorage = _weights, OptimizationLevel = _opt });
         _outputNames = [.. _session.Outputs.Select(o => o.Name)];
         _outputs = new RecursiveAI.OneModel.Tensors.Tensor[_outputNames.Length];
     }

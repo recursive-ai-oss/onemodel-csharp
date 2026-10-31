@@ -131,10 +131,10 @@ public class CoverageOracleTests
         return null;
     }
 
-    private static Tensor RunOne(Case c, ExecutionMode mode, KernelPath path, int threads)
+    private static Tensor RunOne(Case c, ArithmeticMode mode, KernelPath path, int threads)
     {
         using IrModel ir = OnnxImporter.Load(c.Model);
-        using var s = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
+        using var s = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
         var present = c.Inputs.Where(i => i is not null).ToArray();
         var tensors = new Tensor[present.Length];
         var names = new string[present.Length];
@@ -166,7 +166,7 @@ public class CoverageOracleTests
         Assert.True(cases.Count > 250);
         var failures = new List<string>();
         var seen = new HashSet<string>();
-        void Fail(Case c, ExecutionMode mode, string message)
+        void Fail(Case c, ArithmeticMode mode, string message)
         {
             if (seen.Add(c.Name + mode))
             {
@@ -176,9 +176,9 @@ public class CoverageOracleTests
 
         foreach (Case c in cases)
         {
-            foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+            foreach (ArithmeticMode mode in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
             {
-                if (mode == ExecutionMode.Exact && NotExact.Contains(c.Op))
+                if (mode == ArithmeticMode.Exact && NotExact.Contains(c.Op))
                 {
                     continue;
                 }
@@ -195,7 +195,7 @@ public class CoverageOracleTests
                             Fail(c, mode, $"{path}: {why}");
                         }
 
-                        if (mode == ExecutionMode.Exact && TensorTestHelpers.IsFloat(got.DType))
+                        if (mode == ArithmeticMode.Exact && TensorTestHelpers.IsFloat(got.DType))
                         {
                             byte[] bits = TensorTestHelpers.BytesOf(got);
                             if (first is null)
@@ -228,7 +228,7 @@ public class CoverageOracleTests
             bool refused;
             try
             {
-                using Tensor t = RunOne(c, ExecutionMode.Exact, KernelPath.Scalar, 1);
+                using Tensor t = RunOne(c, ArithmeticMode.Exact, KernelPath.Scalar, 1);
                 refused = false;
             }
             catch (SessionException e) when (e.Kind == SessionErrorKind.ExactModeUnavailable)

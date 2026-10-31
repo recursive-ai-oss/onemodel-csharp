@@ -118,7 +118,7 @@ internal sealed class NodeInfo
 internal abstract class OpKernel : IDisposable
 {
     /// <summary>
-    /// Whether this kernel has an exact flavour: with <see cref="ExecutionMode.Exact"/> its <see cref="Run"/> must be bit-identical on
+    /// Whether this kernel has an exact flavour: with <see cref="ArithmeticMode.Exact"/> its <see cref="Run"/> must be bit-identical on
     /// every machine (docs/exact-mode.md). A kernel that returns false is "not exact"; a session in exact mode refuses to be created
     /// with it.
     /// </summary>
@@ -334,7 +334,7 @@ internal sealed class PrepareContext
     private readonly Tensor[] _constants;
     private readonly List<Tensor> _owned;
 
-    internal PrepareContext(Tensor[] constants, List<Tensor> owned, ExecutionMode mode, KernelPath path, DType[]? inputTypes = null)
+    internal PrepareContext(Tensor[] constants, List<Tensor> owned, ArithmeticMode mode, KernelPath path, DType[]? inputTypes = null)
     {
         InputTypes = inputTypes ?? [];
         _constants = constants;
@@ -343,7 +343,7 @@ internal sealed class PrepareContext
         Path = path;
     }
 
-    public ExecutionMode Mode { get; }
+    public ArithmeticMode Mode { get; }
 
     public KernelPath Path { get; }
 
@@ -373,7 +373,7 @@ internal readonly ref struct OpRun
 {
     private readonly Arena _arena;
 
-    internal OpRun(ReadOnlySpan<Tensor> inputs, Span<Tensor> outputs, ExecutionMode mode, KernelPath path, int threads, Arena arena,
+    internal OpRun(ReadOnlySpan<Tensor> inputs, Span<Tensor> outputs, ArithmeticMode mode, KernelPath path, int threads, Arena arena,
         object? state = null)
     {
         State = state;
@@ -402,10 +402,10 @@ internal readonly ref struct OpRun
     public object? State { get; }
 
     /// <summary>The session's mode.</summary>
-    public ExecutionMode Mode { get; }
+    public ArithmeticMode Mode { get; }
 
     /// <summary>True in exact mode.</summary>
-    public bool Exact => Mode == ExecutionMode.Exact;
+    public bool Exact => Mode == ArithmeticMode.Exact;
 
     /// <summary>The kernel mode for the shared kernels (<see cref="Gemm"/> and friends).</summary>
     public KernelMode KernelMode => Exact ? KernelMode.Exact : KernelMode.Fast;

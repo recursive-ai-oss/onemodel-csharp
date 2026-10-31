@@ -123,11 +123,11 @@ public class AutogradModelTests
     [Fact]
     public void FastModeIsIndependentOfThreadCount()
     {
-        ExecutionMode mode = TensorCompute.Mode;
+        ArithmeticMode mode = TensorCompute.Mode;
         int threads = TensorCompute.Threads;
         try
         {
-            TensorCompute.Mode = ExecutionMode.Fast;
+            TensorCompute.Mode = ArithmeticMode.Fast;
             TensorCompute.Threads = 1;
             string c1 = CnnHash(), e1 = EncoderHash();
             TensorCompute.Threads = 8;
@@ -150,11 +150,11 @@ public class AutogradModelTests
     [Fact]
     public void ExactModeHashesArePinned()
     {
-        ExecutionMode mode = TensorCompute.Mode;
+        ArithmeticMode mode = TensorCompute.Mode;
         int threads = TensorCompute.Threads;
         try
         {
-            TensorCompute.Mode = ExecutionMode.Exact;
+            TensorCompute.Mode = ArithmeticMode.Exact;
             string c = "", e = "";
             foreach (int t in new[] { 1, 8 })
             {

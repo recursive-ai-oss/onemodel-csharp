@@ -6,11 +6,11 @@ using System.Runtime.InteropServices;
 
 namespace RecursiveAI.OneModel.Tensors;
 
-/// <summary>A tensor (or a view of it) was used after its storage went back to the pool or its arena was reset, or released twice.</summary>
-public sealed class StaleTensorException : InvalidOperationException
+/// <summary>A tensor's data was accessed after its storage went back to the pool or its arena was reset. Releasing twice is not an error.</summary>
+public sealed class StaleTensorException : ObjectDisposedException
 {
     /// <summary>Creates the exception.</summary>
-    public StaleTensorException(string message) : base(message) { }
+    public StaleTensorException(string message) : base(nameof(Tensor), message) { }
 }
 
 /// <summary>
@@ -84,6 +84,9 @@ public sealed unsafe class TensorBuffer
 
     internal int Generation => Volatile.Read(ref _generation);
 
+    // True when a handle made in `generation` no longer refers to live storage.
+    internal bool IsStale(int generation) => generation != Volatile.Read(ref _generation);
+
     internal long Capacity => _capacity;
 
     internal byte* Pointer => _ptr;
@@ -93,7 +96,7 @@ public sealed unsafe class TensorBuffer
     internal void Touch() => Interlocked.Increment(ref _version);
 
     /// <summary>Address of the first byte, for alignment checks in tests and kernels.</summary>
-    public nuint Address => (nuint)_ptr;
+    internal nuint Address => (nuint)_ptr;
 
     /// <summary>The whole buffer as <typeparamref name="T"/> elements (any trailing partial element is excluded).</summary>
     /// <param name="generation">The generation the caller's tensor was created in.</param>
@@ -150,15 +153,15 @@ public sealed unsafe class TensorBuffer
     }
 
     /// <summary>
-    /// Ends this generation. Returns true when the caller must now recycle the block; throws <see cref="StaleTensorException"/> if
-    /// the generation was already ended (a double release).
+    /// Ends this generation. Returns true when this call ended it and the caller must now recycle the block; false if the generation
+    /// was already ended (a repeated release, or a handle that outlived its storage).
     /// </summary>
     internal bool EndGeneration(int generation, out bool overrun)
     {
         overrun = false;
         if (Interlocked.CompareExchange(ref _generation, unchecked(generation + 1), generation) != generation)
         {
-            throw new StaleTensorException("The tensor's storage was already released (double release or a stale handle).");
+            return false;
         }
 
         Volatile.Write(ref _live, 0);
@@ -178,23 +181,24 @@ public sealed unsafe class TensorBuffer
         return true;
     }
 
-    /// <summary>Releases the storage this handle's tensors view back to its pool, or does nothing for arena storage.</summary>
-    /// <exception cref="StaleTensorException">Already released.</exception>
+    /// <summary>
+    /// Releases the storage this handle's tensors view back to its pool; does nothing for arena storage. Idempotent: releasing a
+    /// generation that has already ended (through this handle, a copy of it, or an arena reset) does nothing. Only data access
+    /// through a stale handle throws.
+    /// </summary>
     internal void Release(int generation)
     {
-        bool overrun;
         if (_arena is not null)
         {
-            // Arena memory is reclaimed in bulk by Arena.Reset; releasing one tensor only validates the handle.
-            if (generation != Volatile.Read(ref _generation))
-            {
-                throw new StaleTensorException("The arena allocation was already reset.");
-            }
-
+            // Arena memory is reclaimed in bulk by Arena.Reset.
             return;
         }
 
-        EndGeneration(generation, out overrun);
+        if (!EndGeneration(generation, out bool overrun))
+        {
+            return;
+        }
+
         _pool!.Return(this);
         if (overrun)
         {

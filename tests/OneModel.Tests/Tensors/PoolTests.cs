@@ -166,8 +166,11 @@ public class PoolTests
         raw.Fill(1f);
         t.Dispose();
         Assert.Throws<StaleTensorException>(() => view.Data<float>());
-        Assert.Throws<StaleTensorException>(() => t.Dispose());
+        t.Dispose(); // releasing again is harmless ...
         Tensor again = Tensor.Create(DType.F32, Shape.Create(16), pool);
+        t.Dispose(); // ... and never releases whoever now holds the recycled block
+        Assert.False(again.IsReleased);
+        again.Data<float>();
         Assert.Throws<StaleTensorException>(() => t.Data<float>()); // the block is back in use, the old handle stays dead
 #if CHECKED
         // Returned memory is overwritten with 0xFF (a NaN): a span kept across the return reads poison, not stale data.

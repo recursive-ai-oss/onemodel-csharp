@@ -21,12 +21,10 @@ public enum SessionErrorKind
     /// <summary>The caller's inputs or outputs do not fit the model: unknown name, wrong element type, wrong shape, wrong buffer size.</summary>
     InvalidInput,
 
-    /// <summary>The session was disposed.</summary>
-    Disposed,
 }
 
 /// <summary>Raised for every failure of the graph layer that is the model's or the caller's doing rather than a bug.</summary>
-public sealed class SessionException : Exception
+public sealed class SessionException : OneModelException
 {
     /// <summary>Creates the exception.</summary>
     /// <param name="kind">The category.</param>
@@ -36,7 +34,7 @@ public sealed class SessionException : Exception
     /// <param name="inner">The exception that caused this one, if any.</param>
     public SessionException(SessionErrorKind kind, string message, string? nodeName = null,
         ImmutableArray<string> operators = default, Exception? inner = null)
-        : base(message, inner)
+        : base(OneModelErrorCategory.Session, message, null, -1, null, inner)
     {
         Kind = kind;
         NodeName = nodeName;

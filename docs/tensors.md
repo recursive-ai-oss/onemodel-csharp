@@ -103,7 +103,8 @@ they cannot require gradients. Further blocked families (for convolution weights
 - **Lifetime.** `Tensor.Dispose()` returns the buffer for the tensor and all its views and copies of the handle. A buffer
   carries a generation; it increases when the buffer is returned or its arena reset. Every access compares the tensor's remembered
   generation to the buffer's and throws `StaleTensorException` on mismatch, so a tensor can never read memory re-rented to someone
-  else, and releasing twice throws. A leaked (never disposed) pooled buffer is freed by the GC's finalizer.
+  else. Releasing is idempotent: releasing again through any copy of the handle does nothing, and a stale handle never releases the memory
+  re-rented to someone else; only reading or writing data through it throws (`StaleTensorException`, an `ObjectDisposedException`). A leaked (never disposed) pooled buffer is freed by the GC's finalizer.
 - **`CHECKED` builds.** New and returned memory is filled with 0xFF (a NaN for floats, −1 for integers), so reads of
   unwritten or released memory stand out. 64 canary bytes (0xA5) follow every buffer's length and are verified when it is released
   or its arena reset; a kernel that wrote past the end makes release throw.

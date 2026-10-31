@@ -4,7 +4,7 @@ using System.Threading;
 namespace RecursiveAI.OneModel.Tensors;
 
 /// <summary>Elementwise binary operations.</summary>
-public enum BinaryOp
+internal enum BinaryOp
 {
     /// <summary><c>a + b</c>.</summary>
     Add,
@@ -17,7 +17,7 @@ public enum BinaryOp
 }
 
 /// <summary>Elementwise unary operations.</summary>
-public enum UnaryOp
+internal enum UnaryOp
 {
     /// <summary><c>-x</c>.</summary>
     Neg,
@@ -59,7 +59,7 @@ public readonly record struct Pool2dParams(int KernelH, int KernelW, int StrideH
 /// strides (including negative and zero), and must produce results that depend only on the inputs and the implementation, never on
 /// the thread count. Shapes are validated by the caller; implementations may assume them.
 /// </summary>
-public interface ITensorKernels
+internal interface ITensorKernels
 {
     /// <summary>A short name for diagnostics, for example <c>reference</c>.</summary>
     string Name { get; }
@@ -82,7 +82,7 @@ public interface ITensorKernels
 }
 
 /// <summary>Holds the kernel set the eager operations use when the caller names none.</summary>
-public static class KernelSet
+internal static class KernelSet
 {
     private static ITensorKernels s_default = DenseKernels.Instance;
 
@@ -101,7 +101,7 @@ public static class KernelSet
 /// Plain scalar loops that define what each eager operation means: double-precision accumulation in the matrix product, no
 /// SIMD, no threads. Slow by design; the optimized kernels are tested against it.
 /// </summary>
-public sealed class ReferenceKernels : ITensorKernels
+internal sealed class ReferenceKernels : ITensorKernels
 {
     /// <summary>The shared instance.</summary>
     public static ReferenceKernels Instance { get; } = new();

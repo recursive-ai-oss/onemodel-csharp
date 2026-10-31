@@ -1,3 +1,4 @@
+using RecursiveAI.OneModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -27,7 +28,7 @@ string Need(string k) => o.TryGetValue(k, out string? v) ? v : throw new Argumen
 int Int(string k, int d) => o.TryGetValue(k, out string? v) ? int.Parse(v, CultureInfo.InvariantCulture) : d;
 float Flt(string k, float d) => o.TryGetValue(k, out string? v) ? float.Parse(v, CultureInfo.InvariantCulture) : d;
 
-if (o.ContainsKey("exact")) TensorCompute.Mode = ExecutionMode.Exact;
+if (o.ContainsKey("exact")) TensorCompute.Mode = ArithmeticMode.Exact;
 if (o.ContainsKey("threads")) TensorCompute.Threads = Int("threads", 1);
 
 var (config, configJson, tensors) = WeightsFile.Read(Need("weights"));

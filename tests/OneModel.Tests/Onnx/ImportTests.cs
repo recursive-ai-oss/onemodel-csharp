@@ -252,8 +252,7 @@ public class ImportTests
             Assert.Throws<ObjectDisposedException>(() => kept.RawData.Length);
             using IrModel s = OnnxImporter.Load(new MemoryStream(File.ReadAllBytes(path)));
             Assert.Single(s.Graph.Nodes);
-            var e = Assert.Throws<OnnxImportException>(() => OnnxImporter.Load(path + ".missing"));
-            Assert.Equal(OnnxErrorKind.Io, e.Kind);
+            Assert.Throws<FileNotFoundException>(() => OnnxImporter.Load(path + ".missing"));
         }
         finally
         {
@@ -274,7 +273,7 @@ public class ImportTests
         {
             using IrModel m = OnnxImporter.Load(path);
             Assert.True(m.Graph.FindValue("big")!.Initializer!.RawData.SequenceEqual(big));
-            using IrModel unmapped = OnnxImporter.Load(path, new OnnxLoadOptions { MemoryMap = false });
+            using IrModel unmapped = OnnxImporter.Load(path, new ModelLoadOptions { MemoryMap = false });
             Assert.True(unmapped.Graph.FindValue("big")!.Initializer!.RawData.SequenceEqual(big));
         }
         finally

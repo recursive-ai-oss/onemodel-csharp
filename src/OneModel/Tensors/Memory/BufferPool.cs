@@ -41,7 +41,7 @@ public sealed class BufferPool : IDisposable
 
     /// <summary>The capacity the pool allocates for a request of <paramref name="bytes"/> bytes (at least 64).</summary>
     /// <exception cref="TensorShapeException"><paramref name="bytes"/> is negative or above <see cref="int.MaxValue"/>.</exception>
-    public static long ClassSize(long bytes)
+    internal static long ClassSize(long bytes)
     {
         if ((ulong)bytes > int.MaxValue)
         {

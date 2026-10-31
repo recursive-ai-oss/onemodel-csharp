@@ -67,7 +67,7 @@ internal static class Program
 
     private static void FuzzModel(ReadOnlySpan<byte> input)
     {
-        var options = new OnnxLoadOptions { MemoryMap = false, ExternalDataDirectory = ExternalDirectory };
+        var options = new ModelLoadOptions { MemoryMap = false, ExternalDataDirectory = ExternalDirectory };
         try
         {
             using IrModel model = OnnxImporter.Load(input.ToArray(), options);
@@ -84,6 +84,41 @@ internal static class Program
         {
             // Rejecting bad input is the expected outcome.
         }
+
+        // The stream route reads with a size limit: a non-seekable stream, once whole and once cut short by the limit.
+        foreach (long limit in new long[] { int.MaxValue, Math.Max(1, input.Length / 2) })
+        {
+            try
+            {
+                using IrModel viaStream = OnnxImporter.Load(new OneWayStream(input.ToArray()), new ModelLoadOptions { MemoryMap = false, MaxModelBytes = limit });
+            }
+            catch (OnnxImportException)
+            {
+                // Expected for bad or oversize input.
+            }
+        }
+    }
+
+    private sealed class OneWayStream(byte[] data) : Stream
+    {
+        private int _at;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int n = Math.Min(count, Math.Min(data.Length - _at, 4099));
+            Array.Copy(data, _at, buffer, offset, n);
+            _at += n;
+            return n;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private const int CheckpointConfigs = 4;

@@ -43,11 +43,11 @@ public class QuantizedAddFusionTests
         x[0] = float.NaN;
         x[1] = 1e9f;
         x[2] = -1e9f;
-        Assert.Contains("QLinearAddOp", PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast));
-        float[] want = PassTestKit.Run(model, x, [1, n], OptimizationLevel.None, ExecutionMode.Fast);
+        Assert.Contains("QLinearAddOp", PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast));
+        float[] want = PassTestKit.Run(model, x, [1, n], OptimizationLevel.None, ArithmeticMode.Fast);
         foreach (int threads in new[] { 1, 3 })
         {
-            float[] got = PassTestKit.Run(model, x, [1, n], OptimizationLevel.All, ExecutionMode.Fast, threads);
+            float[] got = PassTestKit.Run(model, x, [1, n], OptimizationLevel.All, ArithmeticMode.Fast, threads);
             Assert.True(PassTestKit.BitEqual(want, got), $"n={n} threads={threads}");
         }
     }
@@ -67,10 +67,10 @@ public class QuantizedAddFusionTests
         m.Node("DequantizeLinear", ["r", "s", "z"], ["y"]);
         byte[] model = m.Build();
         float[] x = PassTestKit.RandomFloats(3 * 17 * 19, 33, 9f);
-        string[] kernels = PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast);
+        string[] kernels = PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast);
         Assert.Equal(["QuantizeLinearOp", "MaxPoolOp", "DequantizeLinearOp"], kernels);
-        float[] want = PassTestKit.Run(model, x, [1, 3, 17, 19], OptimizationLevel.None, ExecutionMode.Fast);
-        float[] got = PassTestKit.Run(model, x, [1, 3, 17, 19], OptimizationLevel.All, ExecutionMode.Fast);
+        float[] want = PassTestKit.Run(model, x, [1, 3, 17, 19], OptimizationLevel.None, ArithmeticMode.Fast);
+        float[] got = PassTestKit.Run(model, x, [1, 3, 17, 19], OptimizationLevel.All, ArithmeticMode.Fast);
         Assert.True(PassTestKit.BitEqual(want, got));
     }
 }

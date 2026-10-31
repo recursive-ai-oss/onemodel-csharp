@@ -33,11 +33,11 @@ public class VectorElementwiseTests
     }
 
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void BinaryAndUnaryEqualTheScalarLoops(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void BinaryAndUnaryEqualTheScalarLoops(ArithmeticMode mode)
     {
-        ExecutionMode old = TensorCompute.Mode;
+        ArithmeticMode old = TensorCompute.Mode;
         try
         {
             TensorCompute.Mode = mode;
@@ -48,7 +48,7 @@ public class VectorElementwiseTests
                 using Tensor one = Tensor.FromSpan<float>([1.75f], Shape.Create(1));
                 foreach (Func<Tensor, Tensor, ITensorKernels?, Tensor> op in new Func<Tensor, Tensor, ITensorKernels?, Tensor>[]
                 {
-                    (x, y, k) => Ops.Add(x, y, null, k), (x, y, k) => Ops.Sub(x, y, null, k), (x, y, k) => Ops.Mul(x, y, null, k), (x, y, k) => Ops.Div(x, y, null, k),
+                    (x, y, k) => Ops.AddWith(x, y, null, k), (x, y, k) => Ops.SubWith(x, y, null, k), (x, y, k) => Ops.MulWith(x, y, null, k), (x, y, k) => Ops.DivWith(x, y, null, k),
                 })
                 {
                     using Tensor got = op(a, b, null), want = op(a, b, ReferenceKernels.Instance);
@@ -57,19 +57,19 @@ public class VectorElementwiseTests
                     AssertSame(gotB.Data<float>(), wantB.Data<float>(), $"{mode} n={n} broadcast");
                 }
 
-                using Tensor gotN = Ops.Neg(a), wantN = Ops.Neg(a, null, ReferenceKernels.Instance);
+                using Tensor gotN = Ops.Neg(a), wantN = Ops.NegWith(a, null, ReferenceKernels.Instance);
                 AssertSame(gotN.Data<float>(), wantN.Data<float>(), $"{mode} n={n} neg");
-                using Tensor gotR = Ops.Relu(a), wantR = Ops.Relu(a, null, ReferenceKernels.Instance);
+                using Tensor gotR = Ops.Relu(a), wantR = Ops.ReluWith(a, null, ReferenceKernels.Instance);
                 AssertSame(gotR.Data<float>(), wantR.Data<float>(), $"{mode} n={n} relu");
             }
 
             // Strided operands: a transposed view and a column slice.
             using Tensor m = Tensor.FromSpan<float>(Values(7 * 37, 5), Shape.Create(7, 37));
             Tensor mt = m.T();
-            using Tensor g1 = Ops.Add(mt, mt), w1 = Ops.Add(mt, mt, null, ReferenceKernels.Instance);
+            using Tensor g1 = Ops.Add(mt, mt), w1 = Ops.AddWith(mt, mt, null, ReferenceKernels.Instance);
             AssertSame(g1.Data<float>(), w1.Data<float>(), "transposed");
             Tensor cols = m.Slice(1, 3, 30, 2);
-            using Tensor g2 = Ops.Mul(cols, cols), w2 = Ops.Mul(cols, cols, null, ReferenceKernels.Instance);
+            using Tensor g2 = Ops.Mul(cols, cols), w2 = Ops.MulWith(cols, cols, null, ReferenceKernels.Instance);
             AssertSame(g2.Data<float>(), w2.Data<float>(), "strided slice");
         }
         finally
@@ -81,11 +81,11 @@ public class VectorElementwiseTests
     // Backward of an activation over n elements equals, element by element, the backward over a single element: the first n/lanes*lanes
     // go through lanes and the tail through the scalar twin, so any lane/scalar difference shows.
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void ActivationGradientsDoNotDependOnPosition(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void ActivationGradientsDoNotDependOnPosition(ArithmeticMode mode)
     {
-        ExecutionMode old = TensorCompute.Mode;
+        ArithmeticMode old = TensorCompute.Mode;
         try
         {
             TensorCompute.Mode = mode;

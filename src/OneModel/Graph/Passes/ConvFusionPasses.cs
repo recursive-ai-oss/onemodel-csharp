@@ -125,7 +125,7 @@ internal sealed class ConvResidualFusionPass : IGraphPass
 
     public void Run(PassGraph g, CancellationToken ct)
     {
-        if (g.Mode == ExecutionMode.Exact)
+        if (g.Mode == ArithmeticMode.Exact)
         {
             return;
         }
@@ -240,7 +240,7 @@ internal sealed class ConvPackPass : IGraphPass
 
     public void Run(PassGraph g, CancellationToken ct)
     {
-        if (g.Mode == ExecutionMode.Exact)
+        if (g.Mode == ArithmeticMode.Exact)
         {
             return;
         }

@@ -14,7 +14,7 @@ namespace RecursiveAI.OneModel.Tensors;
 /// Layout is fixed per <see cref="OpKind"/> (the table is in <c>docs/tensors.md</c>): <c>Saved</c> slots are positional, empty where
 /// the operation did not need them (for example <c>Mul</c> saves operand <c>a</c> only when <c>b</c> requires a gradient).
 /// </remarks>
-public sealed class BackwardRecord
+internal sealed class BackwardRecord
 {
     private readonly AutogradMeta?[] _inputs;
     private readonly Shape[] _inputShapes;

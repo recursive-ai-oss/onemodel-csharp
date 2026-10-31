@@ -44,6 +44,12 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <PropertyGroup Label="Preview API">
+    <!-- ONEMODEL0001 marks preview API (PackedValue). The repository's own projects use it freely; the guide samples
+         (OneModelSamples=true) do not, so they show what a consumer sees. -->
+    <NoWarn Condition="'$(OneModelSamples)' != 'true'">$(NoWarn);ONEMODEL0001</NoWarn>
+  </PropertyGroup>
+
   <PropertyGroup Label="Reproducible packages">
     <!-- Path mapping is for the packages only (projects under src/). Test projects keep real paths: some tests locate test data from
          [CallerFilePath], which a mapped path would break on CI. -->

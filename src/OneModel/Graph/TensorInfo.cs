@@ -15,4 +15,21 @@ public sealed record TensorInfo(string Name, DType DType, ImmutableArray<IrDim> 
 {
     /// <summary>The number of dimensions, or -1 when the model declares no shape.</summary>
     public int Rank => HasShape ? Dims.Length : -1;
+
+    // The generated text would print the dimension array's type name; this prints `x: F32[N, 16]` (an open extent is its name, or ?).
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append(Name).Append(": ").Append(DType);
+        if (Kind != TensorInfoKind.Tensor)
+        {
+            builder.Append(' ').Append(Kind);
+        }
+
+        if (HasShape)
+        {
+            builder.Append('[').AppendJoin(", ", Dims).Append(']');
+        }
+
+        return true;
+    }
 }

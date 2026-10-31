@@ -1,6 +1,6 @@
 # Graph passes
 
-Rewrites applied to the compiled graph when a session is created, selected by `SessionOptions.OptimizationLevel` and the mode. Interface and ownership rules: [graph-runtime.md](graph-runtime.md) section 6.
+Rewrites applied to the compiled graph when a session is created, selected by `ModelOptions.OptimizationLevel` and the mode. Interface and ownership rules: [graph-runtime.md](graph-runtime.md) section 6.
 
 ## Levels and exact mode
 
@@ -10,7 +10,7 @@ Rewrites applied to the compiled graph when a session is created, selected by `S
 | `Basic` | `constant-fold` |
 | `All` (default) | everything below |
 
-Every pass states whether it **preserves bits**: results identical with and without the pass, in both modes. In `ExecutionMode.Exact` only passes that preserve bits run; the documented exact pipeline (and so the golden result) is that subset. A pass that does not preserve bits may still change fast-mode results only in the last bits (checked against the unfused graph, see the tests); fast mode stays deterministic for any thread count either way.
+Every pass states whether it **preserves bits**: results identical with and without the pass, in both modes. In `ArithmeticMode.Exact` only passes that preserve bits run; the documented exact pipeline (and so the golden result) is that subset. A pass that does not preserve bits may still change fast-mode results only in the last bits (checked against the unfused graph, see the tests); fast mode stays deterministic for any thread count either way.
 
 ## Passes, in order
 

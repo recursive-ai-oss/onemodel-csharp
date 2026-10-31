@@ -8,11 +8,12 @@ namespace RecursiveAI.OneModel.Onnx;
 /// <summary>
 /// Reads ONNX models (IR version 3 and later, any opset) into the <see cref="IrModel"/> graph representation. The protobuf reader,
 /// the ONNX message reader and the external-data resolver are this library's own; nothing is generated and nothing is loaded
-/// that was not checked against the bytes that remain. Bad input produces <see cref="OnnxImportException"/> and nothing else.
+/// that was not checked against the bytes that remain. Bad content produces <see cref="OnnxImportException"/> and nothing else; a
+/// file that cannot be opened or read produces the BCL's own <see cref="IOException"/> family, unwrapped.
 /// </summary>
 public static class OnnxImporter
 {
-    /// <summary>The files at least this large are memory-mapped when <see cref="OnnxLoadOptions.MemoryMap"/> is set; smaller ones are read.</summary>
+    /// <summary>The files at least this large are memory-mapped when <see cref="ModelLoadOptions.MemoryMap"/> is set; smaller ones are read.</summary>
     private const long MapThreshold = 1 << 20;
 
     /// <summary>Imports a model from a file. External data is looked up in the file's directory unless the options say otherwise.</summary>
@@ -20,59 +21,32 @@ public static class OnnxImporter
     /// <param name="options">Import options; defaults when null.</param>
     /// <param name="cancellationToken">Checked between nodes and tensors.</param>
     /// <returns>The model. The caller disposes it, which unmaps the file.</returns>
-    /// <exception cref="OnnxImportException">The file cannot be read or is not a valid, supported ONNX model.</exception>
+    /// <exception cref="OnnxImportException">The file is not a valid, supported ONNX model, or is larger than <see cref="ModelLoadOptions.MaxModelBytes"/>.</exception>
+    /// <exception cref="IOException">The file is missing or cannot be read (<see cref="FileNotFoundException"/>, <see cref="DirectoryNotFoundException"/>, ...); <see cref="UnauthorizedAccessException"/> when access is denied.</exception>
     /// <exception cref="OperationCanceledException">Cancelled.</exception>
-    public static IrModel Load(string path, OnnxLoadOptions? options = null, CancellationToken cancellationToken = default)
+    public static IrModel Load(string path, ModelLoadOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(path);
-        options ??= new OnnxLoadOptions();
-        ByteSource source;
-        try
-        {
-            source = ByteSource.OpenFile(path, options.MemoryMap, MapThreshold, readWholeIfUnmapped: true);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
-        {
-            throw new OnnxImportException(OnnxErrorKind.Io, "The model file cannot be read: " + e.Message, path, -1, null, e);
-        }
+        options ??= new ModelLoadOptions();
+        ByteSource source = ByteSource.OpenFile(path, options.MemoryMap, MapThreshold, readWholeIfUnmapped: true);
 
         string? directory = options.ExternalDataDirectory ?? Path.GetDirectoryName(Path.GetFullPath(path));
         return LoadCore(source, path, directory, options, cancellationToken);
     }
 
-    /// <summary>Imports a model from a stream, which is read to its end. External data is an error unless <see cref="OnnxLoadOptions.ExternalDataDirectory"/> is set.</summary>
+    /// <summary>Imports a model from a stream, which is read to its end. External data is an error unless <see cref="ModelLoadOptions.ExternalDataDirectory"/> is set.</summary>
     /// <param name="stream">A readable stream holding at most 2^31-1 bytes from its current position.</param>
     /// <param name="options">Import options; defaults when null.</param>
     /// <param name="cancellationToken">Checked between nodes and tensors, and while reading.</param>
     /// <returns>The model.</returns>
-    /// <exception cref="OnnxImportException">The stream cannot be read or does not hold a valid, supported model.</exception>
-    public static IrModel Load(Stream stream, OnnxLoadOptions? options = null, CancellationToken cancellationToken = default)
+    /// <exception cref="OnnxImportException">The stream does not hold a valid, supported model, or holds more than <see cref="ModelLoadOptions.MaxModelBytes"/> (reading stops there).</exception>
+    /// <exception cref="IOException">The stream cannot be read.</exception>
+    public static IrModel Load(Stream stream, ModelLoadOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        options ??= new OnnxLoadOptions();
-        byte[] bytes;
-        try
-        {
-            using var ms = new MemoryStream();
-            var buffer = new byte[81920];
-            int n;
-            while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (ms.Length + n > Array.MaxLength)
-                {
-                    throw new OnnxImportException(OnnxErrorKind.Unsupported, "The stream is larger than 2 GB, the most a protobuf message can hold.", "<stream>");
-                }
-
-                ms.Write(buffer, 0, n);
-            }
-
-            bytes = ms.ToArray();
-        }
-        catch (Exception e) when (e is IOException or NotSupportedException or ObjectDisposedException)
-        {
-            throw new OnnxImportException(OnnxErrorKind.Io, "The stream cannot be read: " + e.Message, "<stream>", -1, null, e);
-        }
+        options ??= new ModelLoadOptions();
+        byte[] bytes = StreamBytes.ReadAll(stream, options.MaxModelBytes,
+            (m, _) => new OnnxImportException(OnnxErrorKind.Unsupported, m, "<stream>"), cancellationToken);
 
         return LoadCore(ByteSource.FromArray(bytes), "<stream>", options.ExternalDataDirectory, options, cancellationToken);
     }
@@ -83,10 +57,10 @@ public static class OnnxImporter
     /// <param name="cancellationToken">Checked between nodes and tensors.</param>
     /// <returns>The model.</returns>
     /// <exception cref="OnnxImportException">The bytes are not a valid, supported model.</exception>
-    public static IrModel Load(byte[] data, OnnxLoadOptions? options = null, CancellationToken cancellationToken = default)
+    public static IrModel Load(byte[] data, ModelLoadOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(data);
-        options ??= new OnnxLoadOptions();
+        options ??= new ModelLoadOptions();
         return LoadCore(ByteSource.FromArray(data), "<memory>", options.ExternalDataDirectory, options, cancellationToken);
     }
 
@@ -102,15 +76,15 @@ public static class OnnxImporter
         return OnnxParser.ParseTensor(ref r);
     }
 
-    private static IrModel LoadCore(ByteSource source, string inputName, string? externalDirectory, OnnxLoadOptions options, CancellationToken ct)
+    private static IrModel LoadCore(ByteSource source, string inputName, string? externalDirectory, ModelLoadOptions options, CancellationToken ct)
     {
         ExternalDataResolver? resolver = null;
         try
         {
-            if (source.Length > Array.MaxLength)
+            if (source.Length > Math.Min(options.MaxModelBytes, Array.MaxLength))
             {
                 throw new OnnxImportException(OnnxErrorKind.Unsupported,
-                    $"The model file is {source.Length} bytes; a protobuf message can hold at most 2^31-1. Keep large weights in external data.", inputName);
+                    $"The model is {source.Length} bytes; the limit is {Math.Min(options.MaxModelBytes, Array.MaxLength)} (a protobuf message holds at most 2^31-1). Keep large weights in external data.", inputName);
             }
 
             try

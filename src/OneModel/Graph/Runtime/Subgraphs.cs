@@ -20,12 +20,12 @@ internal interface ISubgraphKernel
 internal sealed class SubgraphBinder
 {
     private readonly OpRegistry _registry;
-    private readonly ExecutionMode _mode;
+    private readonly ArithmeticMode _mode;
     private readonly KernelPath _path;
     private readonly int _threads;
     private readonly CancellationToken _ct;
 
-    public SubgraphBinder(IrNode node, IReadOnlyList<IrValue> captures, OpRegistry registry, ExecutionMode mode, KernelPath path, int threads, CancellationToken ct)
+    public SubgraphBinder(IrNode node, IReadOnlyList<IrValue> captures, OpRegistry registry, ArithmeticMode mode, KernelPath path, int threads, CancellationToken ct)
     {
         Node = node;
         Captures = captures;
