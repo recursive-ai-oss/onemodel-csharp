@@ -8,6 +8,7 @@ The source tree is only read. The copy gets these changes to train/run.py, each 
 * the device comes from REF_DEVICE (default "cpu") and bf16 autocast is off on the CPU, so the reference is a plain fp32 run;
 * every step dumps the batch the model sees (after augmentation, rounded to bytes, padded) to REF_DUMP/batch-<step>.bin,
   and the step's loss, gradient norm and learning rate to REF_DUMP/steps.jsonl;
+* REF_TF32=0 disables TF32 in cuDNN convolutions;
 * REF_STEPS overrides the step count and REF_EVAL_EVERY the evaluation interval.
 
 Batch file layout (little-endian): int32 B, int32 W, int32 widths[B], int32 target_lengths[B], int32 targets[sum],
@@ -43,6 +44,8 @@ def main() -> None:
     t = t.replace(".pin_memory()", "")
     t = patch(t, 'with torch.autocast("cuda", dtype=torch.bfloat16):',
               'with (torch.autocast("cuda", dtype=torch.bfloat16) if dev == "cuda" and os.environ.get("REF_BF16", "1") == "1" else __import__("contextlib").nullcontext()):')
+    # cuDNN convolutions use TF32 by default on recent GPUs; REF_TF32=0 turns that off so the run is plain fp32
+    t = patch(t, "    random.seed(seed)\n", "    random.seed(seed)\n    torch.backends.cudnn.allow_tf32 = os.environ.get(\"REF_TF32\", \"1\") == \"1\"\n")
     # dump the batch the model sees
     t = patch(t, "            x = to_input(x, dev)\n",
               "            _dump_batch(step, x, widths, tgt, tlen)\n            x = to_input(x, dev)\n")
@@ -53,7 +56,7 @@ def main() -> None:
     d = os.environ.get("REF_DUMP")
     if not d:
         return
-    xb = x.to(torch.uint8).contiguous().numpy()
+    xb = x.to(torch.uint8).contiguous().cpu().numpy()
     b, _, h, w = xb.shape
     assert h == 32
     hdr = np.array([b, w], dtype="<i4").tobytes()

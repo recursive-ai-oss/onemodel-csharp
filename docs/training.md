@@ -259,3 +259,11 @@ generated-photo source of the original recipe is left out, which changes the mix
   binary16 weights, nearest even). The consumer's own parity test, run unchanged, passes on the exported file and fails when a byte of a
   tensor is flipped.
 - *Cost.* See the table at the end of this section.
+
+| Step of 128 lines, CPU, 8 threads, shared host (indicative) | Median step | Peak resident memory |
+|---|---:|---:|
+| This library, fast mode | 13.1 s (forward 3–5 s, of which the conv stack 2.4–4 s and the LSTM 0.5–1 s) | 14.5 GB |
+| PyTorch 2.11 CPU, same batches (wall-clock gaps between dumped batches; includes the data pipeline) | about 6 s | 12.6 GB |
+
+So a CPU step here takes about twice PyTorch's, mostly in the convolutions' forward and backward; peak memory is 1.15× PyTorch's. The
+2000-step run took 7.7 h wall-clock with queue waits; the work itself is far below what a GPU does, and no speed tuning was attempted.
