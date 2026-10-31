@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using RecursiveAI.OneModel.Threading;
 
 namespace RecursiveAI.OneModel.Kernels;
@@ -30,6 +31,26 @@ internal static unsafe class Int8Elementwise
     {
         int lo = p.YUnsigned ? 0 : -128, hi = p.YUnsigned ? 255 : 127;
         long i = 0;
+        if (Avx2.IsSupported)
+        {
+            // Eight lanes at a time, loaded with sign or zero extension straight from memory: the same float operations per element as
+            // the four-lane loop below (division included), so the bytes are the same.
+            Vector256<int> za = Vector256.Create(p.AZero), zb = Vector256.Create(p.BZero);
+            Vector256<float> sa = Vector256.Create(p.AScale), sb = Vector256.Create(p.BScale), sy = Vector256.Create(p.YScale);
+            Vector256<float> zy = Vector256.Create((float)p.YZero), vlo = Vector256.Create((float)lo), vhi = Vector256.Create((float)hi);
+            for (; i + 32 <= n; i += 32)
+            {
+                Vector256<int> q0 = Q8(a + i, b + i, p, za, zb, sa, sb, sy, zy, vlo, vhi);
+                Vector256<int> q1 = Q8(a + i + 8, b + i + 8, p, za, zb, sa, sb, sy, zy, vlo, vhi);
+                Vector256<int> q2 = Q8(a + i + 16, b + i + 16, p, za, zb, sa, sb, sy, zy, vlo, vhi);
+                Vector256<int> q3 = Q8(a + i + 24, b + i + 24, p, za, zb, sa, sb, sy, zy, vlo, vhi);
+                Vector256<short> s0 = Vector256.Narrow(q0, q1);
+                Vector256<short> s1 = Vector256.Narrow(q2, q3);
+                Vector256<byte> packed = p.YUnsigned ? Vector256.Narrow(s0.AsUInt16(), s1.AsUInt16()) : Vector256.Narrow(s0, s1).AsByte();
+                packed.Store(y + i);
+            }
+        }
+
         if (Vector128.IsHardwareAccelerated)
         {
             Vector128<int> za = Vector128.Create(p.AZero), zb = Vector128.Create(p.BZero);
@@ -52,6 +73,18 @@ internal static unsafe class Int8Elementwise
         {
             y[i] = (byte)AddOne(a[i], b[i], in p, lo, hi);
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<int> Q8(byte* a, byte* b, in Int8AddParams p, Vector256<int> za, Vector256<int> zb, Vector256<float> sa, Vector256<float> sb,
+        Vector256<float> sy, Vector256<float> zy, Vector256<float> lo, Vector256<float> hi)
+    {
+        Vector256<int> wa = p.AUnsigned ? Avx2.ConvertToVector256Int32(a) : Avx2.ConvertToVector256Int32((sbyte*)a);
+        Vector256<int> wb = p.BUnsigned ? Avx2.ConvertToVector256Int32(b) : Avx2.ConvertToVector256Int32((sbyte*)b);
+        Vector256<float> sum = (Vector256.ConvertToSingle(wa - za) * sa) + (Vector256.ConvertToSingle(wb - zb) * sb);
+        Vector256<float> v = Vector256.Round(sum / sy) + zy;
+        v = Vector256.ConditionalSelect(Vector256.Equals(v, v), v, lo);
+        return Vector256.ConvertToInt32(Vector256.Min(Vector256.Max(v, lo), hi));
     }
 
     /// <summary>Scalar reference for one element.</summary>

@@ -186,16 +186,39 @@ internal static unsafe class Int8Pool
         }
     }
 
-    // acc[i] = max(acc[i], v[i]) for n bytes.
+    // acc[i] = max(acc[i], v[i]) for n bytes. A tail shorter than a vector is covered by one more vector that overlaps the last full one:
+    // the maximum is idempotent, so redoing those lanes changes nothing, and no scalar loop is needed for rows of 16 bytes or more.
     private static void MaxInto(byte* acc, byte* v, int n)
     {
         int i = 0;
-        if (Vector128.IsHardwareAccelerated)
+        if (Vector256.IsHardwareAccelerated && n >= 32)
+        {
+            for (; i + 32 <= n; i += 32)
+            {
+                Vector256.Max(Vector256.Load(acc + i), Vector256.Load(v + i)).Store(acc + i);
+            }
+
+            if (i < n)
+            {
+                Vector256.Max(Vector256.Load(acc + n - 32), Vector256.Load(v + n - 32)).Store(acc + n - 32);
+            }
+
+            return;
+        }
+
+        if (Vector128.IsHardwareAccelerated && n >= 16)
         {
             for (; i + 16 <= n; i += 16)
             {
                 Vector128.Max(Vector128.Load(acc + i), Vector128.Load(v + i)).Store(acc + i);
             }
+
+            if (i < n)
+            {
+                Vector128.Max(Vector128.Load(acc + n - 16), Vector128.Load(v + n - 16)).Store(acc + n - 16);
+            }
+
+            return;
         }
 
         for (; i < n; i++)
@@ -223,12 +246,20 @@ internal static unsafe class Int8Pool
             new Span<byte>(tmp, padW).Clear();
             byte* line = src + ((long)r * inW);
             int c = 0;
-            if (Vector128.IsHardwareAccelerated)
+            if (Vector128.IsHardwareAccelerated && inW >= 16)
             {
+                // The last vector overlaps the one before it when the width is not a multiple of 16: it stores the same bytes again.
                 Vector128<byte> vflip = Vector128.Create(flip);
                 for (; c + 16 <= inW; c += 16)
                 {
                     (Vector128.Load(line + c) ^ vflip).Store(tmp + padW + c);
+                }
+
+                if (c < inW)
+                {
+                    c = inW - 16;
+                    (Vector128.Load(line + c) ^ vflip).Store(tmp + padW + c);
+                    c = inW;
                 }
             }
 
@@ -268,6 +299,15 @@ internal static unsafe class Int8Pool
                 {
                     Vector128<byte> v = sw == 1 ? Vector128.Load(acc + ow) : Int8Pack.Even((sbyte*)(acc + (2 * ow))).AsByte();
                     (v ^ vflip).Store(o + ow);
+                }
+
+                if (ow < outW && outW >= 16)
+                {
+                    // One more vector ending at the last column; it rewrites bytes already stored with the same values.
+                    ow = outW - 16;
+                    Vector128<byte> v = sw == 1 ? Vector128.Load(acc + ow) : Int8Pack.Even((sbyte*)(acc + (2 * ow))).AsByte();
+                    (v ^ vflip).Store(o + ow);
+                    ow = outW;
                 }
             }
 

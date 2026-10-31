@@ -21,6 +21,31 @@ public class Int8ElementwiseTests
         yield return [0.5f, 0, 0.5f, 0, 1e-39f, 0];
     }
 
+    [Fact]
+    public void EveryLengthEqualsTheScalarChain()
+    {
+        // Lengths around the vector widths (8, 16, 32 lanes) exercise every tail.
+        var rng = new Random(3);
+        foreach (bool aU in new[] { false, true })
+        {
+            var p = new Int8AddParams(aU, 5, 0.031f, !aU, -9, 0.0173f, aU, 3, 0.047f);
+            for (int n = 0; n <= 100; n++)
+            {
+                var a = new byte[n];
+                var b = new byte[n];
+                rng.NextBytes(a);
+                rng.NextBytes(b);
+                var y = new byte[n];
+                Int8Elementwise.Add8(a, b, y, in p, 1);
+                int lo = aU ? 0 : -128, hi = aU ? 255 : 127;
+                for (int i = 0; i < n; i++)
+                {
+                    Assert.True((byte)Int8Elementwise.AddOne(a[i], b[i], in p, lo, hi) == y[i], $"n={n} i={i}");
+                }
+            }
+        }
+    }
+
     [Theory]
     [MemberData(nameof(Params))]
     public void AdditionEqualsTheScalarChain(float sa, int za, float sb, int zb, float sy, int zy)

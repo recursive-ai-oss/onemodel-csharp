@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
+using System.Threading;
 using RecursiveAI.OneModel.Threading;
 
 namespace RecursiveAI.OneModel.Kernels;
@@ -308,6 +309,24 @@ internal static unsafe class Int8Gemm
         return Vector128.ConvertToInt32(Vector128.Min(Vector128.Max(v, lo), hi));
     }
 
+    // round_half_even(sum * mult) clamped to [lo - zero, hi - zero], as a 32-bit integer; the caller adds the zero point. Equal to
+    // clamp(Round(sum * mult) + zero, lo, hi) for a finite mult: the clamp bounds are integers, so clamping before or after rounding
+    // gives the same value, and cvtps2dq / fcvtns round to nearest even (the default mode, which this runtime never changes).
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<int> RoundCvt8(Vector256<int> sum, Vector256<float> mult, Vector256<float> lo, Vector256<float> hi) =>
+        Avx.ConvertToVector256Int32(Avx.Min(Avx.Max(Vector256.ConvertToSingle(sum) * mult, lo), hi));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<int> RoundCvt4(Vector128<int> sum, Vector128<float> mult, Vector128<float> lo, Vector128<float> hi) =>
+        AdvSimd.ConvertToInt32RoundToEven(AdvSimd.Min(AdvSimd.Max(Vector128.ConvertToSingle(sum) * mult, lo), hi));
+
+    private static Vector256<int> QuantSum8(Vector256<int> sum, Vector256<float> mult, Vector256<float> zero, Vector256<float> lo, Vector256<float> hi)
+    {
+        Vector256<float> v = Vector256.Round(Vector256.ConvertToSingle(sum) * mult) + zero;
+        v = Vector256.ConditionalSelect(Vector256.Equals(v, v), v, lo);
+        return Vector256.ConvertToInt32(Vector256.Min(Vector256.Max(v, lo), hi));
+    }
+
     private static Vector128<int> Quant4(int* p, Vector128<float> mult, Vector128<float> zero, Vector128<float> lo, Vector128<float> hi)
     {
         Vector128<float> v = Vector128.Round(Vector128.ConvertToSingle(Vector128.Load(p)) * mult) + zero;
@@ -463,7 +482,10 @@ internal static unsafe class Int8Gemm
         // The work estimate and the number of threads worth using come first: they pick the chunk size.
         long work = ((long)m * n * k / 50) + ((long)m * n / 2);
         int usable = (int)Math.Clamp(work / ParallelFor.MinWorkPerThread, 1, Math.Max(1, threads));
-        Int8Format fe = source == null && usable > 1 ? ChooseTile(in f, m, n, k, usable) : f;
+        // A convolution's patches are packed once per product into a buffer all chunks share (see TileJob), so the chunk size can be
+        // chosen as for a packed B; with one thread the panels are packed by the chunk that multiplies them.
+        bool shared = source != null && usable > 1;
+        Int8Format fe = (source == null || shared) && usable > 1 ? ChooseTile(in f, m, n, k, usable) : f;
         TileJob job = t_tileJob ??= new TileJob();
         job.F = fe;
         job.M = m;
@@ -496,11 +518,37 @@ internal static unsafe class Int8Gemm
             group--;
         }
 
-        job.GroupTiles = source == null ? 1 : group;
+        job.GroupTiles = source == null || shared ? 1 : group;
         int groups = (tilesM + job.GroupTiles - 1) / job.GroupTiles;
+        job.Shared = shared;
+        int chunks = groups * job.TilesN;
+        if (shared)
+        {
+            // Chunks [0, PackChunks) pack strips of B into one buffer for the whole product; the tile chunks after them wait, if they
+            // must, for the strips of their panel. ParallelFor hands chunks out in increasing order, so a pack chunk is always claimed
+            // (and running, since pack chunks wait for nothing) before any chunk that depends on it: no deadlock, no barrier.
+            int strips = (n + fe.Nr - 1) / fe.Nr;
+            int kpad = fe.KPad(k);
+            job.SharedB = Slab.Get(0, (long)strips * fe.Nr * kpad);
+            job.SharedSums = (int*)Slab.Get(1, (long)strips * fe.Nr * sizeof(int));
+            job.Strips = strips;
+            job.PackStripsPer = Math.Clamp(2048 / Math.Max(1, kpad), 1, 4);
+            job.PackChunks = (strips + job.PackStripsPer - 1) / job.PackStripsPer;
+            if (job.Ready.Length < strips)
+            {
+                job.Ready = new int[Math.Max(strips, 2 * job.Ready.Length)];
+            }
+
+            Array.Clear(job.Ready, 0, strips);
+            chunks += job.PackChunks;
+            work += (long)k * n / 8;
+        }
+
         // About 50 multiply-adds per nanosecond per thread at the measured 100 giga-operations per second.
-        ParallelFor.Run(job, groups * job.TilesN, threads, work);
+        ParallelFor.Run(job, chunks, threads, work);
         job.Source = null;
+        job.SharedB = null;
+        job.SharedSums = null;
     }
 
     // Per-chunk fixed cost (claiming the chunk, slab lookup, tile set-up) in nanoseconds, and the product rate in multiply-adds per
@@ -725,9 +773,24 @@ internal static unsafe class Int8Gemm
         public Int8BPanelSource? Source;
         public delegate*<int, byte*, byte*, int*, nint, int, void> Micro;
 
+        // Shared-panel mode: B packed once into SharedB (with its column sums), strip by strip, by the first PackChunks chunks.
+        public bool Shared;
+        public byte* SharedB;
+        public int* SharedSums;
+        public int Strips;
+        public int PackStripsPer;
+        public int PackChunks;
+        public int[] Ready = new int[64];
+
         public override void RunChunk(int chunk)
         {
             Int8Format f = F;
+            if (Shared)
+            {
+                RunShared(chunk);
+                return;
+            }
+
             int j0 = (chunk % TilesN) * f.Nc;
             int nc = Math.Min(f.Nc, N - j0);
             int kp = f.KPad(K);
@@ -753,6 +816,55 @@ internal static unsafe class Int8Gemm
             {
                 Tile(t * f.Mc, j0, nc, bBase, colSums);
             }
+        }
+
+        private void RunShared(int chunk)
+        {
+            Int8Format f = F;
+            long stripB = (long)f.Nr * f.KPad(K);
+            if (chunk < PackChunks)
+            {
+                int s0 = chunk * PackStripsPer;
+                int count = Math.Min(Strips - s0, PackStripsPer);
+                try
+                {
+                    Source!.Pack(s0, count, SharedB + (s0 * stripB), SharedSums + ((long)s0 * f.Nr));
+                }
+                finally
+                {
+                    // Set even on failure so no waiting chunk spins forever; the failure itself is reported by ParallelFor.
+                    for (int i = 0; i < count; i++)
+                    {
+                        Volatile.Write(ref Ready[s0 + i], 1);
+                    }
+                }
+
+                return;
+            }
+
+            // Panel-major: the first tile chunks use the panel whose strips were claimed first.
+            chunk -= PackChunks;
+            int panel = chunk / TilesM, t = chunk % TilesM;
+            int j0 = panel * f.Nc;
+            int nc = Math.Min(f.Nc, N - j0);
+            int first = j0 / f.Nr, last = first + ((nc + f.Nr - 1) / f.Nr);
+            for (int s = first; s < last; s++)
+            {
+                int spins = 0;
+                while (Volatile.Read(ref Ready[s]) == 0)
+                {
+                    if (++spins < 200)
+                    {
+                        Thread.SpinWait(8);
+                    }
+                    else
+                    {
+                        Thread.Yield();
+                    }
+                }
+            }
+
+            Tile(t * f.Mc, j0, nc, SharedB + (first * stripB), SharedSums + j0);
         }
 
         // One tile of rows i0.. by the columns j0.. of the panel at bBase (whose first strip holds column j0); colSums[0] is column j0's sum.
@@ -912,6 +1024,58 @@ internal static unsafe class Int8Gemm
             int hi = ep.QuantUnsigned ? 255 : 127;
             Vector128<float> vms = Vector128.Create(mRow), vz = Vector128.Create((float)ep.QuantZero);
             Vector128<float> vlo = Vector128.Create((float)lo), vhi = Vector128.Create((float)hi);
+            // With a finite multiplier no value can be NaN, so the sums can be clamped in float and converted with the hardware's own
+            // round-to-nearest-even conversion (one instruction instead of Round, add, NaN select and truncating convert); see RoundCvt.
+            bool cvt = !perCol && float.IsFinite(mRow) && (Avx.IsSupported || AdvSimd.Arm64.IsSupported);
+            if (cvt && Avx.IsSupported && Vector256.IsHardwareAccelerated)
+            {
+                Vector256<int> wc = Vector256.Create(c), wzp = Vector256.Create(ep.QuantZero);
+                Vector256<float> wm = Vector256.Create(mRow);
+                Vector256<float> wlo = Vector256.Create((float)(lo - ep.QuantZero)), whi = Vector256.Create((float)(hi - ep.QuantZero));
+                for (; j + 32 <= nc; j += 32)
+                {
+                    Vector256<int> q0 = RoundCvt8(Vector256.Load(row + j) + wc, wm, wlo, whi) + wzp;
+                    Vector256<int> q1 = RoundCvt8(Vector256.Load(row + j + 8) + wc, wm, wlo, whi) + wzp;
+                    Vector256<int> q2 = RoundCvt8(Vector256.Load(row + j + 16) + wc, wm, wlo, whi) + wzp;
+                    Vector256<int> q3 = RoundCvt8(Vector256.Load(row + j + 24) + wc, wm, wlo, whi) + wzp;
+                    Vector256<short> s0 = Vector256.Narrow(q0, q1);
+                    Vector256<short> s1 = Vector256.Narrow(q2, q3);
+                    Vector256<byte> packed = ep.QuantUnsigned ? Vector256.Narrow(s0.AsUInt16(), s1.AsUInt16()) : Vector256.Narrow(s0, s1).AsByte();
+                    packed.Store(q + j);
+                }
+            }
+            else if (cvt && AdvSimd.Arm64.IsSupported)
+            {
+                Vector128<int> zpi = Vector128.Create(ep.QuantZero);
+                Vector128<float> clo = Vector128.Create((float)(lo - ep.QuantZero)), chi = Vector128.Create((float)(hi - ep.QuantZero));
+                for (; j + 16 <= nc; j += 16)
+                {
+                    Vector128<int> q0 = RoundCvt4(Vector128.Load(row + j) + vc, vms, clo, chi) + zpi;
+                    Vector128<int> q1 = RoundCvt4(Vector128.Load(row + j + 4) + vc, vms, clo, chi) + zpi;
+                    Vector128<int> q2 = RoundCvt4(Vector128.Load(row + j + 8) + vc, vms, clo, chi) + zpi;
+                    Vector128<int> q3 = RoundCvt4(Vector128.Load(row + j + 12) + vc, vms, clo, chi) + zpi;
+                    Int8Quantize.Pack16(q0, q1, q2, q3, ep.QuantUnsigned).Store(q + j);
+                }
+            }
+            else if (Vector256.IsHardwareAccelerated)
+            {
+                // Eight lanes at a time: the same operations per element as the four-lane loop below, so the bytes are the same.
+                Vector256<int> wc = Vector256.Create(c);
+                Vector256<float> wm = Vector256.Create(mRow), wz = Vector256.Create((float)ep.QuantZero);
+                Vector256<float> wlo = Vector256.Create((float)lo), whi = Vector256.Create((float)hi);
+                for (; j + 32 <= nc; j += 32)
+                {
+                    Vector256<int> q0 = QuantSum8(Vector256.Load(row + j) + wc, perCol ? Vector256.Load(ep.MultVec + j0 + j) : wm, wz, wlo, whi);
+                    Vector256<int> q1 = QuantSum8(Vector256.Load(row + j + 8) + wc, perCol ? Vector256.Load(ep.MultVec + j0 + j + 8) : wm, wz, wlo, whi);
+                    Vector256<int> q2 = QuantSum8(Vector256.Load(row + j + 16) + wc, perCol ? Vector256.Load(ep.MultVec + j0 + j + 16) : wm, wz, wlo, whi);
+                    Vector256<int> q3 = QuantSum8(Vector256.Load(row + j + 24) + wc, perCol ? Vector256.Load(ep.MultVec + j0 + j + 24) : wm, wz, wlo, whi);
+                    Vector256<short> s0 = Vector256.Narrow(q0, q1);
+                    Vector256<short> s1 = Vector256.Narrow(q2, q3);
+                    Vector256<byte> packed = ep.QuantUnsigned ? Vector256.Narrow(s0.AsUInt16(), s1.AsUInt16()) : Vector256.Narrow(s0, s1).AsByte();
+                    packed.Store(q + j);
+                }
+            }
+
             for (; j + 16 <= nc; j += 16)
             {
                 Vector128<int> q0 = QuantSum(Vector128.Load(row + j) + vc, perCol ? Vector128.Load(ep.MultVec + j0 + j) : vms, vz, vlo, vhi);

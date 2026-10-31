@@ -115,15 +115,22 @@ internal static unsafe class Int8Pack
         }
     }
 
-    // Loads sixteen columns of one source row into the shifted signed domain; fewer than sixteen are read through a stack copy and the
-    // rest read as zero.
+    // Loads sixteen columns of one source row into the shifted signed domain. Fewer than sixteen valid columns (the ragged last strip of
+    // a 14x14 or 7x7 layer): when sixteen bytes are readable from here, they are loaded whole and the lanes past the valid columns are
+    // masked to zero (the shifted value of the padding); only the last rows of the matrix go through a stack copy.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Vector128<sbyte> LoadRow(byte* p, int cols, bool u8, byte* tmp)
+    private static Vector128<sbyte> LoadRow(byte* p, int cols, bool u8, byte* tmp, bool readable16, Vector128<sbyte> keep)
     {
         if (cols == 16)
         {
             Vector128<byte> v = Vector128.Load(p);
             return (u8 ? v ^ Vector128.Create((byte)0x80) : v).AsSByte();
+        }
+
+        if (readable16)
+        {
+            Vector128<byte> v = Vector128.Load(p);
+            return (u8 ? v ^ Vector128.Create((byte)0x80) : v).AsSByte() & keep;
         }
 
         for (int c = 0; c < 16; c++)
@@ -167,13 +174,16 @@ internal static unsafe class Int8Pack
                 }
 
                 byte* col = src + j0 + c0;
+                Vector128<sbyte> keep = Vector128.LessThan(Vector128.Create((sbyte)0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), Vector128.Create((sbyte)cb));
+                // Bytes of the source that exist: the last row only has n columns.
+                long readable = ((long)(k - 1) * ldb) + n - (j0 + c0);
                 for (int q = 0; q < groups; q++)
                 {
                     int p = q * g;
                     Vector128<sbyte> r0 = default, r1 = default, r2 = default, r3 = default;
                     if (p < k)
                     {
-                        r0 = LoadRow(col + (p * ldb), cb, u8, tmp);
+                        r0 = LoadRow(col + (p * ldb), cb, u8, tmp, (p * ldb) + 16 <= readable, keep);
                         if (wantSums)
                         {
                             sums.Add(r0);
@@ -182,7 +192,7 @@ internal static unsafe class Int8Pack
 
                     if (p + 1 < k)
                     {
-                        r1 = LoadRow(col + ((p + 1) * ldb), cb, u8, tmp);
+                        r1 = LoadRow(col + ((p + 1) * ldb), cb, u8, tmp, ((p + 1) * ldb) + 16 <= readable, keep);
                         if (wantSums)
                         {
                             sums.Add(r1);
@@ -193,7 +203,7 @@ internal static unsafe class Int8Pack
                     {
                         if (p + 2 < k)
                         {
-                            r2 = LoadRow(col + ((p + 2) * ldb), cb, u8, tmp);
+                            r2 = LoadRow(col + ((p + 2) * ldb), cb, u8, tmp, ((p + 2) * ldb) + 16 <= readable, keep);
                             if (wantSums)
                             {
                                 sums.Add(r2);
@@ -202,7 +212,7 @@ internal static unsafe class Int8Pack
 
                         if (p + 3 < k)
                         {
-                            r3 = LoadRow(col + ((p + 3) * ldb), cb, u8, tmp);
+                            r3 = LoadRow(col + ((p + 3) * ldb), cb, u8, tmp, ((p + 3) * ldb) + 16 <= readable, keep);
                             if (wantSums)
                             {
                                 sums.Add(r3);
