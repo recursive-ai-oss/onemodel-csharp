@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.Intrinsics;
+using RecursiveAI.OneModel.Kernels.Fast;
 using RecursiveAI.OneModel.Threading;
 
 namespace RecursiveAI.OneModel.Kernels;
@@ -37,6 +38,9 @@ internal static unsafe class ConvPacked
 
     [ThreadStatic]
     private static PackJob? t_packJob;
+
+    [ThreadStatic]
+    private static RowJob? t_rowJob;
 
     /// <summary>Floats <see cref="PackWeights"/> writes for weights of <paramref name="s"/> packed for <paramref name="path"/>.</summary>
     public static long PackedWeightsLength(KernelPath path, in ConvShape s)
@@ -100,6 +104,12 @@ internal static unsafe class ConvPacked
         int coutG = s.Cout / s.Groups;
         int k = cinG * s.KH * s.KW;
         int n = s.OutH * s.OutW;
+        if (n == 1 && packedWeights is not null && blk.Mr % 4 == 0 && s.KH == 1 && s.KW == 1 && s.H == 1 && s.W == 1)
+        {
+            RunSingleColumn(blk, s, input, packedWeights, output, threads, epilogue);
+            return;
+        }
+
         ChooseTiles(blk, coutG, n, k, (long)s.N * s.Groups, out int mc, out int nc);
         int tilesM = (coutG + mc - 1) / mc;
         int tilesN = (n + nc - 1) / nc;
@@ -158,6 +168,135 @@ internal static unsafe class ConvPacked
         {
             job.Release();
         }
+    }
+
+    // A 1x1 convolution of a 1x1 input (the squeeze-and-excitation layers of MobileNet-style networks) is a matrix-vector product.
+    // The tile microkernel would compute 32 columns to keep one, so it streams the weights through a vector kernel instead; the order
+    // of the sums per output is the tile kernel's, so the bits are the same.
+    private static void RunSingleColumn(
+        Gemm.Blocking blk, in ConvShape s, float* input, float* packedWeights, float* output, int threads, IGemmEpilogue? epilogue)
+    {
+        RowJob job = t_rowJob ??= new RowJob();
+        int k = s.Cin / s.Groups;
+        job.Setup(blk.Mr, s.Cin, s.Cout, s.Groups, input, packedWeights, output, epilogue);
+        try
+        {
+            long chunks = (long)s.N * s.Groups * job.ChunksPerImageGroup;
+            // The product is bound by reading the weights once, from wherever the last run left them: about 16 bytes (4 weights) per
+            // nanosecond per core.
+            long work = (long)s.N * s.Cout * k / 4;
+            ParallelFor.Run(job, checked((int)chunks), threads, work);
+        }
+        finally
+        {
+            job.Release();
+        }
+    }
+
+    // Chunks of the single-column product: StripsPerRowChunk strips of rows of one (image, group).
+    private sealed class RowJob : ChunkJob
+    {
+        private const int StripsPerRowChunk = 8;
+        private int _mr;
+        private int _cin;
+        private int _cinG;
+        private int _cout;
+        private int _coutG;
+        private int _groups;
+        private int _k;
+        private long _mPad;
+        private float* _input;
+        private float* _packed;
+        private float* _output;
+        private IGemmEpilogue? _epilogue;
+
+        public int ChunksPerImageGroup { get; private set; }
+
+        public void Setup(int mr, int cin, int cout, int groups, float* input, float* packed, float* output, IGemmEpilogue? epilogue)
+        {
+            _mr = mr;
+            _cin = cin;
+            _cinG = cin / groups;
+            _cout = cout;
+            _coutG = cout / groups;
+            _groups = groups;
+            _k = _cinG;
+            _mPad = (long)((_coutG + mr - 1) / mr) * mr;
+            _input = input;
+            _packed = packed;
+            _output = output;
+            _epilogue = epilogue;
+            ChunksPerImageGroup = (((_coutG + mr - 1) / mr) + StripsPerRowChunk - 1) / StripsPerRowChunk;
+        }
+
+        public void Release() => _epilogue = null;
+
+        public override void RunChunk(int chunk)
+        {
+            int part = chunk % ChunksPerImageGroup;
+            int ig = chunk / ChunksPerImageGroup;
+            int img = ig / _groups;
+            int g = ig % _groups;
+            int mr = _mr;
+            int row0 = part * StripsPerRowChunk * mr;
+            int rows = Math.Min(_coutG - row0, StripsPerRowChunk * mr);
+            float* x = _input + ((long)img * _cin) + ((long)g * _cinG);
+            float* c = _output + ((long)img * _cout) + ((long)g * _coutG) + row0;
+            int spv = mr / 4;
+            int full = rows / 4;
+            float* tail = stackalloc float[4];
+            for (int pc = 0; pc < _k; pc += Gemm.Kc)
+            {
+                int kc = Math.Min(Gemm.Kc, _k - pc);
+                int acc = pc > 0 ? 1 : 0;
+                // Packed layout (GemmPack.PackAPanels): block pc at pc * mPad, strip s of it at s * kc * mr; sliver j of the rows is four
+                // rows into strip j / spv.
+                float* block = _packed + ((long)g * _mPad * _k) + (pc * _mPad) + ((long)(row0 / mr) * kc * mr);
+                long strip = (long)kc * mr;
+                float* xb = x + pc;
+                int j = 0;
+                for (; j + 8 <= full; j += 8)
+                {
+                    FastRowGemv.Slivers8(
+                        kc, mr, Sliver(block, strip, spv, j), Sliver(block, strip, spv, j + 1), Sliver(block, strip, spv, j + 2),
+                        Sliver(block, strip, spv, j + 3), Sliver(block, strip, spv, j + 4), Sliver(block, strip, spv, j + 5),
+                        Sliver(block, strip, spv, j + 6), Sliver(block, strip, spv, j + 7), xb, c + (4 * j), acc);
+                }
+
+                if (j + 4 <= full)
+                {
+                    FastRowGemv.Slivers4(
+                        kc, mr, Sliver(block, strip, spv, j), Sliver(block, strip, spv, j + 1), Sliver(block, strip, spv, j + 2),
+                        Sliver(block, strip, spv, j + 3), xb, c + (4 * j), acc);
+                    j += 4;
+                }
+
+                for (; j < full; j++)
+                {
+                    FastRowGemv.Sliver1(kc, mr, Sliver(block, strip, spv, j), xb, c + (4 * j), acc);
+                }
+
+                int rest = rows - (full * 4);
+                if (rest > 0)
+                {
+                    // The last sliver is partly padding: compute it on a copy and move only the real rows.
+                    for (int r = 0; r < 4; r++)
+                    {
+                        tail[r] = acc != 0 && r < rest ? c[(4 * full) + r] : 0f;
+                    }
+
+                    FastRowGemv.Sliver1(kc, mr, Sliver(block, strip, spv, full), xb, tail, acc);
+                    for (int r = 0; r < rest; r++)
+                    {
+                        c[(4 * full) + r] = tail[r];
+                    }
+                }
+            }
+
+            _epilogue?.Apply(c, 1, (g * _coutG) + row0, 0, rows, 1, KernelMode.Fast);
+        }
+
+        private static float* Sliver(float* block, long strip, int spv, int j) => block + ((j / spv) * strip) + ((j % spv) * 4);
     }
 
     // Tile sizes from the shape alone: wide tiles first, shorter ones only when the shape would otherwise give too few chunks. The

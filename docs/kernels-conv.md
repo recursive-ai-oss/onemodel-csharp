@@ -58,6 +58,29 @@ the shared gathering phase is estimated at one nanosecond per gathered element (
 on 8 threads (indicative, shared host), MobileNetV3-large's convolutions took 4.0 ms with the rate set to 40, 2.9 ms at 20, 2.1 ms at 10
 and 1.9 ms at 5 or lower; ResNet-50's did not change. Depthwise convolutions use four times their estimate for the same reason.
 
+## Single-column products
+
+A convolution with a 1x1 kernel over a 1x1 input (the squeeze-and-excitation layers of MobileNet-style networks: `Cout x Cin` weights
+against one vector) with prepacked weights is a matrix-vector product, and the tile microkernel would compute 32 columns to keep one.
+It runs instead as follows, on every path whose strip height `MR` is a multiple of four (AVX-512, NEON, the 4-lane and scalar paths;
+the AVX2 path with `MR = 6` keeps the tile kernel).
+
+* The rows of a strip are cut into slivers of four rows. A sliver's four outputs are one 4-lane vector; each step of k broadcasts the
+  input value `x[p]` and does one fused multiply-add of it with the sliver's four packed weights (`p*MR + r` in the strip). Eight slivers
+  (then four, then one) run together to give the multiply-add independent chains.
+* Each output is accumulated in increasing k with one fused multiply-add per step, from +0 or from the stored partial sum of the previous
+  block of `Kc` taps, which is the tile microkernel's order, so the bits are the same as the tile path's (the tests compare the two).
+  Where no fused multiply-add exists the multiply and add are separate, as in the 4-lane and scalar tile kernels.
+* The last sliver of a ragged strip is computed on a four-float copy and only its real rows are stored.
+* A chunk is eight strips of one image and group (`8 * MR` rows), a constant of the shape. The bias, activation and residual epilogue is
+  applied to each chunk's rows (a `rows x 1` tile).
+* The work estimate for the pool is one nanosecond per four weights, since the product is bound by streaming the weights once, so only
+  layers of about 160 000 weights or more use a second thread.
+
+Measured on MobileNetV3-large (indicative, one x64 machine with AVX-512, shared host, same job, median of three): the sixteen
+squeeze-and-excitation convolutions took 0.78 ms of a 7.4 ms run on one thread and 0.87 of 3.2 ms on eight; the model runs 6.75 -> 6.24 ms
+on one thread, 2.45 -> 1.41 ms on eight and 3.0 -> 2.1 ms on sixteen.
+
 ## Memory
 
 One packed copy of the weights replaces the original (the pass releases the original once nothing else reads it). Scratch per thread:

@@ -169,6 +169,13 @@ public class ConvTests
             new(1, 20, 25, 25, 20, 3, 3, 1, 1, 2, 2, 2, 2, 2, 2, 1),
             new(1, 8, 1, 300, 12, 1, 7, 1, 2, 0, 3, 0, 3, 1, 1, 1),
             new(1, 512, 7, 7, 96, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+            // A 1x1 input and kernel (a squeeze-and-excitation layer) runs as a matrix-vector product: ragged rows and slivers, more than
+            // Kc taps, groups, two images.
+            new(1, 672, 1, 1, 168, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1),
+            new(2, 700, 1, 1, 97, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1),
+            new(1, 24, 1, 1, 36, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 3),
+            new(1, 5, 1, 1, 7, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1),
+            new(1, 520, 1, 1, 1000, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1),
         ];
         foreach (ConvShape s in shapes)
         {
