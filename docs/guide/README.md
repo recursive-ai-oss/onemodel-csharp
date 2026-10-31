@@ -27,7 +27,7 @@ You use the lowest one that does the job.
 
 ## Install
 
-    dotnet add package RecursiveAI.OneModel --prerelease
-    dotnet add package RecursiveAI.OneModel.Training --prerelease      # only to train
+    dotnet add package RecursiveAI.OneModel
+    dotnet add package RecursiveAI.OneModel.Training      # only to train
 
 Both packages reference nothing but the .NET shared framework (net10.0). They run unchanged on Linux, macOS and Windows, x64 and arm64, and in a browser (WebAssembly). Under NativeAOT see the note in the [README](../../README.md).

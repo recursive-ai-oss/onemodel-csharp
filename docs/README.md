@@ -18,6 +18,7 @@ Looking for how to use the library? See the [usage guide](guide/README.md).
 | exp, log, tanh, erf, sigmoid, GELU: polynomials and error | [exact-transcendentals.md](exact-transcendentals.md) |
 | Reference oracles, pinned versions, comparison metrics | [oracles.md](oracles.md) |
 | Benchmark method | [bench-method.md](bench-method.md) |
+| Performance against ONNX Runtime (1.0 measurements) | [performance.md](performance.md) |
 | Convolution in fast mode: tiles, gathering, prepacked weights, threads | [kernels-conv.md](kernels-conv.md) |
 | Depthwise convolution: phase planes, lane layout, bits | [kernels-depthwise.md](kernels-depthwise.md) |
 | Half-precision storage: conversions, the widening adapter, compact weights | [fp16.md](fp16.md) |

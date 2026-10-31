@@ -2,7 +2,7 @@
 
 A neural-network runtime for .NET in pure managed C#, with no native binaries and no dependency beyond the shared framework. It loads ONNX models and its own format, optimizes the graph and runs it on SIMD CPU kernels, and it trains models on the same kernels.
 
-**Status:** preview. What works:
+**Status:** 1.0. What works:
 
 - **Inference:** ONNX import (our own protobuf reader, any opset from 7, external data), graph passes (constant folding, weight prepacking, conv/GEMM/attention fusions), memory planning, thread-safe sessions and the one-line `Model.Load(...).Run(...)`. Coverage of the ONNX backend test suite is published in [docs/conformance.md](docs/conformance.md), gaps included; control flow (`If`, `Loop`, `Scan`), sequences and optionals run.
 - **Data types:** fp32, fp16/bf16 models and weight storage, int8 (dynamic and static quantization, per-channel weights, QDQ graphs).
@@ -11,7 +11,7 @@ A neural-network runtime for .NET in pure managed C#, with no native binaries an
 - **Own format:** save and load an imported model in a simple memory-mappable format ([docs/format.md](docs/format.md)).
 - **Training** (package `RecursiveAI.OneModel.Training`): reverse-mode autodiff on the tensor layer, modules, losses, SGD/Adam/AdamW, learning-rate schedules, deterministic data loading, bit-exact checkpoints, and tracing a module into a graph that runs and saves like an imported one ([docs/training.md](docs/training.md), [docs/tracing.md](docs/tracing.md)).
 
-The API may still change between previews; see [CHANGELOG.md](CHANGELOG.md).
+Speed and memory against ONNX Runtime on x64 and arm64, slower rows included: [docs/performance.md](docs/performance.md). The public API follows Semantic Versioning from 1.0; changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Layout
 

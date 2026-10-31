@@ -301,10 +301,10 @@ One line per case: `case` (opset), fast status, exact status, reason.
 
 | Case | Opset | Fast | Exact | Reason |
 |---|---:|---|---|---|
-| test_acos | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Acos. Use ArithmeticMode.Fast or remove these operators |
-| test_acos_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Acos. Use ArithmeticMode.Fast or remove these operators |
-| test_acosh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Acosh. Use ArithmeticMode.Fast or remove these operator |
-| test_acosh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Acosh. Use ArithmeticMode.Fast or remove these operator |
+| test_acos | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Acos. Use ArithmeticMode.Fast or remove these operator |
+| test_acos_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Acos. Use ArithmeticMode.Fast or remove these operator |
+| test_acosh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Acosh. Use ArithmeticMode.Fast or remove these operato |
+| test_acosh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Acosh. Use ArithmeticMode.Fast or remove these operato |
 | test_adagrad | 0 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.training.Adagrad (opset 1) |
 | test_adagrad_multiple | 0 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.training.Adagrad (opset 1) |
 | test_adam | 0 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.training.Adam (opset 1) |
@@ -317,78 +317,78 @@ One line per case: `case` (opset), fast status, exact status, reason.
 | test_ai_onnx_ml_label_encoder_tensor_value_only_mapping | 0 | unsupported-op | unsupported-op | value 'X' has element type string |
 | test_ai_onnx_ml_tree_ensemble_set_membership | 0 | unsupported-op | unsupported-op | no kernel: ai.onnx.ml.TreeEnsemble (opset 5) |
 | test_ai_onnx_ml_tree_ensemble_single_tree | 0 | unsupported-op | unsupported-op | no kernel: ai.onnx.ml.TreeEnsemble (opset 5) |
-| test_asin | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Asin. Use ArithmeticMode.Fast or remove these operators |
-| test_asin_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Asin. Use ArithmeticMode.Fast or remove these operators |
-| test_asinh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Asinh. Use ArithmeticMode.Fast or remove these operator |
-| test_asinh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Asinh. Use ArithmeticMode.Fast or remove these operator |
-| test_atan | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Atan. Use ArithmeticMode.Fast or remove these operators |
-| test_atan_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Atan. Use ArithmeticMode.Fast or remove these operators |
-| test_atanh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Atanh. Use ArithmeticMode.Fast or remove these operator |
-| test_atanh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Atanh. Use ArithmeticMode.Fast or remove these operator |
-| test_attention_3d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_diff_heads_sizes | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_diff_heads_sizes_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_diff_heads_sizes_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_diff_heads_sizes_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_diff_heads_sizes_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_diff_heads_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_gqa | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_gqa_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_gqa_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_gqa_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_gqa_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_gqa_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_transpose_verification | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_with_past_and_present_qk_matmul | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_with_past_and_present_qk_matmul_bias | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_with_past_and_present_qk_matmul_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_3d_with_past_and_present_qk_matmul_softmax | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_attn_mask_3d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_attn_mask_3d_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_attn_mask_4d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_attn_mask_4d_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_attn_mask_bool | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_attn_mask_bool_4d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_diff_heads_mask4d_padded_kv | 24 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_diff_heads_sizes | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_diff_heads_sizes_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_diff_heads_sizes_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_diff_heads_sizes_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_diff_heads_sizes_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_diff_heads_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_diff_heads_with_past_and_present_mask3d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_diff_heads_with_past_and_present_mask4d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_fp16 | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_gqa | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_gqa_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_gqa_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_gqa_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_gqa_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_gqa_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_gqa_with_past_and_present_fp16 | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_softcap_neginf_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_softcap_neginf_mask_poison | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_past_and_present_qk_matmul | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_past_and_present_qk_matmul_bias | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_past_and_present_qk_matmul_bias_4d_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_past_and_present_qk_matmul_bias_4d_mask_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_qk_matmul | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_qk_matmul_bias | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_qk_matmul_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
-| test_attention_4d_with_qk_matmul_softmax | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these oper |
+| test_asin | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Asin. Use ArithmeticMode.Fast or remove these operator |
+| test_asin_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Asin. Use ArithmeticMode.Fast or remove these operator |
+| test_asinh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Asinh. Use ArithmeticMode.Fast or remove these operato |
+| test_asinh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Asinh. Use ArithmeticMode.Fast or remove these operato |
+| test_atan | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Atan. Use ArithmeticMode.Fast or remove these operator |
+| test_atan_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Atan. Use ArithmeticMode.Fast or remove these operator |
+| test_atanh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Atanh. Use ArithmeticMode.Fast or remove these operato |
+| test_atanh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Atanh. Use ArithmeticMode.Fast or remove these operato |
+| test_attention_3d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_diff_heads_sizes | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_diff_heads_sizes_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_diff_heads_sizes_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_diff_heads_sizes_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_diff_heads_sizes_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_diff_heads_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_gqa | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_gqa_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_gqa_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_gqa_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_gqa_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_gqa_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_transpose_verification | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_with_past_and_present_qk_matmul | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_with_past_and_present_qk_matmul_bias | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_with_past_and_present_qk_matmul_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_3d_with_past_and_present_qk_matmul_softmax | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_attn_mask_3d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_attn_mask_3d_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_attn_mask_4d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_attn_mask_4d_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_attn_mask_bool | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_attn_mask_bool_4d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_diff_heads_mask4d_padded_kv | 24 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_diff_heads_sizes | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_diff_heads_sizes_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_diff_heads_sizes_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_diff_heads_sizes_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_diff_heads_sizes_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_diff_heads_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_diff_heads_with_past_and_present_mask3d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_diff_heads_with_past_and_present_mask4d | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_fp16 | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_gqa | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_gqa_attn_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_gqa_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_gqa_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_gqa_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_gqa_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_gqa_with_past_and_present_fp16 | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_scaled | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_softcap_neginf_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_softcap_neginf_mask_poison | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_past_and_present | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_past_and_present_qk_matmul | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_past_and_present_qk_matmul_bias | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_past_and_present_qk_matmul_bias_4d_mask | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_past_and_present_qk_matmul_bias_4d_mask_causal | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_qk_matmul | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_qk_matmul_bias | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_qk_matmul_softcap | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
+| test_attention_4d_with_qk_matmul_softmax | 23 | pass | not-exact | Exact mode is not available: no exact kernel exists for Attention. Use ArithmeticMode.Fast or remove these ope |
 | test_basic_deform_conv_with_padding | 22 | unsupported-op | unsupported-op | no kernel: DeformConv (opset 22) |
 | test_basic_deform_conv_without_padding | 22 | unsupported-op | unsupported-op | no kernel: DeformConv (opset 22) |
 | test_batchnorm_epsilon_training_mode | 15 | unsupported-op | unsupported-op | BatchNormalization: training_mode = 1 is not supported |
@@ -399,10 +399,10 @@ One line per case: `case` (opset), fast status, exact status, reason.
 | test_bernoulli_expanded | 22 | unsupported-op | unsupported-op | no kernel: RandomUniformLike (opset 22) |
 | test_bernoulli_seed | 22 | unsupported-op | unsupported-op | no kernel: Bernoulli (opset 22) |
 | test_bernoulli_seed_expanded | 22 | unsupported-op | unsupported-op | no kernel: RandomUniformLike (opset 22) |
-| test_blackmanwindow | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for BlackmanWindow. Use ArithmeticMode.Fast or remove these |
-| test_blackmanwindow_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators. |
-| test_blackmanwindow_symmetric | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for BlackmanWindow. Use ArithmeticMode.Fast or remove these |
-| test_blackmanwindow_symmetric_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators. |
+| test_blackmanwindow | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for BlackmanWindow. Use ArithmeticMode.Fast or remove thes |
+| test_blackmanwindow_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators |
+| test_blackmanwindow_symmetric | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for BlackmanWindow. Use ArithmeticMode.Fast or remove thes |
+| test_blackmanwindow_symmetric_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators |
 | test_cast_FLOAT16_to_FLOAT4E2M1 | 25 | unsupported-type | unsupported-type | value 'output' has element type float4e2m1 |
 | test_cast_FLOAT16_to_FLOAT8E4M3FN | 25 | unsupported-type | unsupported-type | value 'output' has element type float8e4m3fn |
 | test_cast_FLOAT16_to_FLOAT8E4M3FNUZ | 25 | unsupported-type | unsupported-type | value 'output' has element type float8e4m3fnuz |
@@ -564,10 +564,10 @@ One line per case: `case` (opset), fast status, exact status, reason.
 | test_causal_conv_with_state_with_bias | 27 | unsupported-op | unsupported-op | no kernel: CausalConvWithState (opset 27) |
 | test_causal_conv_with_state_with_bias_and_past_state | 27 | unsupported-op | unsupported-op | no kernel: CausalConvWithState (opset 27) |
 | test_causal_conv_with_state_with_past_state | 27 | unsupported-op | unsupported-op | no kernel: CausalConvWithState (opset 27) |
-| test_cos | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators. |
-| test_cos_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators. |
-| test_cosh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cosh. Use ArithmeticMode.Fast or remove these operators |
-| test_cosh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cosh. Use ArithmeticMode.Fast or remove these operators |
+| test_cos | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators |
+| test_cos_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators |
+| test_cosh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cosh. Use ArithmeticMode.Fast or remove these operator |
+| test_cosh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cosh. Use ArithmeticMode.Fast or remove these operator |
 | test_deform_conv_with_mask_bias | 22 | unsupported-op | unsupported-op | no kernel: DeformConv (opset 22) |
 | test_deform_conv_with_multiple_offset_groups | 22 | unsupported-op | unsupported-op | no kernel: DeformConv (opset 22) |
 | test_dequantizelinear_blocked | 25 | unsupported-op | unsupported-op | DequantizeLinear: block_size (blocked quantization) is not supported |
@@ -580,16 +580,16 @@ One line per case: `case` (opset), fast status, exact status, reason.
 | test_dequantizelinear_int4 | 25 | unsupported-type | unsupported-type | value 'x' has element type int4 |
 | test_dequantizelinear_uint2 | 25 | unsupported-type | unsupported-type | value 'x' has element type uint2 |
 | test_dequantizelinear_uint4 | 25 | unsupported-type | unsupported-type | value 'x' has element type uint4 |
-| test_dft | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators. |
-| test_dft_axis | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators. |
-| test_dft_axis_opset19 | 19 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators. |
+| test_dft | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators |
+| test_dft_axis | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators |
+| test_dft_axis_opset19 | 19 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators |
 | test_dft_inverse | 20 | known-diff | not-exact | expected data carries 1.9e-7 float32 FFT noise, above the case's 1e-7 absolute tolerance |
 | test_dft_inverse_opset19 | 19 | known-diff | not-exact | expected data carries 1.9e-7 float32 FFT noise, above the case's 1e-7 absolute tolerance |
-| test_dft_irfft | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators. |
-| test_dft_irfft_opset19 | 19 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators. |
-| test_dft_opset19 | 19 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators. |
-| test_dft_rfft | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators. |
-| test_dft_rfft_opset19 | 19 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators. |
+| test_dft_irfft | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators |
+| test_dft_irfft_opset19 | 19 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators |
+| test_dft_opset19 | 19 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators |
+| test_dft_rfft | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators |
+| test_dft_rfft_opset19 | 19 | pass | not-exact | Exact mode is not available: no exact kernel exists for DFT. Use ArithmeticMode.Fast or remove these operators |
 | test_equal_string | 19 | unsupported-type | unsupported-type | value 'x' has element type string |
 | test_equal_string_broadcast | 19 | unsupported-type | unsupported-type | value 'x' has element type string |
 | test_flexattention | 26 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.FlexAttention (opset 1) |
@@ -604,34 +604,34 @@ One line per case: `case` (opset), fast status, exact status, reason.
 | test_flexattention_scaled | 26 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.FlexAttention (opset 1) |
 | test_flexattention_score_mod | 26 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.FlexAttention (opset 1) |
 | test_flexattention_soft_cap | 26 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.FlexAttention (opset 1) |
-| test_gelu_tanh_1_expanded | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_gelu_tanh_2_expanded | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_gridsample | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_aligncorners_true | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_bicubic | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_bicubic_align_corners_0_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_bicubic_align_corners_1_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_bilinear | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_bilinear_align_corners_0_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_bilinear_align_corners_1_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_border_padding | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_nearest | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_nearest_align_corners_0_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_nearest_align_corners_1_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_reflection_padding | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_volumetric_bilinear_align_corners_0 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_volumetric_bilinear_align_corners_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_volumetric_nearest_align_corners_0 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_volumetric_nearest_align_corners_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_gridsample_zeros_padding | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these ope |
-| test_hammingwindow | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for HammingWindow. Use ArithmeticMode.Fast or remove these  |
-| test_hammingwindow_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators. |
-| test_hammingwindow_symmetric | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for HammingWindow. Use ArithmeticMode.Fast or remove these  |
-| test_hammingwindow_symmetric_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators. |
-| test_hannwindow | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for HannWindow. Use ArithmeticMode.Fast or remove these ope |
-| test_hannwindow_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators. |
-| test_hannwindow_symmetric | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for HannWindow. Use ArithmeticMode.Fast or remove these ope |
-| test_hannwindow_symmetric_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators. |
+| test_gelu_tanh_1_expanded | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_gelu_tanh_2_expanded | 20 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_gridsample | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_aligncorners_true | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_bicubic | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_bicubic_align_corners_0_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_bicubic_align_corners_1_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_bilinear | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_bilinear_align_corners_0_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_bilinear_align_corners_1_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_border_padding | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_nearest | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_nearest_align_corners_0_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_nearest_align_corners_1_additional_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_reflection_padding | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_volumetric_bilinear_align_corners_0 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_volumetric_bilinear_align_corners_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_volumetric_nearest_align_corners_0 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_volumetric_nearest_align_corners_1 | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_gridsample_zeros_padding | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for GridSample. Use ArithmeticMode.Fast or remove these op |
+| test_hammingwindow | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for HammingWindow. Use ArithmeticMode.Fast or remove these |
+| test_hammingwindow_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators |
+| test_hammingwindow_symmetric | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for HammingWindow. Use ArithmeticMode.Fast or remove these |
+| test_hammingwindow_symmetric_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators |
+| test_hannwindow | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for HannWindow. Use ArithmeticMode.Fast or remove these op |
+| test_hannwindow_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators |
+| test_hannwindow_symmetric | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for HannWindow. Use ArithmeticMode.Fast or remove these op |
+| test_hannwindow_symmetric_expanded | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for Cos. Use ArithmeticMode.Fast or remove these operators |
 | test_image_decoder_decode_bmp_rgb | 20 | unsupported-op | unsupported-op | no kernel: ImageDecoder (opset 20) |
 | test_image_decoder_decode_jpeg2k_rgb | 20 | unsupported-op | unsupported-op | no kernel: ImageDecoder (opset 20) |
 | test_image_decoder_decode_jpeg_bgr | 20 | unsupported-op | unsupported-op | no kernel: ImageDecoder (opset 20) |
@@ -655,34 +655,34 @@ One line per case: `case` (opset), fast status, exact status, reason.
 | test_linear_attention_linear_t1_no_past | 27 | unsupported-op | unsupported-op | no kernel: LinearAttention (opset 27) |
 | test_linear_attention_no_past_explicit_zeros | 27 | unsupported-op | unsupported-op | no kernel: LinearAttention (opset 27) |
 | test_linear_attention_prefill_with_past | 27 | unsupported-op | unsupported-op | no kernel: LinearAttention (opset 27) |
-| test_lppool_1d_default | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operato |
-| test_lppool_2d_default | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operato |
-| test_lppool_2d_dilations | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operato |
-| test_lppool_2d_pads | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operato |
-| test_lppool_2d_same_lower | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operato |
-| test_lppool_2d_same_upper | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operato |
-| test_lppool_2d_strides | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operato |
-| test_lppool_3d_default | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operato |
-| test_lrn | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for LRN. Use ArithmeticMode.Fast or remove these operators. |
-| test_lrn_default | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for LRN. Use ArithmeticMode.Fast or remove these operators. |
-| test_melweightmatrix | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for MelWeightMatrix. Use ArithmeticMode.Fast or remove thes |
+| test_lppool_1d_default | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operat |
+| test_lppool_2d_default | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operat |
+| test_lppool_2d_dilations | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operat |
+| test_lppool_2d_pads | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operat |
+| test_lppool_2d_same_lower | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operat |
+| test_lppool_2d_same_upper | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operat |
+| test_lppool_2d_strides | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operat |
+| test_lppool_3d_default | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for LpPool. Use ArithmeticMode.Fast or remove these operat |
+| test_lrn | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for LRN. Use ArithmeticMode.Fast or remove these operators |
+| test_lrn_default | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for LRN. Use ArithmeticMode.Fast or remove these operators |
+| test_melweightmatrix | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for MelWeightMatrix. Use ArithmeticMode.Fast or remove the |
 | test_momentum | 0 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.training.Momentum (opset 1) |
 | test_momentum_multiple | 0 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.training.Momentum (opset 1) |
-| test_mvn_expanded | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_mvn_expanded_ver18 | 18 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
+| test_mvn_expanded | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_mvn_expanded_ver18 | 18 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
 | test_nesterov_momentum | 0 | unsupported-op | unsupported-op | no kernel: ai.onnx.preview.training.Momentum (opset 1) |
-| test_pow | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_bcast_array | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_bcast_scalar | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_example | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_types_float32_int32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_types_float32_int64 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_types_float32_uint32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_types_float32_uint64 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_types_int32_float32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_types_int32_int32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_types_int64_float32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
-| test_pow_types_int64_int64 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators. |
+| test_pow | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_bcast_array | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_bcast_scalar | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_example | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_types_float32_int32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_types_float32_int64 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_types_float32_uint32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_types_float32_uint64 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_types_int32_float32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_types_int32_int32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_types_int64_float32 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
+| test_pow_types_int64_int64 | 15 | pass | not-exact | Exact mode is not available: no exact kernel exists for Pow. Use ArithmeticMode.Fast or remove these operators |
 | test_quantizelinear_blocked_asymmetric | 25 | unsupported-op | unsupported-op | QuantizeLinear: block_size (blocked quantization) is not supported |
 | test_quantizelinear_blocked_symmetric | 25 | unsupported-op | unsupported-op | QuantizeLinear: block_size (blocked quantization) is not supported |
 | test_quantizelinear_e4m3fn | 25 | unsupported-type | unsupported-type | value 'y_zero_point' has element type float8e4m3fn |
@@ -714,49 +714,49 @@ One line per case: `case` (opset), fast status, exact status, reason.
 | test_regex_full_match_empty | 20 | unsupported-op | unsupported-op | value 'X' has element type string |
 | test_resize_downsample_scales_cubic_align_corners | 19 | known-diff | known-diff | Resize align_corners follows ONNX Runtime where the two backend cases disagree (docs/ops-conv.md) |
 | test_resize_downsample_scales_linear_align_corners | 19 | known-diff | known-diff | Resize align_corners follows ONNX Runtime where the two backend cases disagree (docs/ops-conv.md) |
-| test_roialign_aligned_false | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for RoiAlign. Use ArithmeticMode.Fast or remove these opera |
-| test_roialign_aligned_true | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for RoiAlign. Use ArithmeticMode.Fast or remove these opera |
-| test_roialign_mode_max | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for RoiAlign. Use ArithmeticMode.Fast or remove these opera |
-| test_sce_NCd1_mean_weight_negative_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_NCd1_mean_weight_negative_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_NCd1d2d3_none_no_weight_negative_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_NCd1d2d3_none_no_weight_negative_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_NCd1d2d3_sum_weight_high_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_NCd1d2d3_sum_weight_high_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_NCd1d2d3d4d5_mean_weight | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_NCd1d2d3d4d5_mean_weight_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_NCd1d2d3d4d5_none_no_weight | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_NCd1d2d3d4d5_none_no_weight_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_3d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_3d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_no_weight_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_no_weight_ii_3d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_no_weight_ii_3d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_no_weight_ii_4d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_no_weight_ii_4d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_no_weight_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_weight | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_weight_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_weight_ii_3d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_weight_ii_3d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_weight_ii_4d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_weight_ii_4d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_weight_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_mean_weight_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_none | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_none_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_none_weights | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_none_weights_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_sum | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sce_sum_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or rem |
-| test_sin | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Sin. Use ArithmeticMode.Fast or remove these operators. |
-| test_sin_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Sin. Use ArithmeticMode.Fast or remove these operators. |
-| test_sinh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Sinh. Use ArithmeticMode.Fast or remove these operators |
-| test_sinh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Sinh. Use ArithmeticMode.Fast or remove these operators |
-| test_stft | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for STFT. Use ArithmeticMode.Fast or remove these operators |
-| test_stft_with_window | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for STFT. Use ArithmeticMode.Fast or remove these operators |
+| test_roialign_aligned_false | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for RoiAlign. Use ArithmeticMode.Fast or remove these oper |
+| test_roialign_aligned_true | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for RoiAlign. Use ArithmeticMode.Fast or remove these oper |
+| test_roialign_mode_max | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for RoiAlign. Use ArithmeticMode.Fast or remove these oper |
+| test_sce_NCd1_mean_weight_negative_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_NCd1_mean_weight_negative_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_NCd1d2d3_none_no_weight_negative_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_NCd1d2d3_none_no_weight_negative_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_NCd1d2d3_sum_weight_high_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_NCd1d2d3_sum_weight_high_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_NCd1d2d3d4d5_mean_weight | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_NCd1d2d3d4d5_mean_weight_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_NCd1d2d3d4d5_none_no_weight | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_NCd1d2d3d4d5_none_no_weight_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_3d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_3d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_no_weight_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_no_weight_ii_3d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_no_weight_ii_3d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_no_weight_ii_4d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_no_weight_ii_4d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_no_weight_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_weight | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_weight_ii | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_weight_ii_3d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_weight_ii_3d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_weight_ii_4d | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_weight_ii_4d_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_weight_ii_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_mean_weight_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_none | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_none_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_none_weights | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_none_weights_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_sum | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sce_sum_log_prob | 13 | pass | not-exact | Exact mode is not available: no exact kernel exists for SoftmaxCrossEntropyLoss. Use ArithmeticMode.Fast or re |
+| test_sin | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Sin. Use ArithmeticMode.Fast or remove these operators |
+| test_sin_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Sin. Use ArithmeticMode.Fast or remove these operators |
+| test_sinh | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Sinh. Use ArithmeticMode.Fast or remove these operator |
+| test_sinh_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Sinh. Use ArithmeticMode.Fast or remove these operator |
+| test_stft | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for STFT. Use ArithmeticMode.Fast or remove these operator |
+| test_stft_with_window | 17 | pass | not-exact | Exact mode is not available: no exact kernel exists for STFT. Use ArithmeticMode.Fast or remove these operator |
 | test_string_concat | 20 | unsupported-op | unsupported-op | value 'x' has element type string |
 | test_string_concat_broadcasting | 20 | unsupported-op | unsupported-op | value 'x' has element type string |
 | test_string_concat_empty_string | 20 | unsupported-op | unsupported-op | value 'x' has element type string |
@@ -774,8 +774,8 @@ One line per case: `case` (opset), fast status, exact status, reason.
 | test_strnormalizer_export_monday_empty_output | 10 | unsupported-op | unsupported-op | value 'x' has element type string |
 | test_strnormalizer_export_monday_insensintive_upper_twodim | 10 | unsupported-op | unsupported-op | value 'x' has element type string |
 | test_strnormalizer_nostopwords_nochangecase | 10 | unsupported-op | unsupported-op | value 'x' has element type string |
-| test_tan | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Tan. Use ArithmeticMode.Fast or remove these operators. |
-| test_tan_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Tan. Use ArithmeticMode.Fast or remove these operators. |
+| test_tan | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Tan. Use ArithmeticMode.Fast or remove these operators |
+| test_tan_example | 22 | pass | not-exact | Exact mode is not available: no exact kernel exists for Tan. Use ArithmeticMode.Fast or remove these operators |
 | test_tfidfvectorizer_tf_batch_onlybigrams_skip0 | 9 | unsupported-op | unsupported-op | no kernel: TfIdfVectorizer (opset 9) |
 | test_tfidfvectorizer_tf_batch_onlybigrams_skip5 | 9 | unsupported-op | unsupported-op | no kernel: TfIdfVectorizer (opset 9) |
 | test_tfidfvectorizer_tf_batch_uniandbigrams_skip5 | 9 | unsupported-op | unsupported-op | no kernel: TfIdfVectorizer (opset 9) |

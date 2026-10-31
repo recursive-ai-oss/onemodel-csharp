@@ -25,6 +25,6 @@ using SessionOutputs outputs = session.Run(new Dictionary<string, Tensor> { ["x"
 float[] y = outputs["y"].ToArray<float>();
 ```
 
-This is a preview; the API may change between previews. Documentation, supported operators, source and issues: <https://github.com/recursive-ai-oss/onemodel-csharp>.
+The public API follows Semantic Versioning. Documentation, supported operators, source and issues: <https://github.com/recursive-ai-oss/onemodel-csharp>.
 
 Licensed `MIT OR Apache-2.0`.

@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-31
+
+The first stable release. The public API is reshaped once, below, and follows Semantic Versioning from here. Speed and peak memory against ONNX Runtime on x64 and arm64, with the rows where it is still slower, are in `docs/performance.md`. Of the 1905 `onnx/backend/test` cases, 1580 pass in fast mode and 1382 in exact mode, none fail, and the rest are listed gaps (`docs/conformance.md`). Exact-mode output hashes of the reference models and every node case are equal across x64 and arm64 JIT (default, one thread, narrower instruction sets, hardware intrinsics off), NativeAOT and browser WebAssembly (interpreted and compiled).
+
 ### Breaking changes
 
 The public API is reshaped for 1.0. Every change below lists its replacement.
@@ -30,6 +34,8 @@ The public API is reshaped for 1.0. Every change below lists its replacement.
 
 ### Changed
 
+- Faster fp32 convolution on AVX-512: 16x16 and 8x32 tiles chosen by the output channel count, 1x1 unit-stride convolutions read their input in place without a gather phase, stride-2 patches are gathered with a shuffle, and depthwise layers on narrow maps run as one flat row (`docs/kernels-conv.md`, `docs/kernels-depthwise.md`). Exact mode is unchanged.
+- `docs/performance.md`: the 1.0 measurements against ONNX Runtime.
 - Fast-mode erf `Gelu` (the operator, the fused erf chain and the matrix-product epilogue) uses a degree 5 over degree 5 rational function instead of the accurate exponential form: 3.5 to 5 times faster, absolute error below 1e-6 (`docs/exact-transcendentals.md`). Exact mode and training are unchanged. int8 and fp32 transformers gain 5 to 20 percent end to end.
 
 ## [0.5.0-preview.1] - 2026-10-31
