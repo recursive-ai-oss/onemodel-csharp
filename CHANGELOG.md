@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.5.0-preview.1] - 2026-10-31
+
+Training arrives as a second package, `RecursiveAI.OneModel.Training`: reverse-mode automatic differentiation on the tensor layer, modules, losses, SGD/Adam/AdamW with schedules, deterministic data loading, bit-exact checkpoints, and tracing a model into a graph that runs and saves like an imported one. Inference got faster across convolution, int8 and transformer graphs, especially at higher thread counts (`docs/kernels-conv.md`, `docs/int8.md`, `docs/kernels-gemm.md`). The README and package readme describe what works today.
+
 ### Added
 
 - `Ops.Lstm`, `Ops.Gru` and `Recurrent.Forward` take per-row sequence lengths (packed-sequence semantics: the reverse direction starts at each row's last valid step, padded outputs are zero), and `WarmupCosineLr` (linear warm-up, then a cosine to a floor). `tools/CrnnFinetune` fine-tunes a CRNN line recognizer, scores it and writes the weights as a model container; `tools/crnn_ref` runs and compares a PyTorch reference (docs/training.md section 10),

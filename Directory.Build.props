@@ -61,7 +61,7 @@
     <Copyright>Copyright (c) Recursive AI, LLC</Copyright>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <!-- The one place the package version lives. -->
-    <Version>0.3.0-preview.1</Version>
+    <Version>0.5.0-preview.1</Version>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/recursive-ai-oss/onemodel-csharp</RepositoryUrl>
     <PackageProjectUrl>https://recursiveai.org/onemodel/</PackageProjectUrl>
