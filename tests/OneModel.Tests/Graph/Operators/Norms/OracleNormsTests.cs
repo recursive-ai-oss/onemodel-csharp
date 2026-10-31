@@ -32,10 +32,10 @@ public class OracleNormsTests
         return new Meta(Specs(doc.RootElement.GetProperty("inputs")), Specs(doc.RootElement.GetProperty("outputs")));
     }
 
-    private static Tensor[] RunCase(string dir, Meta meta, ExecutionMode mode, KernelPath? path, int threads)
+    private static Tensor[] RunCase(string dir, Meta meta, ArithmeticMode mode, KernelPath? path, int threads)
     {
         using IrModel ir = OnnxImporter.Load(Path.Combine(dir, "model.onnx"));
-        using var s = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
+        using var s = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = threads }, OpRegistry.Default, path, default);
         var inputs = new Tensor[meta.Inputs.Count];
         var names = new string[inputs.Length];
         for (int i = 0; i < inputs.Length; i++)
@@ -128,9 +128,9 @@ public class OracleNormsTests
             try
             {
                 Meta meta = ReadMeta(dir);
-                Tensor[] fast = RunCase(dir, meta, ExecutionMode.Fast, null, 1);
-                Tensor[] many = RunCase(dir, meta, ExecutionMode.Fast, null, 7);
-                Tensor[] exact = RunCase(dir, meta, ExecutionMode.Exact, KernelPath.Scalar, 1);
+                Tensor[] fast = RunCase(dir, meta, ArithmeticMode.Fast, null, 1);
+                Tensor[] many = RunCase(dir, meta, ArithmeticMode.Fast, null, 7);
+                Tensor[] exact = RunCase(dir, meta, ArithmeticMode.Exact, KernelPath.Scalar, 1);
                 for (int i = 0; i < fast.Length; i++)
                 {
                     byte[] raw = File.ReadAllBytes(Path.Combine(dir, $"output_{i}.bin"));
@@ -148,7 +148,7 @@ public class OracleNormsTests
 
                 foreach (KernelPath path in KernelPaths.All.Where(KernelPaths.IsSupported).Where(p => p != KernelPath.Scalar))
                 {
-                    Tensor[] other = RunCase(dir, meta, ExecutionMode.Exact, path, 3);
+                    Tensor[] other = RunCase(dir, meta, ArithmeticMode.Exact, path, 3);
                     for (int i = 0; i < exact.Length; i++)
                     {
                         if (!Bits(exact[i]).SequenceEqual(Bits(other[i])))

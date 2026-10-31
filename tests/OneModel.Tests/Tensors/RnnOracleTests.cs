@@ -205,11 +205,11 @@ public class RnnOracleTests
     // Gradients at 1 and 8 threads are bit-identical in both modes (the engine is single-threaded; threads exist only inside the GEMM
     // and convolution, whose chunking is fixed).
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void GradientsDoNotDependOnThreads(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void GradientsDoNotDependOnThreads(ArithmeticMode mode)
     {
-        ExecutionMode oldMode = TensorCompute.Mode;
+        ArithmeticMode oldMode = TensorCompute.Mode;
         int oldThreads = TensorCompute.Threads;
         try
         {
@@ -232,7 +232,7 @@ public class RnnOracleTests
 
             Assert.Equal(hashes[0], hashes[2]);
             Assert.Equal(hashes[1], hashes[3]);
-            if (mode == ExecutionMode.Exact)
+            if (mode == ArithmeticMode.Exact)
             {
                 // Pinned: the same on every OS, CPU, instruction set and thread count (checked on x64 AVX-512/AVX2/128-bit/scalar and arm64).
                 Assert.Equal("589335EBDC4E8E20BF30EFABE1C74CC0D9906C90BBEB57D1694CDC26508FD565", hashes[0]);

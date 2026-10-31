@@ -7,7 +7,7 @@ using RecursiveAI.OneModel.Tensors;
 namespace RecursiveAI.OneModel.Graph.Runtime;
 
 /// <summary>What a session fixes once: the mode, the instruction set, the thread budget and where memory comes from.</summary>
-internal sealed record SessionEnv(ExecutionMode Mode, KernelPath Path, int Threads, BufferPool Pool);
+internal sealed record SessionEnv(ArithmeticMode Mode, KernelPath Path, int Threads, BufferPool Pool);
 
 internal enum ValueKind : byte
 {

@@ -53,7 +53,7 @@ internal static class Program
             return 2;
         }
 
-        foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+        foreach (ArithmeticMode mode in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
         {
             if (which != "both" && !string.Equals(which, mode.ToString(), StringComparison.OrdinalIgnoreCase))
             {
@@ -66,7 +66,7 @@ internal static class Program
                 results.Add(Conformance.ConformanceRunner.RunCase(group, dir, mode));
             }
 
-            File.WriteAllText(Path.Combine(outDir, $"conformance-{(mode == ExecutionMode.Exact ? "exact" : "fast")}.tsv"), Conformance.ConformanceRunner.ToTsv(results));
+            File.WriteAllText(Path.Combine(outDir, $"conformance-{(mode == ArithmeticMode.Exact ? "exact" : "fast")}.tsv"), Conformance.ConformanceRunner.ToTsv(results));
             Console.WriteLine($"{mode}: {cases.Count} cases; " + string.Join(", ", results.GroupBy(r => r.Status).OrderBy(g => g.Key).Select(g => $"{Conformance.ConformanceRunner.StatusName(g.Key)} {g.Count()}")));
         }
 
@@ -252,7 +252,7 @@ internal static class Program
     private static int LoadOne(string file, bool noMap)
     {
         var sw = Stopwatch.StartNew();
-        using IrModel m = OnnxImporter.Load(file, new OnnxLoadOptions { MemoryMap = !noMap });
+        using IrModel m = OnnxImporter.Load(file, new ModelLoadOptions { MemoryMap = !noMap });
         double ms = sw.Elapsed.TotalMilliseconds;
         long bytes = 0;
         int inits = 0;

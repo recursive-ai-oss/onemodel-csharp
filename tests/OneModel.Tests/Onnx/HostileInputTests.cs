@@ -192,9 +192,9 @@ public class HostileInputTests
     [Fact]
     public void NestingWithinTheLimitIsFineAndTheLimitIsConfigurable()
     {
-        using IrModel ok = OnnxImporter.Load(Nested(20), new OnnxLoadOptions { MaxNesting = 128 });
+        using IrModel ok = OnnxImporter.Load(Nested(20), new ModelLoadOptions { MaxNesting = 128 });
         Assert.NotNull(ok.Graph);
-        var e = Assert.Throws<OnnxImportException>(() => OnnxImporter.Load(Nested(20), new OnnxLoadOptions { MaxNesting = 30 }));
+        var e = Assert.Throws<OnnxImportException>(() => OnnxImporter.Load(Nested(20), new ModelLoadOptions { MaxNesting = 30 }));
         Assert.Equal(OnnxErrorKind.Malformed, e.Kind);
         Assert.Contains("nested", e.Message, StringComparison.Ordinal);
     }

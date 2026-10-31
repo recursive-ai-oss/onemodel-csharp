@@ -154,12 +154,12 @@ public class ElementwiseKernelTests
         .Build();
 
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void SteadyStateRunAllocatesNothingAndIsRepeatable(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void SteadyStateRunAllocatesNothingAndIsRepeatable(ArithmeticMode mode)
     {
         using IrModel ir = OnnxImporter.Load(Chain());
-        using var s = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = 1 });
+        using var s = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = 1 });
         float[] x = new float[1003];
         for (int i = 0; i < x.Length; i++)
         {
@@ -227,9 +227,9 @@ public class ElementwiseKernelTests
     }
 
     [Theory]
-    [InlineData(ExecutionMode.Fast)]
-    [InlineData(ExecutionMode.Exact)]
-    public void ExpandedGeluGraphFromTheSpecificationRuns(ExecutionMode mode)
+    [InlineData(ArithmeticMode.Fast)]
+    [InlineData(ArithmeticMode.Exact)]
+    public void ExpandedGeluGraphFromTheSpecificationRuns(ArithmeticMode mode)
     {
         // The shape of the Gelu function body in the ONNX backend tests: constants, CastLike, Div, Erf, Sum, Mul.
         byte[] model = new ModelBuilder(20)
@@ -248,7 +248,7 @@ public class ElementwiseKernelTests
             .Node("Mul", ["mx", "phi"], ["y"])
             .Build();
         using IrModel ir = OnnxImporter.Load(model);
-        using var s = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = 1 });
+        using var s = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = 1 });
         float[] y = new float[3];
         s.Run("x", new float[] { -1f, 0f, 1f }.AsSpan(), [3], "y", y.AsSpan());
         Assert.Equal(-0.15865526f, y[0], 1e-6f);

@@ -14,9 +14,13 @@ namespace RecursiveAI.OneModel.Tensors;
 /// <remarks>
 /// <para>A default <see cref="Tensor"/> is empty (<see cref="IsEmpty"/>). Rank is at most <see cref="Shape.MaxRank"/>, the element
 /// count at most 2^31-1 and the storage at most 2^31-1 bytes.</para>
-/// <para>Ownership: a tensor made by <c>Create</c> owns its storage until <see cref="Dispose"/> (called on any copy or view; it
-/// releases the storage for all of them), or until the arena it came from is reset. Using a tensor after that throws
-/// <see cref="StaleTensorException"/>. A tensor that is never disposed leaks only until the GC finalizes its buffer.</para>
+/// <para>Ownership (the one rule): a <see cref="Tensor"/> is a lightweight handle, and every copy of it, every view and every slice
+/// refers to the same storage. The storage lives until <see cref="Dispose"/> is called on any one of them, or until the arena it came
+/// from is reset. <see cref="Dispose"/> can be called any number of times on any copy, so <c>using</c> a tensor you were handed, or
+/// passing it to a method that disposes it, never throws. What is checked is use: reading or writing data through a handle whose
+/// storage was released throws <see cref="StaleTensorException"/> (an <see cref="ObjectDisposedException"/>), and
+/// <see cref="IsReleased"/> tells you beforehand. A tensor that is never disposed leaks only until the GC finalizes its buffer.
+/// Tensors returned by <see cref="Graph.Session"/> come in a <see cref="Graph.SessionOutputs"/> that owns them; see docs/guide/tensors.md.</para>
 /// <para>Gradients: a tensor <see cref="RequiresGrad"/> when created with <see cref="WithRequiresGrad"/> or produced by an
 /// operation on such a tensor while <see cref="GradMode.IsEnabled"/>; those operations also attach a <see cref="BackwardRecord"/>.</para>
 /// </remarks>
@@ -105,7 +109,7 @@ public readonly partial struct Tensor : IDisposable
     }
 
     /// <summary>Allocates a scalar (rank 0) tensor.</summary>
-    public static Tensor Scalar<T>(T value, BufferPool? pool = null) where T : unmanaged => FromSpan([value], default, pool);
+    public static Tensor Scalar<T>(T value, BufferPool? pool = null) where T : unmanaged => FromSpan([value], default(Shape), pool);
 
     private static long ByteCount(DType dtype, int count)
     {
@@ -374,11 +378,17 @@ public readonly partial struct Tensor : IDisposable
     // ---- lifetime ---------------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// Releases the storage to its pool for this tensor and every view or copy of the handle. Does nothing for arena storage (the
-    /// arena reclaims it at <see cref="Arena.Reset"/>) or an empty tensor.
+    /// Releases the storage to its pool, for this tensor and for every copy and view of it. Safe to call any number of times, on any
+    /// copy, and on an empty tensor; later calls do nothing. Does nothing for arena storage (the arena reclaims it at
+    /// <see cref="Arena.Reset"/>). Reading or writing the data through any copy afterwards throws <see cref="StaleTensorException"/>.
     /// </summary>
-    /// <exception cref="StaleTensorException">The storage was already released.</exception>
     public void Dispose() => _buffer?.Release(_generation);
+
+    /// <summary>
+    /// True when this handle refers to storage that was released (by <see cref="Dispose"/> on any copy, or by an arena reset), so
+    /// reading its data would throw. False for an empty tensor.
+    /// </summary>
+    public bool IsReleased => _buffer is not null && _buffer.IsStale(_generation);
 
     // ---- autograd ---------------------------------------------------------------------------------------------------------
 
@@ -386,7 +396,7 @@ public readonly partial struct Tensor : IDisposable
     public bool RequiresGrad => _meta is { RequiresGrad: true };
 
     /// <summary>The autograd node, or null if the tensor does not take part in differentiation.</summary>
-    public AutogradMeta? Autograd => _meta;
+    internal AutogradMeta? Autograd => _meta;
 
     /// <summary>The accumulated gradient (empty if none).</summary>
     public Tensor Grad => _meta?.Grad ?? default;

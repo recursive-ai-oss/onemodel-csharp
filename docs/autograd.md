@@ -47,7 +47,7 @@ step for the 12-operator conv net and 58 KB for the two-layer encoder in `Autogr
 
 ## 4. Arithmetic: `TensorCompute`
 
-`TensorCompute.Mode` (`ExecutionMode.Fast` default, or `Exact`) and `TensorCompute.Threads` apply to every differentiable
+`TensorCompute.Mode` (`ArithmeticMode.Fast` default, or `Exact`) and `TensorCompute.Threads` apply to every differentiable
 operator, forward and backward. The kernel path is the machine's best (`KernelPaths.Best()`).
 
 - **Matrix products and convolutions** run on the blocked GEMM (`docs/kernels-gemm.md`) and the convolution kernels

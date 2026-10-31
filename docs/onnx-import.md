@@ -139,8 +139,8 @@ These are single-machine, indicative figures, not a gated benchmark.
 ## 7. Errors
 
 Everything wrong with the input is one exception type carrying a kind (`Malformed` for bytes that are not valid protobuf, `InvalidModel`
-for valid protobuf that is not a valid model, `Unsupported`, `ExternalData`, `Io`), the input's name, the byte offset when one is known,
-and the field path (`ModelProto.graph.node[3].attribute[1].t`). Offsets are from the start of the model file or byte array.
+for valid protobuf that is not a valid model, `Unsupported`, `ExternalData`), the input's name, the byte offset when one is known,
+and the field path (`ModelProto.graph.node[3].attribute[1].t`). Offsets are from the start of the model file or byte array. A file that cannot be opened or read is not an import error: the platform exception (`FileNotFoundException`, ...) propagates unwrapped. `ModelLoadOptions.MaxModelBytes` (default and maximum 2^31 − 1) is enforced while a stream is read, and `MaxNesting` accepts 8 to 250.
 
 ## 8. How the importer is checked
 

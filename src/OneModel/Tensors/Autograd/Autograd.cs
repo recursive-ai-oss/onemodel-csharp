@@ -4,7 +4,7 @@ using System.Threading;
 namespace RecursiveAI.OneModel.Tensors;
 
 /// <summary>The operation a <see cref="BackwardRecord"/> belongs to. A backward engine dispatches on this value through a static table.</summary>
-public enum OpKind
+internal enum OpKind
 {
     /// <summary>No operation (a default record).</summary>
     None = 0,
@@ -84,7 +84,7 @@ public enum OpKind
 /// Autograd state attached to a tensor that takes part in differentiation: whether it needs a gradient, the record of the operation
 /// that produced it (null for a leaf), and its accumulated gradient. Tensors that do not require gradients have none.
 /// </summary>
-public sealed class AutogradMeta
+internal sealed class AutogradMeta
 {
     internal AutogradMeta(bool requiresGrad, BackwardRecord? gradFn, int outputIndex)
     {
@@ -148,10 +148,10 @@ public static class GradMode
     internal static void Restore(bool wasDisabled) => s_disabled = wasDisabled;
 
     /// <summary>The cheap test every eager operation makes: record only when enabled and some input requires gradients.</summary>
-    public static bool ShouldRecord(in Tensor a) => !s_disabled && a.RequiresGrad;
+    internal static bool ShouldRecord(in Tensor a) => !s_disabled && a.RequiresGrad;
 
     /// <summary>As <see cref="ShouldRecord(in Tensor)"/> for two inputs.</summary>
-    public static bool ShouldRecord(in Tensor a, in Tensor b) => !s_disabled && (a.RequiresGrad || b.RequiresGrad);
+    internal static bool ShouldRecord(in Tensor a, in Tensor b) => !s_disabled && (a.RequiresGrad || b.RequiresGrad);
 }
 
 /// <summary>Restores the previous <see cref="GradMode"/> setting when disposed.</summary>
@@ -176,7 +176,7 @@ public sealed class TensorVersionException : InvalidOperationException
 /// A tensor kept for the backward pass together with the version its storage had when it was saved. <see cref="Unpack"/> fails if
 /// any in-place operation touched the storage since.
 /// </summary>
-public readonly struct SavedTensor
+internal readonly struct SavedTensor
 {
     internal SavedTensor(in Tensor value, bool owned)
     {

@@ -21,6 +21,7 @@ The API may still change between previews; see [CHANGELOG.md](CHANGELOG.md).
 | `src/OneModel.Training` | training, package `RecursiveAI.OneModel.Training` |
 | `tests/OneModel.Tests` | unit tests (xUnit v3) |
 | `tests/AotSmoke`, `tests/WasmSmoke` | NativeAOT and browser-wasm smoke apps |
+| `tests/GuideSamples` | the examples of the usage guide, built and run in CI |
 | `tests/OnnxSweep` | runs the ONNX backend test cases and writes the conformance table |
 | `bench/Micro` | BenchmarkDotNet micro-benchmarks and kernel timing |
 | `bench/Bar` | side-by-side timing against ONNX Runtime (the only place it is referenced) |
@@ -33,7 +34,9 @@ The API may still change between previews; see [CHANGELOG.md](CHANGELOG.md).
     using var m = Model.Load("model.onnx");
     float[] v = m.Run(tokens);          // float[], long[] or int[] in; names and shapes come from the model
 
-For several inputs or outputs, tensors, exact mode (`new SessionOptions { Mode = ExecutionMode.Exact }`), a thread limit, an optimization level or compact fp16/bf16 weight storage, use `m.Session` or `Session.Load` directly. A model with operators that are not supported fails to load with an exception that lists every missing one; supported operators and opsets are in [docs/conformance.md](docs/conformance.md). How graphs are planned and run: [docs/graph-runtime.md](docs/graph-runtime.md). `ModelFormat.Convert` saves an ONNX model in our own format, and `Model.Load` reads either.
+The usage guide, with examples that CI builds and runs, is in [docs/guide](docs/guide/README.md): getting started, tensors and who owns their memory, errors, the file format, training and checkpoints, tracing, and migration notes from ONNX Runtime and TorchSharp.
+
+For several inputs or outputs, tensors, exact mode (`new ModelOptions { Mode = ArithmeticMode.Exact }`, `using RecursiveAI.OneModel.Graph;`), a thread limit, an optimization level or compact fp16/bf16 weight storage, use `m.Session` or `Session.Load` directly. A model with operators that are not supported fails to load with an exception that lists every missing one; supported operators and opsets are in [docs/conformance.md](docs/conformance.md). How graphs are planned and run: [docs/graph-runtime.md](docs/graph-runtime.md). `ModelFormat.Convert` saves an ONNX model in our own format, and `Model.Load` reads either.
 
 ### NativeAOT users: set `IlcInstructionSet`
 

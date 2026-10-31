@@ -75,8 +75,8 @@ public class LinearFusionTests
             foreach (int rows in new[] { 1, 3, 7, 97, 130 })
             {
                 float[] x = PassTestKit.RandomFloats(rows * k, 3 + rows);
-                float[] none = PassTestKit.Run(model, x, [rows, k], OptimizationLevel.None, ExecutionMode.Exact);
-                float[] all = PassTestKit.Run(model, x, [rows, k], OptimizationLevel.All, ExecutionMode.Exact);
+                float[] none = PassTestKit.Run(model, x, [rows, k], OptimizationLevel.None, ArithmeticMode.Exact);
+                float[] all = PassTestKit.Run(model, x, [rows, k], OptimizationLevel.All, ArithmeticMode.Exact);
                 Assert.True(PassTestKit.BitEqual(none, all), $"k={k} n={n} rows={rows}");
             }
         }
@@ -88,9 +88,9 @@ public class LinearFusionTests
     {
         byte[] model = LinearModel(300, 37, act, bias, gemm);
         float[] x = PassTestKit.RandomFloats(130 * 300, 9);
-        float[] none = PassTestKit.Run(model, x, [130, 300], OptimizationLevel.None, ExecutionMode.Fast);
-        float[] one = PassTestKit.Run(model, x, [130, 300], OptimizationLevel.All, ExecutionMode.Fast, 1);
-        float[] many = PassTestKit.Run(model, x, [130, 300], OptimizationLevel.All, ExecutionMode.Fast, 8);
+        float[] none = PassTestKit.Run(model, x, [130, 300], OptimizationLevel.None, ArithmeticMode.Fast);
+        float[] one = PassTestKit.Run(model, x, [130, 300], OptimizationLevel.All, ArithmeticMode.Fast, 1);
+        float[] many = PassTestKit.Run(model, x, [130, 300], OptimizationLevel.All, ArithmeticMode.Fast, 8);
         Assert.True(PassTestKit.BitEqual(one, many));
         for (int i = 0; i < none.Length; i++)
         {
@@ -102,9 +102,9 @@ public class LinearFusionTests
     public void MatMulBiasReluBecomesOneNode()
     {
         byte[] model = LinearModel(16, 8, "Relu", true, false);
-        Assert.Equal(["LinearOp"], PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast));
-        Assert.Equal(["MatMulOp", "AddOp", "ReluOp"], PassTestKit.Kernels(model, OptimizationLevel.None, ExecutionMode.Fast));
-        Assert.Equal(["MatMulOp", "AddOp", "ReluOp"], PassTestKit.Kernels(model, OptimizationLevel.Basic, ExecutionMode.Fast));
+        Assert.Equal(["LinearOp"], PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast));
+        Assert.Equal(["MatMulOp", "AddOp", "ReluOp"], PassTestKit.Kernels(model, OptimizationLevel.None, ArithmeticMode.Fast));
+        Assert.Equal(["MatMulOp", "AddOp", "ReluOp"], PassTestKit.Kernels(model, OptimizationLevel.Basic, ArithmeticMode.Fast));
     }
 
     [Fact]
@@ -114,14 +114,14 @@ public class LinearFusionTests
         float[] x = PassTestKit.RandomFloats(5 * 64, 31);
         float[] Run(OptimizationLevel level)
         {
-            using var m = Model.Load(new MemoryStream(model), new SessionOptions { OptimizationLevel = level, WeightStorage = WeightStorage.Binary16, IntraOpThreads = 1 });
+            using var m = Model.Load(new MemoryStream(model), new ModelOptions { OptimizationLevel = level, WeightStorage = WeightStorage.Binary16, IntraOpThreads = 1 });
             return m.Run(x, [5, 64]);
         }
 
         float[] none = Run(OptimizationLevel.None), all = Run(OptimizationLevel.All);
         Assert.True(PassTestKit.BitEqual(none, all));
         // Compact weights are not packed, so the product is not fused into a LinearOp.
-        using var s = Session.Load(new MemoryStream(model), new SessionOptions { WeightStorage = WeightStorage.Binary16 });
+        using var s = Session.Load(new MemoryStream(model), new ModelOptions { WeightStorage = WeightStorage.Binary16 });
         Assert.NotNull(s);
     }
 }

@@ -75,7 +75,7 @@ public class NormalizationTests
             .Node("LayerNormalization", ins, ["y", "m", "i"], ("epsilon", 1e-5f)).Build();
         double[] want = LayerNormRef(x, rows, cols, scale, withBias ? bias : null, 1e-5f, false, out double[] wantMean, out double[] wantInv);
 
-        Out[] fast = Run(model, ExecutionMode.Fast, null, 1, 3, (x, shape));
+        Out[] fast = Run(model, ArithmeticMode.Fast, null, 1, 3, (x, shape));
         Assert.True(ScaledError(fast[0].F!, want) < 2e-5, $"cols {cols}: {ScaledError(fast[0].F!, want)}");
         Assert.True(ScaledError(fast[1].F!, wantMean) < 2e-5);
         Assert.True(ScaledError(fast[2].F!, wantInv) < 2e-5);
@@ -85,7 +85,7 @@ public class NormalizationTests
         {
             foreach (int threads in new[] { 1, 4 })
             {
-                Out[] ex = Run(model, ExecutionMode.Exact, path, threads, 3, (x, shape));
+                Out[] ex = Run(model, ArithmeticMode.Exact, path, threads, 3, (x, shape));
                 for (int k = 0; k < 3; k++)
                 {
                     AssertSameBits(ex[k].F!, fast[k].F!, $"LayerNormalization output {k} {path} threads {threads}");
@@ -111,7 +111,7 @@ public class NormalizationTests
         }
 
         double[] want = LayerNormRef(x, 4, 15, sFull, bias, 1e-5f, false, out _, out _);
-        Out[] got = Run(model, ExecutionMode.Fast, null, 1, 1, (x, shape));
+        Out[] got = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, shape));
         Assert.True(ScaledError(got[0].F!, want) < 2e-5);
     }
 
@@ -129,11 +129,11 @@ public class NormalizationTests
         byte[] model = new ModelBuilder(23).Input("x", 1, 3, cols).Initializer("s", scale, cols).Output("y", 1, 3, cols)
             .Node("RMSNormalization", ["x", "s"], ["y"], ("epsilon", 1e-5f)).Build();
         double[] want = LayerNormRef(x, 3, cols, scale, null, 1e-5f, true, out _, out _);
-        Out[] fast = Run(model, ExecutionMode.Fast, null, 1, 1, (x, shape));
+        Out[] fast = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, shape));
         Assert.True(ScaledError(fast[0].F!, want) < 2e-5);
         foreach (var path in Paths)
         {
-            AssertSameBits(Run(model, ExecutionMode.Exact, path, 3, 1, (x, shape))[0].F!, fast[0].F!, $"RMSNormalization {path}");
+            AssertSameBits(Run(model, ArithmeticMode.Exact, path, 3, 1, (x, shape))[0].F!, fast[0].F!, $"RMSNormalization {path}");
         }
     }
 
@@ -157,11 +157,11 @@ public class NormalizationTests
             row.CopyTo(want, r * spatial);
         }
 
-        Out[] fast = Run(model, ExecutionMode.Fast, null, 1, 1, (x, shape));
+        Out[] fast = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, shape));
         Assert.True(ScaledError(fast[0].F!, want) < 2e-5);
         foreach (var path in Paths)
         {
-            AssertSameBits(Run(model, ExecutionMode.Exact, path, 2, 1, (x, shape))[0].F!, fast[0].F!, $"InstanceNormalization {path}");
+            AssertSameBits(Run(model, ArithmeticMode.Exact, path, 2, 1, (x, shape))[0].F!, fast[0].F!, $"InstanceNormalization {path}");
         }
     }
 
@@ -195,11 +195,11 @@ public class NormalizationTests
             LayerNormRef(x[(r * cols)..((r + 1) * cols)], 1, cols, sc, bi, 1e-5f, false, out _, out _).CopyTo(want, r * cols);
         }
 
-        Out[] fast = Run(model, ExecutionMode.Fast, null, 1, 1, (x, shape));
+        Out[] fast = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, shape));
         Assert.True(ScaledError(fast[0].F!, want) < 2e-5, $"{ScaledError(fast[0].F!, want)}");
         foreach (var path in Paths)
         {
-            AssertSameBits(Run(model, ExecutionMode.Exact, path, 2, 1, (x, shape))[0].F!, fast[0].F!, $"GroupNormalization {path}");
+            AssertSameBits(Run(model, ArithmeticMode.Exact, path, 2, 1, (x, shape))[0].F!, fast[0].F!, $"GroupNormalization {path}");
         }
     }
 
@@ -211,7 +211,7 @@ public class NormalizationTests
             .Node("LayerNormalization", ["x", "s"], ["y"]).Build();
         foreach (var path in Paths)
         {
-            float[] y = Run(model, ExecutionMode.Exact, path, 1, 1, (x, [2, 4]))[0].F!;
+            float[] y = Run(model, ArithmeticMode.Exact, path, 1, 1, (x, [2, 4]))[0].F!;
             foreach (float v in y)
             {
                 Assert.Equal(0x7FC00000u, Bits(v));

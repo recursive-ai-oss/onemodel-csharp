@@ -2,22 +2,6 @@ using System;
 
 namespace RecursiveAI.OneModel.Graph;
 
-/// <summary>How exactly a session computes. See docs/exact-mode.md.</summary>
-public enum ExecutionMode
-{
-    /// <summary>
-    /// The default. Kernels may use fused multiply-add and any blocking. Results depend only on the inputs, the options and the
-    /// machine's kernel path, never on the thread count or scheduling.
-    /// </summary>
-    Fast = 0,
-
-    /// <summary>
-    /// Opt-in. Every result is bit-identical across operating systems, CPUs, instruction sets and thread counts. Creating a session
-    /// fails if the model uses an operator that has no exact kernel.
-    /// </summary>
-    Exact = 1,
-}
-
 /// <summary>How much the graph is rewritten before it is planned.</summary>
 public enum OptimizationLevel
 {
@@ -30,7 +14,7 @@ public enum OptimizationLevel
     /// <summary>
     /// The default. Everything in <see cref="Basic"/>, plus constant weights packed once for the matrix kernels and operator fusion
     /// (bias and activation applied to each finished tile, Gelu and attention patterns, convolution with its batch normalization).
-    /// In <see cref="ExecutionMode.Exact"/> only the passes that keep every bit run; see docs/graph-passes.md.
+    /// In <see cref="ArithmeticMode.Exact"/> only the passes that keep every bit run; see docs/graph-passes.md.
     /// </summary>
     All = 2,
 }
@@ -52,10 +36,10 @@ public enum WeightStorage
 }
 
 /// <summary>Settings fixed when a <see cref="Session"/> is created.</summary>
-public sealed class SessionOptions
+public sealed class ModelOptions
 {
-    /// <summary>Fast or exact arithmetic. Default <see cref="ExecutionMode.Fast"/>.</summary>
-    public ExecutionMode Mode { get; init; } = ExecutionMode.Fast;
+    /// <summary>Fast or exact arithmetic. Default <see cref="ArithmeticMode.Fast"/>.</summary>
+    public ArithmeticMode Mode { get; init; } = ArithmeticMode.Fast;
 
     /// <summary>
     /// The most threads one <c>Run</c> may use inside an operator. 0 (the default) means one per logical core, up to 256. 1 runs

@@ -22,12 +22,12 @@ public enum CheckpointErrorKind
 }
 
 /// <summary>A checkpoint could not be read or applied. <see cref="Kind"/> says which check failed; the message names the field.</summary>
-public sealed class CheckpointException : Exception
+public sealed class CheckpointException : OneModelException
 {
     /// <summary>Creates the exception.</summary>
     /// <param name="kind">Which check failed.</param>
     /// <param name="message">What was wrong and where.</param>
-    public CheckpointException(CheckpointErrorKind kind, string message) : base(message) => Kind = kind;
+    public CheckpointException(CheckpointErrorKind kind, string message) : base(OneModelErrorCategory.Checkpoint, message) => Kind = kind;
 
     /// <summary>Which check failed.</summary>
     public CheckpointErrorKind Kind { get; }

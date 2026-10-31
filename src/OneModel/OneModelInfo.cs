@@ -5,7 +5,7 @@ namespace RecursiveAI.OneModel;
 /// <summary>
 /// A tiny deterministic self-check that smoke apps call to show the library loaded and ran.
 /// </summary>
-public static class OneModelInfo
+internal static class OneModelInfo
 {
     /// <summary>
     /// Computes the 64-bit FNV-1a hash of the bytes of <paramref name="data"/>. FNV-1a is specified by Fowler, Noll and Vo:

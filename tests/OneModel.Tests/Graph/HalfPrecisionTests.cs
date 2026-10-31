@@ -139,23 +139,23 @@ public class HalfPrecisionTests
             .Build();
     }
 
-    private static float[] Run(byte[] model, float[] x, SessionOptions options)
+    private static float[] Run(byte[] model, float[] x, ModelOptions options)
     {
         using var m = Model.Load(new MemoryStream(model), options);
         return m.Run(x, [x.Length / In, In]);
     }
 
     [Theory]
-    [InlineData(false, ExecutionMode.Fast)]
-    [InlineData(true, ExecutionMode.Fast)]
-    [InlineData(false, ExecutionMode.Exact)]
-    public void HalfPrecisionModelMatchesFloatModelWithRoundedWeights(bool brain, ExecutionMode mode)
+    [InlineData(false, ArithmeticMode.Fast)]
+    [InlineData(true, ArithmeticMode.Fast)]
+    [InlineData(false, ArithmeticMode.Exact)]
+    public void HalfPrecisionModelMatchesFloatModelWithRoundedWeights(bool brain, ArithmeticMode mode)
     {
         float[] w1 = Weights(In * Mid, 1, 0.2f), b = Weights(Mid, 2, 0.1f), w2 = Weights(Mid * Out, 3, 0.1f);
         float[] x = Weights(5 * In, 4, 2f);
-        float[] reference = Run(FloatModel(Round(w1, brain), Round(b, brain), Round(w2, brain)), x, new SessionOptions { Mode = mode });
+        float[] reference = Run(FloatModel(Round(w1, brain), Round(b, brain), Round(w2, brain)), x, new ModelOptions { Mode = mode });
         byte[] half = HalfModel(w1, b, w2, brain);
-        float[] got = Run(half, x, new SessionOptions { Mode = mode, IntraOpThreads = 1 });
+        float[] got = Run(half, x, new ModelOptions { Mode = mode, IntraOpThreads = 1 });
 
         // The only difference is rounding each activation to half precision: 2^-11 (binary16) or 2^-8 (bfloat16) relative per operator.
         double max = reference.Max(Math.Abs), diff = 0;
@@ -165,7 +165,7 @@ public class HalfPrecisionTests
         }
 
         Assert.True(diff / max < (brain ? 3e-2 : 3e-3), $"scaled error {diff / max}");
-        Assert.Equal(got, Run(half, x, new SessionOptions { Mode = mode, IntraOpThreads = 4 }));
+        Assert.Equal(got, Run(half, x, new ModelOptions { Mode = mode, IntraOpThreads = 4 }));
     }
 
     [Theory]
@@ -179,9 +179,9 @@ public class HalfPrecisionTests
 
         // Activations stay float32 and widening is exact, so the result equals the float32 model on weights rounded in advance, bit for bit.
         // (The bias is below the size limit and stays float32, so it is not rounded.)
-        float[] reference = Run(FloatModel(Round(w1, brain), b, Round(w2, brain)), x, new SessionOptions { IntraOpThreads = 1 });
-        float[] got = Run(FloatModel(w1, b, w2), x, new SessionOptions { IntraOpThreads = 1, WeightStorage = storage });
+        float[] reference = Run(FloatModel(Round(w1, brain), b, Round(w2, brain)), x, new ModelOptions { IntraOpThreads = 1 });
+        float[] got = Run(FloatModel(w1, b, w2), x, new ModelOptions { IntraOpThreads = 1, WeightStorage = storage });
         Assert.Equal(reference, got);
-        Assert.Equal(reference, Run(FloatModel(w1, b, w2), x, new SessionOptions { IntraOpThreads = 4, WeightStorage = storage }));
+        Assert.Equal(reference, Run(FloatModel(w1, b, w2), x, new ModelOptions { IntraOpThreads = 4, WeightStorage = storage }));
     }
 }

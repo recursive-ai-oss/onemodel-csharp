@@ -17,6 +17,7 @@ public sealed class TracedModel : IDisposable
 {
     private readonly byte[] _onnx;
     private IrModel? _ir;
+    private bool _disposed;
 
     internal TracedModel(byte[] onnx, string[] inputNames, string[] outputNames, int nodeCount)
     {
@@ -36,14 +37,32 @@ public sealed class TracedModel : IDisposable
     public int NodeCount { get; }
 
     /// <summary>The recorded graph as an ONNX model (opset 20), as a new array.</summary>
-    public byte[] ToOnnx() => (byte[])_onnx.Clone();
+    /// <exception cref="ObjectDisposedException">The traced model was disposed.</exception>
+    public byte[] ToOnnx()
+    {
+        ThrowIfDisposed();
+        return (byte[])_onnx.Clone();
+    }
 
     /// <summary>Writes the recorded graph as an ONNX file, constants embedded.</summary>
     /// <param name="path">The file to create or overwrite.</param>
-    public void SaveOnnx(string path) => File.WriteAllBytes(path, _onnx);
+    /// <exception cref="ObjectDisposedException">The traced model was disposed.</exception>
+    public void SaveOnnx(string path)
+    {
+        ThrowIfDisposed();
+        File.WriteAllBytes(path, _onnx);
+    }
 
     /// <summary>The recorded graph as the library's IR; owned by this object.</summary>
-    public IrModel Ir => _ir ??= OnnxImporter.Load(_onnx);
+    /// <exception cref="ObjectDisposedException">The traced model was disposed.</exception>
+    public IrModel Ir
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _ir ??= OnnxImporter.Load(_onnx);
+        }
+    }
 
     /// <summary>Saves the model in the library's format (<see cref="ModelFormat"/>).</summary>
     /// <param name="path">The file to create or overwrite.</param>
@@ -59,9 +78,15 @@ public sealed class TracedModel : IDisposable
     /// <param name="options">Defaults to fast mode.</param>
     /// <param name="cancellationToken">Checked between operators.</param>
     /// <exception cref="SessionException">An operator is unsupported in the requested mode.</exception>
-    public Session CreateSession(SessionOptions? options = null, CancellationToken cancellationToken = default) =>
+    public Session CreateSession(ModelOptions? options = null, CancellationToken cancellationToken = default) =>
         Session.Create(Ir, options, cancellationToken);
 
-    /// <summary>Releases the imported graph. Sessions created earlier keep working.</summary>
-    public void Dispose() => _ir?.Dispose();
+    /// <summary>Releases the imported graph. Safe to call more than once. Sessions created earlier keep working; the other members throw <see cref="ObjectDisposedException"/> afterwards.</summary>
+    public void Dispose()
+    {
+        _disposed = true;
+        _ir?.Dispose();
+    }
+
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 }

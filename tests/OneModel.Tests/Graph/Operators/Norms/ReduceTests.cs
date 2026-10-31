@@ -114,7 +114,7 @@ public class ReduceTests
                     foreach (int opset in new[] { 13, 18 })
                     {
                         byte[] model = Model(op, opset, dims, axes, keep, outDims);
-                        Out[] got = Run(model, ExecutionMode.Fast, null, 1, 1, (x, dims));
+                        Out[] got = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, dims));
                         Assert.Equal(Shape.Create(outDims), got[0].Shape);
                         double err = ScaledError(got[0].F!, want);
                         Assert.True(err < 1e-5, $"{op} opset {opset} dims {string.Join('x', dims)} mask {mask} keep {keep}: {err}");
@@ -131,14 +131,14 @@ public class ReduceTests
         float[] x = Random(rng, 24);
         int[] dims = [2, 3, 4];
         double[] all = Ref("ReduceSum", x, dims, [true, true, true], false, out _);
-        Assert.True(ScaledError(Run(Model("ReduceSum", 13, dims, null, false, []), ExecutionMode.Fast, null, 1, 1, (x, dims))[0].F!, all) < 1e-6);
-        Assert.True(ScaledError(Run(Model("ReduceMax", 11, dims, null, true, [1, 1, 1]), ExecutionMode.Fast, null, 1, 1, (x, dims))[0].F!, [x.Max()]) < 1e-9);
+        Assert.True(ScaledError(Run(Model("ReduceSum", 13, dims, null, false, []), ArithmeticMode.Fast, null, 1, 1, (x, dims))[0].F!, all) < 1e-6);
+        Assert.True(ScaledError(Run(Model("ReduceMax", 11, dims, null, true, [1, 1, 1]), ArithmeticMode.Fast, null, 1, 1, (x, dims))[0].F!, [x.Max()]) < 1e-9);
 
         // Empty axes input with noop_with_empty_axes: the identity.
         byte[] noop = Model("ReduceSum", 13, dims, [], true, dims, noop: true);
-        AssertSameBits(Run(noop, ExecutionMode.Fast, null, 1, 1, (x, dims))[0].F!, x, "noop");
+        AssertSameBits(Run(noop, ArithmeticMode.Fast, null, 1, 1, (x, dims))[0].F!, x, "noop");
         byte[] noopAll = Model("ReduceMean", 18, dims, [], true, [1, 1, 1], noop: false);
-        Assert.True(ScaledError(Run(noopAll, ExecutionMode.Fast, null, 1, 1, (x, dims))[0].F!, [x.Average(v => (double)v)]) < 1e-6);
+        Assert.True(ScaledError(Run(noopAll, ArithmeticMode.Fast, null, 1, 1, (x, dims))[0].F!, [x.Average(v => (double)v)]) < 1e-6);
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public class ReduceTests
         float[] x = [1, nan, 3, nan, nan, nan, 2, 5, 4];
         foreach (var path in Paths)
         {
-            foreach (ExecutionMode mode in new[] { ExecutionMode.Fast, ExecutionMode.Exact })
+            foreach (ArithmeticMode mode in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
             {
                 // A scan from the first element that only a strictly better value replaces: NaN is ignored unless it comes first.
                 float[] max = Run(Model("ReduceMax", 13, [3, 3], [1], false, [3]), mode, path, 1, 1, (x, [3, 3]))[0].F!;
@@ -161,11 +161,11 @@ public class ReduceTests
         }
 
         float[] z = [];
-        Assert.Equal([float.NegativeInfinity, float.NegativeInfinity], Run(Model("ReduceMax", 13, [2, 0], [1], false, [2]), ExecutionMode.Fast, null, 1, 1, (z, [2, 0]))[0].F!);
-        Assert.Equal([0f, 0f], Run(Model("ReduceSum", 11, [2, 0], [1], false, [2]), ExecutionMode.Fast, null, 1, 1, (z, [2, 0]))[0].F!);
-        Assert.Equal([0f, 0f], Run(Model("ReduceMean", 13, [2, 0], [1], false, [2]), ExecutionMode.Fast, null, 1, 1, (z, [2, 0]))[0].F!);
-        Assert.Equal([1f, 1f], Run(Model("ReduceProd", 13, [2, 0], [1], false, [2]), ExecutionMode.Fast, null, 1, 1, (z, [2, 0]))[0].F!);
-        Assert.Equal([inf, -inf], Run(Model("ReduceMax", 13, [2, 2], [1], false, [2]), ExecutionMode.Fast, null, 1, 1, ([inf, -inf, -inf, -inf], [2, 2]))[0].F!);
+        Assert.Equal([float.NegativeInfinity, float.NegativeInfinity], Run(Model("ReduceMax", 13, [2, 0], [1], false, [2]), ArithmeticMode.Fast, null, 1, 1, (z, [2, 0]))[0].F!);
+        Assert.Equal([0f, 0f], Run(Model("ReduceSum", 11, [2, 0], [1], false, [2]), ArithmeticMode.Fast, null, 1, 1, (z, [2, 0]))[0].F!);
+        Assert.Equal([0f, 0f], Run(Model("ReduceMean", 13, [2, 0], [1], false, [2]), ArithmeticMode.Fast, null, 1, 1, (z, [2, 0]))[0].F!);
+        Assert.Equal([1f, 1f], Run(Model("ReduceProd", 13, [2, 0], [1], false, [2]), ArithmeticMode.Fast, null, 1, 1, (z, [2, 0]))[0].F!);
+        Assert.Equal([inf, -inf], Run(Model("ReduceMax", 13, [2, 2], [1], false, [2]), ArithmeticMode.Fast, null, 1, 1, ([inf, -inf, -inf, -inf], [2, 2]))[0].F!);
     }
 
     [Theory]
@@ -184,13 +184,13 @@ public class ReduceTests
                 bool[] red = [.. Enumerable.Range(0, dims.Length).Select(i => (mask >> i & 1) != 0)];
                 int[] outDims = [.. dims.Where((_, i) => !red[i])];
                 byte[] model = Model(op, 18, dims, axes, false, outDims);
-                float[] one = Run(model, ExecutionMode.Fast, null, 1, 1, (x, dims))[0].F!;
-                AssertSameBits(Run(model, ExecutionMode.Fast, null, 8, 1, (x, dims))[0].F!, one, $"{op} mask {mask} threads");
+                float[] one = Run(model, ArithmeticMode.Fast, null, 1, 1, (x, dims))[0].F!;
+                AssertSameBits(Run(model, ArithmeticMode.Fast, null, 8, 1, (x, dims))[0].F!, one, $"{op} mask {mask} threads");
                 foreach (var path in Paths)
                 {
                     foreach (int threads in new[] { 1, 5 })
                     {
-                        float[] ex = Run(model, ExecutionMode.Exact, path, threads, 1, (x, dims))[0].F!;
+                        float[] ex = Run(model, ArithmeticMode.Exact, path, threads, 1, (x, dims))[0].F!;
                         AssertSameBits(ex, one, $"{op} mask {mask} exact {path} threads {threads}");
                     }
                 }
@@ -207,7 +207,7 @@ public class ReduceTests
             byte[] model = new ModelBuilder(13).Initializer("x", new long[] { 1, 2, 3, 4 }, 4).Output("y", 7, 1)
                 .Node(op, ["x"], ["y"], ("keepdims", 1L)).Build();
             using var ir = RecursiveAI.OneModel.Onnx.OnnxImporter.Load(model);
-            using var s = RecursiveAI.OneModel.Graph.Session.Create(ir, new RecursiveAI.OneModel.Graph.SessionOptions(), RecursiveAI.OneModel.Graph.Runtime.OpRegistry.Default, null, default);
+            using var s = RecursiveAI.OneModel.Graph.Session.Create(ir, new RecursiveAI.OneModel.Graph.ModelOptions(), RecursiveAI.OneModel.Graph.Runtime.OpRegistry.Default, null, default);
             RecursiveAI.OneModel.Tensors.Tensor[] outs = [default];
             s.Run([], [], [s.Outputs[0].Name], outs);
             Assert.Equal(want, outs[0].ToArray<long>()[0]);

@@ -114,12 +114,12 @@ public class TraceModelTests
     public void ExactModeSessionMatchesExactEagerWhereTheOperationsAreShared()
     {
         var m = new TraceModels.Cnn();
-        ExecutionMode before = TensorCompute.Mode;
+        ArithmeticMode before = TensorCompute.Mode;
         try
         {
-            TensorCompute.Mode = ExecutionMode.Exact;
+            TensorCompute.Mode = ArithmeticMode.Exact;
             using TracedModel tm = TraceCnn(m, 4, out Tensor traced);
-            using Session s = tm.CreateSession(new SessionOptions { Mode = ExecutionMode.Exact });
+            using Session s = tm.CreateSession(new ModelOptions { Mode = ArithmeticMode.Exact });
             Tensor got = Run(s, ["x"], [TraceModels.Cnn.Input(4)]);
             // Conv, pooling, relu and the matrix product are the same canonical kernels in both layers; batch norm, log-softmax and the
             // bias adds are written differently, so equality is to the last bits, not guaranteed identical.

@@ -37,7 +37,7 @@ public class HappyPathTests
     {
         string? path = Environment.GetEnvironmentVariable("ONEMODEL_MINILM");
         Assert.SkipUnless(!string.IsNullOrEmpty(path) && File.Exists(path), "ONEMODEL_MINILM not set");
-        using var s = Session.Load(path!, new SessionOptions { IntraOpThreads = 1 });
+        using var s = Session.Load(path!, new ModelOptions { IntraOpThreads = 1 });
         var shape = Shape.Create([1, 16]);
         long[] ids = new long[16];
         for (int i = 0; i < ids.Length; i++)

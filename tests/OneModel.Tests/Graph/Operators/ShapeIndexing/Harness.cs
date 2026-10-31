@@ -13,7 +13,7 @@ internal readonly record struct In(Tensor T, bool Const = false);
 internal static class Harness
 {
     public static Tensor[] Run(string op, int opset, In?[] inputs, (string Name, object Value)[] attrs, DType[] outTypes,
-        ExecutionMode mode = ExecutionMode.Fast, int threads = 1)
+        ArithmeticMode mode = ArithmeticMode.Fast, int threads = 1)
     {
         var mb = new ModelBuilder(opset);
         var names = new string[inputs.Length];
@@ -52,7 +52,7 @@ internal static class Harness
 
         mb.Node(op, names, outNames, attrs);
         using IrModel ir = OnnxImporter.Load(mb.Build());
-        using var session = Session.Create(ir, new SessionOptions { Mode = mode, IntraOpThreads = threads });
+        using var session = Session.Create(ir, new ModelOptions { Mode = mode, IntraOpThreads = threads });
         var outs = new Tensor[outNames.Length];
         session.Run(feedNames.ToArray(), feed.ToArray(), outNames, outs);
         return outs;

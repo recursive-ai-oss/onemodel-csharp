@@ -49,14 +49,14 @@ public sealed class ExternalDataTests : IDisposable
     }
 
     private OnnxImportException Fails(Pb tensor, bool map = true) =>
-        Assert.Throws<OnnxImportException>(() => OnnxImporter.Load(Write(tensor), new OnnxLoadOptions { MemoryMap = map }));
+        Assert.Throws<OnnxImportException>(() => OnnxImporter.Load(Write(tensor), new ModelLoadOptions { MemoryMap = map }));
 
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public void OffsetAndLengthSelectTheRange(bool map)
     {
-        using IrModel m = OnnxImporter.Load(Write(Tensor("w.bin", "4096", "16")), new OnnxLoadOptions { MemoryMap = map });
+        using IrModel m = OnnxImporter.Load(Write(Tensor("w.bin", "4096", "16")), new ModelLoadOptions { MemoryMap = map });
         TensorData t = m.Graph.Initializers[0];
         Assert.True(t.IsExternal);
         byte[] expected = new byte[16];
@@ -149,7 +149,7 @@ public sealed class ExternalDataTests : IDisposable
     {
         byte[] bytes = File.ReadAllBytes(Write(Tensor("w.bin", "0", "16")));
         Assert.Equal(OnnxErrorKind.ExternalData, Assert.Throws<OnnxImportException>(() => OnnxImporter.Load(new MemoryStream(bytes))).Kind);
-        using IrModel m = OnnxImporter.Load(new MemoryStream(bytes), new OnnxLoadOptions { ExternalDataDirectory = _dir });
+        using IrModel m = OnnxImporter.Load(new MemoryStream(bytes), new ModelLoadOptions { ExternalDataDirectory = _dir });
         Assert.Equal(16, m.Graph.Initializers[0].RawLength);
     }
 
@@ -157,7 +157,7 @@ public sealed class ExternalDataTests : IDisposable
     public void ModelsReadFromADifferentDirectoryDoNotEscapeThroughTheOptionEither()
     {
         byte[] bytes = Build.Model(Build.Graph("g", [], null, null, [Tensor("../secret.bin")]));
-        var e = Assert.Throws<OnnxImportException>(() => OnnxImporter.Load(bytes, new OnnxLoadOptions { ExternalDataDirectory = _dir }));
+        var e = Assert.Throws<OnnxImportException>(() => OnnxImporter.Load(bytes, new ModelLoadOptions { ExternalDataDirectory = _dir }));
         Assert.Equal(OnnxErrorKind.ExternalData, e.Kind);
     }
 

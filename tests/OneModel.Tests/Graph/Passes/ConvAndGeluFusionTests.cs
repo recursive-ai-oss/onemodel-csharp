@@ -58,8 +58,8 @@ public class ConvAndGeluFusionTests
     {
         byte[] model = ConvModel(cin, cout, k, g, true, false, act);
         float[] x = PassTestKit.RandomFloats(cin * 9 * 11, 11);
-        float[] none = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.None, ExecutionMode.Exact);
-        float[] all = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.All, ExecutionMode.Exact);
+        float[] none = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.None, ArithmeticMode.Exact);
+        float[] all = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.All, ArithmeticMode.Exact);
         Assert.True(PassTestKit.BitEqual(none, all));
     }
 
@@ -69,18 +69,18 @@ public class ConvAndGeluFusionTests
     {
         byte[] model = ConvModel(cin, cout, k, g, true, true, act);
         float[] x = PassTestKit.RandomFloats(cin * 9 * 11, 12);
-        float[] none = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.None, ExecutionMode.Fast);
-        float[] one = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.All, ExecutionMode.Fast, 1);
-        float[] many = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.All, ExecutionMode.Fast, 4);
+        float[] none = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.None, ArithmeticMode.Fast);
+        float[] one = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.All, ArithmeticMode.Fast, 1);
+        float[] many = PassTestKit.Run(model, x, [1, cin, 9, 11], OptimizationLevel.All, ArithmeticMode.Fast, 4);
         Assert.True(PassTestKit.BitEqual(one, many));
         for (int i = 0; i < none.Length; i++)
         {
             Assert.True(Math.Abs(none[i] - one[i]) <= 2e-5f * (1f + Math.Abs(none[i])), $"element {i}: {none[i]} vs {one[i]}");
         }
 
-        string[] fast = PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast);
+        string[] fast = PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast);
         Assert.Equal(act is null ? ["ConvOp", "IdentityOp"] : ["ConvOp"], fast);
-        string[] exact = PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Exact);
+        string[] exact = PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Exact);
         Assert.Contains("BatchNormalizationOp", exact);
     }
 
@@ -110,9 +110,9 @@ public class ConvAndGeluFusionTests
     {
         byte[] model = ResidualModel(c, g, skip);
         float[] x = PassTestKit.RandomFloats(c * 9 * 11, 13);
-        float[] none = PassTestKit.Run(model, x, [1, c, 9, 11], OptimizationLevel.None, ExecutionMode.Fast);
-        float[] one = PassTestKit.Run(model, x, [1, c, 9, 11], OptimizationLevel.All, ExecutionMode.Fast, 1);
-        float[] many = PassTestKit.Run(model, x, [1, c, 9, 11], OptimizationLevel.All, ExecutionMode.Fast, 4);
+        float[] none = PassTestKit.Run(model, x, [1, c, 9, 11], OptimizationLevel.None, ArithmeticMode.Fast);
+        float[] one = PassTestKit.Run(model, x, [1, c, 9, 11], OptimizationLevel.All, ArithmeticMode.Fast, 1);
+        float[] many = PassTestKit.Run(model, x, [1, c, 9, 11], OptimizationLevel.All, ArithmeticMode.Fast, 4);
         Assert.True(PassTestKit.BitEqual(one, many));
         for (int i = 0; i < none.Length; i++)
         {
@@ -136,11 +136,11 @@ public class ConvAndGeluFusionTests
     public void ErfGeluChainBecomesOneNodeAndStaysClose()
     {
         byte[] model = GeluModel();
-        Assert.Equal(["FloatFunctionOp`1"], PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Fast));
-        Assert.Equal(5, PassTestKit.Kernels(model, OptimizationLevel.All, ExecutionMode.Exact).Length);
+        Assert.Equal(["FloatFunctionOp`1"], PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Fast));
+        Assert.Equal(5, PassTestKit.Kernels(model, OptimizationLevel.All, ArithmeticMode.Exact).Length);
         float[] x = PassTestKit.RandomFloats(7 * 40, 13, 4f);
-        float[] none = PassTestKit.Run(model, x, [7, 40], OptimizationLevel.None, ExecutionMode.Fast);
-        float[] all = PassTestKit.Run(model, x, [7, 40], OptimizationLevel.All, ExecutionMode.Fast);
+        float[] none = PassTestKit.Run(model, x, [7, 40], OptimizationLevel.None, ArithmeticMode.Fast);
+        float[] all = PassTestKit.Run(model, x, [7, 40], OptimizationLevel.All, ArithmeticMode.Fast);
         for (int i = 0; i < none.Length; i++)
         {
             Assert.True(Math.Abs(none[i] - all[i]) <= 2e-6f * (1f + Math.Abs(none[i])), $"element {i}: {none[i]} vs {all[i]}");
@@ -160,6 +160,6 @@ public class ConvAndGeluFusionTests
         b.Node("Add", ["e", "one"], ["a"]);
         b.Node("Mul", ["u", "a"], ["m"]);
         b.Node("Mul", ["m", "half"], ["y"]);
-        Assert.Equal(["LinearOp"], PassTestKit.Kernels(b.Build(), OptimizationLevel.All, ExecutionMode.Fast));
+        Assert.Equal(["LinearOp"], PassTestKit.Kernels(b.Build(), OptimizationLevel.All, ArithmeticMode.Fast));
     }
 }

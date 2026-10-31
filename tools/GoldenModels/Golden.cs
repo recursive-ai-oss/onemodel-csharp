@@ -8,6 +8,7 @@
 //   --threads N              intra-op threads (default: ONEMODEL_THREADS, else 0 = every core)
 //   --time REPS             also run each model REPS more times and print the best warm time to stderr (for exact-versus-fast cost)
 //   --mode exact|fast        default exact; fast is only for measuring the cost of exactness
+using RecursiveAI.OneModel;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -31,7 +32,7 @@ internal static class Golden
     public static int Run(string[] args, TextWriter output, TextWriter error)
     {
         int threads = int.TryParse(Environment.GetEnvironmentVariable("ONEMODEL_THREADS"), NumberStyles.None, CultureInfo.InvariantCulture, out int t) ? t : 0;
-        ExecutionMode mode = ExecutionMode.Exact;
+        ArithmeticMode mode = ArithmeticMode.Exact;
         string? casesDir = null;
         int every = 1;
         int reps = 0;
@@ -42,7 +43,7 @@ internal static class Golden
             switch (args[i])
             {
                 case "--threads": threads = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
-                case "--mode": mode = args[++i] == "fast" ? ExecutionMode.Fast : ExecutionMode.Exact; break;
+                case "--mode": mode = args[++i] == "fast" ? ArithmeticMode.Fast : ArithmeticMode.Exact; break;
                 case "--cases": casesDir = args[++i]; break;
                 case "--print": PrintName = args[++i]; break;
                 case "--time": reps = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
@@ -53,7 +54,7 @@ internal static class Golden
             }
         }
 
-        var options = new SessionOptions { Mode = mode, IntraOpThreads = threads };
+        var options = new ModelOptions { Mode = mode, IntraOpThreads = threads };
         int failures = 0;
         foreach (string spec in models)
         {
@@ -97,7 +98,7 @@ internal static class Golden
         return failures == 0 ? 0 : 1;
     }
 
-    private static void RunModel(string name, string file, string refDir, SessionOptions options, TextWriter output, TextWriter error, int reps)
+    private static void RunModel(string name, string file, string refDir, ModelOptions options, TextWriter output, TextWriter error, int reps)
     {
         var inputs = new Dictionary<string, NpyArray>();
         foreach (string f in Directory.GetFiles(Path.Combine(refDir, "inputs"), "*.npy"))
@@ -172,7 +173,7 @@ internal static class Golden
         }
     }
 
-    private static void RunGraph(string name, string file, string jsonSpec, SessionOptions options, TextWriter output)
+    private static void RunGraph(string name, string file, string jsonSpec, ModelOptions options, TextWriter output)
     {
         string[] js = jsonSpec.Split('#');
         using JsonDocument doc = JsonDocument.Parse(File.ReadAllBytes(js[0]));
@@ -206,7 +207,7 @@ internal static class Golden
         }
     }
 
-    private static void RunCases(string dir, int every, SessionOptions options, TextWriter output, TextWriter error)
+    private static void RunCases(string dir, int every, ModelOptions options, TextWriter output, TextWriter error)
     {
         string[] cases = Directory.GetDirectories(dir);
         Array.Sort(cases, StringComparer.Ordinal);

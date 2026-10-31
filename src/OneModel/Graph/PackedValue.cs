@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
@@ -20,6 +21,7 @@ public enum TensorInfoKind
 }
 
 /// <summary>What a packed value holds.</summary>
+[Experimental("ONEMODEL0001")]
 public enum PackedKind
 {
     /// <summary>A sequence of tensors (possibly none).</summary>
@@ -45,6 +47,7 @@ public enum PackedKind
 /// tensor one byte of <see cref="DType"/>, one byte of rank, rank int32 extents and the row-major element bytes. An optional holding
 /// a tensor has the same tensor record without the count. The layout is internal to the library and may change.
 /// </remarks>
+[Experimental("ONEMODEL0001")]
 public static class PackedValue
 {
     private static ReadOnlySpan<byte> Magic => "OMV1"u8;
