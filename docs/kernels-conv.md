@@ -69,8 +69,8 @@ shuffle on SSE and Arm64, and the padded gather finds the columns inside the pla
 
 ## Winograd F(2x2, 3x3)
 
-Fast mode computes a 3x3 stride-1 unit-dilation single-group convolution with 32 to about 200 input and output channels (`Cin >= 32`, `Cout >= 32`,
-`Cin * Cout <= 40 960`) by Winograd's minimal filtering (Lavin and Gray 2016, section 3) when the weights were prepacked at load. The choice depends on
+Fast mode computes a 3x3 stride-1 unit-dilation single-group convolution with 32 to 256 input and output channels (`Cin >= 32`, `Cout >= 32`,
+`Cin * Cout <= 65 536`) by Winograd's minimal filtering (Lavin and Gray 2016, section 3) when the weights were prepacked at load. The choice depends on
 the weights' shape alone, because the packed layout differs: for each of the 16 positions of the 4x4 transform, the Cout x Cin matrix
 `U = G g G^T` (computed in double precision from the 3x3 filters, rounded once) in the A-panel layout of the matrix product. Padding, odd sizes
 and any `pads` are handled; the unpacked path and exact mode keep the direct sums.
@@ -86,10 +86,14 @@ and any `pads` are handled; the unpacked path and exact mode keep the direct sum
   over the input channels on the convolution register tile, accumulating across channel blocks in increasing order from +0. (3) Output transform
   `Y = A^T M A`, four tiles at a time, stored as interleaved 2x2 blocks into the output (clipped at the edges); then the epilogue (bias, residual,
   activation) runs on the chunk's rows of each channel, which are one contiguous run of the plane.
-* **Why the limits.** Every chunk reads all 16 transformed weight matrices. Up to about 2.5 MB they stay in the shared caches; ResNet-50's
-  256 x 256 layers at 14 x 14 ran 20% slower and its 512 x 512 layers at 7 x 7 almost three times slower than the direct path on one thread. With 16 to 32
-  channels the transforms cost as much as they save (DBNet, 32 x 40 maps). Measured gain on one thread: the CRNN front end's five 3x3 layers (32 to 192
-  channels, batch 8) 20.6 -> 13.2 ms; ResNet-50's 64-channel 56x56 layers -21%, its 128-channel 28x28 layers -31 to -35%.
+* **Why the limits.** Every chunk reads all 16 transformed weight matrices (`16 x Cin x Cout` floats, 4 MB at 256 x 256), so large channel counts
+  stop paying: on one to eight threads a 512 x 512 layer at 7 x 7 ran about two thirds slower than the direct path, a 256 x 256 layer at 14 x 14 gained
+  about 8%, and 192 x 192 at 28 x 28 gained 50%. With 16 channels the transforms cost as much as they save. Measured on one thread (indicative):
+  the CRNN front end's five 3x3 layers (32 to 192 channels, batch 8) 20.6 -> 13.2 ms; ResNet-50's 64-channel 56x56 layers about -20% and its
+  128-channel 28x28 layers about -30%.
+* **Two details that mattered.** The kernels are compiled at full optimisation from the first call (`AggressiveOptimization`: tiered compilation left the
+  transform loops in unoptimised code for the first hundred milliseconds, a third of a small layer's run), and the 16 positions of a buffer are
+  a cache line more than a multiple of 4 KiB apart (a distance of exactly 8 KiB sent the 16 stores of one tile group to the same cache sets).
 * **Accuracy.** Larger rounding error than the direct convolution (the transforms add and subtract before the sum); the tests bound it at
   16 * K * 2^-24 * sum|w x|, and the reference models stay within 4e-5 of ONNX Runtime scaled.
 

@@ -26,10 +26,10 @@ internal static unsafe class ConvWinograd
     // Channel counts below this do not repay the transforms (measured: 16 -> 32 channels at 32x40 is no faster than the direct path).
     private const int MinChannels = 32;
 
-    // The transformed weights (16 x Cin x Cout floats) are read by every chunk, so they should stay in the caches the chunks share:
-    // beyond Cin * Cout = 40 960 (a 2.5 MB copy; 192 x 192 channels fit) the direct path is faster (ResNet-50's 256 x 256 layers at 14 x 14
-    // ran 20% slower, its 512 x 512 layers at 7 x 7 almost three times slower, one thread).
-    private const long MaxChannelProduct = 40_960;
+    // The transformed weights (16 x Cin x Cout floats) are read by every chunk, so they should stay in the caches the chunks share. Measured
+    // on one to eight threads, 3x3 layers of 192 x 192 and 256 x 256 channels still gain (up to 50% and about 8%), 512 x 512 layers at 7 x 7
+    // lose two thirds.
+    private const long MaxChannelProduct = 65_536;
 
     // Floats of transformed input plus products one chunk may hold (1 MiB): about the size of a core's second-level cache.
     private const long BudgetFloats = 256 * 1024;

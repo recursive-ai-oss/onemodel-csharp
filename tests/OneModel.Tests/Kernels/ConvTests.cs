@@ -285,7 +285,7 @@ public class ConvTests
             new(2, 40, 29, 37, 72, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1),
             new(1, 32, 5, 100, 130, 3, 3, 1, 1, 0, 1, 2, 1, 1, 1, 1),
         ];
-        Assert.False(ConvWinograd.Eligible(new(1, 256, 14, 14, 256, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1)));
+        Assert.False(ConvWinograd.Eligible(new(1, 512, 7, 7, 512, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1)));
         Assert.False(ConvWinograd.Eligible(new(1, 64, 14, 14, 64, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1)));
         foreach (ConvShape s in shapes)
         {
