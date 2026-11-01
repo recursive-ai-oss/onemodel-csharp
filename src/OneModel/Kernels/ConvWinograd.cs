@@ -117,7 +117,7 @@ internal static unsafe class ConvWinograd
         int txPad = (tilesX + 3) & ~3;
         int coutPad = (s.Cout + blk.Mr - 1) / blk.Mr * blk.Mr;
 
-        // Tile rows per chunk: as many as the cache budget allows, fewer while that leaves too few chunks to share between cores.
+        // Tile rows per block: as many as the cache budget allows, fewer while that leaves too few blocks to share between cores.
         long perTile = Positions * (long)(s.Cin + coutPad);
         int rows = (int)Math.Clamp(BudgetFloats / (perTile * txPad), 1, tilesY);
         long macsPerRow = (long)txPad * Positions * s.Cin * s.Cout;
@@ -126,14 +126,32 @@ internal static unsafe class ConvWinograd
             rows /= 2;
         }
 
-        int chunksPerImage = (tilesY + rows - 1) / rows;
+        int blocksPerImage = (tilesY + rows - 1) / rows;
         int stripsFull = ((rows * txPad) + blk.Nr - 1) / blk.Nr;
+
+        // The output channels of a block split into groups of whole row strips when the blocks alone leave too few chunks for the cores.
+        int rowStrips = coutPad / blk.Mr;
+        long blockMacs = rows * macsPerRow;
+        int split = 1;
+        while (split < rowStrips && (long)s.N * blocksPerImage * split < TargetChunks && blockMacs / (split + 1) >= MinChunkMacs)
+        {
+            split++;
+        }
+
+        int stripsPerGroup = (rowStrips + split - 1) / split;
+        split = (rowStrips + stripsPerGroup - 1) / stripsPerGroup;
+
+        int blocks = checked(s.N * blocksPerImage);
+        long posStrideV = (long)stripsFull * blk.Nr * s.Cin;
+        float* v = Scratch.Get(Scratch.WinogradV, blocks * Positions * posStrideV);
         Job job = t_job ??= new Job();
-        job.Setup(path, blk, s, input, packed, output, epilogue, rows, chunksPerImage, txPad, coutPad, stripsFull);
+        job.Setup(path, blk, s, input, packed, output, epilogue, rows, blocksPerImage, txPad, coutPad, stripsFull, split, stripsPerGroup, v, posStrideV);
         try
         {
+            long tileChannels = (long)s.N * tilesY * txPad * s.Cin;
+            ParallelFor.Run(job.Transform, checked(blocks * job.ChannelGroups), threads, tileChannels * 3);
             long macs = (long)s.N * Positions * s.Cin * s.Cout * tilesY * txPad;
-            ParallelFor.Run(job, checked(s.N * chunksPerImage), threads, macs / 8);
+            ParallelFor.Run(job.Product, checked(blocks * split), threads, macs / 8);
         }
         finally
         {
@@ -201,22 +219,38 @@ internal static unsafe class ConvWinograd
         return Vector128.Create(a.GetElement(2), b.GetElement(2), a.GetElement(3), b.GetElement(3));
     }
 
-    private sealed class Job : ChunkJob
+    // Two parallel phases per call: the input transform (chunks of a few channels of one block of tile rows of one image, into one shared
+    // buffer), then the products and the output transform (chunks of a group of row strips of one block). A block is a few whole tile
+    // rows of one image; every output is produced by exactly one product chunk.
+    private sealed class Job
     {
-        private KernelPath _path;
+        private const int ChannelsPerChunk = 16;
         private int _mr, _nr, _n, _cin, _cout, _h, _w, _padTop, _padLeft, _outH, _outW;
-        private int _tilesX, _tilesY, _rows, _chunksPerImage, _txPad, _coutPad, _stripsFull;
+        private int _tilesX, _tilesY, _rows, _blocksPerImage, _txPad, _coutPad, _stripsFull, _split, _stripsPerGroup;
+        private long _posStrideV;
+        private float* _v;
         private float* _input;
         private float* _packed;
         private float* _output;
         private IGemmEpilogue? _epilogue;
         private delegate*<int, float*, float*, float*, nint, int, void> _micro;
 
+        public Job()
+        {
+            Transform = new TransformPhase(this);
+            Product = new ProductPhase(this);
+        }
+
+        public ChunkJob Transform { get; }
+
+        public ChunkJob Product { get; }
+
+        public int ChannelGroups => (_cin + ChannelsPerChunk - 1) / ChannelsPerChunk;
+
         public void Setup(
             KernelPath path, Gemm.Blocking blk, in ConvShape s, float* input, float* packed, float* output, IGemmEpilogue? epilogue,
-            int rows, int chunksPerImage, int txPad, int coutPad, int stripsFull)
+            int rows, int blocksPerImage, int txPad, int coutPad, int stripsFull, int split, int stripsPerGroup, float* v, long posStrideV)
         {
-            _path = path;
             _mr = blk.Mr;
             _nr = blk.Nr;
             _n = s.N;
@@ -231,10 +265,14 @@ internal static unsafe class ConvWinograd
             _tilesX = (_outW + 1) / 2;
             _tilesY = (_outH + 1) / 2;
             _rows = rows;
-            _chunksPerImage = chunksPerImage;
+            _blocksPerImage = blocksPerImage;
             _txPad = txPad;
             _coutPad = coutPad;
             _stripsFull = stripsFull;
+            _split = split;
+            _stripsPerGroup = stripsPerGroup;
+            _v = v;
+            _posStrideV = posStrideV;
             _input = input;
             _packed = packed;
             _output = output;
@@ -244,32 +282,56 @@ internal static unsafe class ConvWinograd
 
         public void Release() => _epilogue = null;
 
-        public override void RunChunk(int chunk)
+        private sealed class TransformPhase(Job owner) : ChunkJob
         {
-            int img = chunk / _chunksPerImage;
-            int ty0 = (chunk % _chunksPerImage) * _rows;
-            int nRows = Math.Min(_tilesY, ty0 + _rows) - ty0;
-            int tiles = nRows * _txPad;
-            int strips = (tiles + _nr - 1) / _nr;
-            long ldm = (long)_stripsFull * _nr;
-            long posStrideV = ldm * _cin;
-            long posStrideM = _coutPad * ldm;
-            float* v = Scratch.Get(Scratch.WinogradV, Positions * posStrideV);
-            float* m = Scratch.Get(Scratch.WinogradM, Positions * posStrideM);
+            public override void RunChunk(int chunk) => owner.RunTransform(chunk);
+        }
 
-            TransformInput(img, ty0, nRows, strips, v, posStrideV, ldm);
-            Multiply(strips, v, posStrideV, m, posStrideM, ldm);
-            TransformOutput(img, ty0, nRows, m, posStrideM, ldm);
+        private sealed class ProductPhase(Job owner) : ChunkJob
+        {
+            public override void RunChunk(int chunk) => owner.RunProduct(chunk);
+        }
+
+        private void RunTransform(int chunk)
+        {
+            int groups = ChannelGroups;
+            int block = chunk / groups;
+            int c0 = (chunk % groups) * ChannelsPerChunk;
+            int img = block / _blocksPerImage;
+            int ty0 = (block % _blocksPerImage) * _rows;
+            int nRows = Math.Min(_tilesY, ty0 + _rows) - ty0;
+            int strips = (nRows * _txPad + _nr - 1) / _nr;
+            long ldm = (long)_stripsFull * _nr;
+            float* v = _v + (block * Positions * _posStrideV);
+            TransformInput(img, ty0, nRows, strips, c0, Math.Min(_cin, c0 + ChannelsPerChunk), v, _posStrideV, ldm);
+        }
+
+        private void RunProduct(int chunk)
+        {
+            int block = chunk / _split;
+            int group = chunk % _split;
+            int img = block / _blocksPerImage;
+            int ty0 = (block % _blocksPerImage) * _rows;
+            int nRows = Math.Min(_tilesY, ty0 + _rows) - ty0;
+            int strips = (nRows * _txPad + _nr - 1) / _nr;
+            long ldm = (long)_stripsFull * _nr;
+            int rowStrip0 = group * _stripsPerGroup;
+            int rowStrip1 = Math.Min(_coutPad / _mr, rowStrip0 + _stripsPerGroup);
+            long posStrideM = (long)(rowStrip1 - rowStrip0) * _mr * ldm;
+            float* v = _v + (block * Positions * _posStrideV);
+            float* m = Scratch.Get(Scratch.WinogradM, Positions * posStrideM);
+            Multiply(strips, rowStrip0, rowStrip1, v, _posStrideV, m, posStrideM, ldm);
+            TransformOutput(img, ty0, nRows, rowStrip0 * _mr, Math.Min(_cout, rowStrip1 * _mr), m, posStrideM, ldm);
         }
 
         // V = B^T d B for every channel and tile of the chunk, four tiles (consecutive columns of one tile row) per vector, written in
         // the packed-B layout of each position: block pc of Kc channels at pc*ldm, strip s of it at s*kc*nr, channel row p at p*nr.
-        private void TransformInput(int img, int ty0, int nRows, int strips, float* v, long posStride, long ldm)
+        private void TransformInput(int img, int ty0, int nRows, int strips, int c0, int c1, float* v, long posStride, long ldm)
         {
             int nr = _nr;
             int groups = strips * nr / 4;
             float* window = stackalloc float[16];
-            for (int c = 0; c < _cin; c++)
+            for (int c = c0; c < c1; c++)
             {
                 float* plane = _input + (((long)img * _cin) + c) * _h * _w;
                 int pc = c / Gemm.Kc * Gemm.Kc;
@@ -363,10 +425,9 @@ internal static unsafe class ConvWinograd
 
         // For each position, M_p = U_p x V_p over the input channels in blocks of Kc, on the register-tile microkernel. M_p has coutPad
         // rows (the packed weights are padded with zero rows) and ldm columns, so every microkernel call is a full tile.
-        private void Multiply(int strips, float* v, long posStrideV, float* m, long posStrideM, long ldm)
+        private void Multiply(int strips, int rowStrip0, int rowStrip1, float* v, long posStrideV, float* m, long posStrideM, long ldm)
         {
             int mr = _mr, nr = _nr;
-            int rowStrips = _coutPad / mr;
             long perPos = (long)_coutPad * _cin;
             for (int p = 0; p < Positions; p++)
             {
@@ -380,10 +441,10 @@ internal static unsafe class ConvWinograd
                     for (int s = 0; s < strips; s++)
                     {
                         float* bp = vp + (pc * ldm) + ((long)s * kc * nr);
-                        for (int i = 0; i < rowStrips; i++)
+                        for (int i = rowStrip0; i < rowStrip1; i++)
                         {
                             float* ap = up + ((long)pc * _coutPad) + ((long)i * kc * mr);
-                            _micro(kc, ap, bp, mp + (i * mr * ldm) + (s * nr), (nint)ldm, accumulate);
+                            _micro(kc, ap, bp, mp + ((i - rowStrip0) * mr * ldm) + (s * nr), (nint)ldm, accumulate);
                         }
                     }
                 }
@@ -392,15 +453,15 @@ internal static unsafe class ConvWinograd
 
         // Y = A^T M A for every output channel and tile, four tiles per vector; the 2x2 results are stored (interleaved along the row)
         // into the output, clipped at its edges, and the epilogue is applied to the chunk's rows of that channel.
-        private void TransformOutput(int img, int ty0, int nRows, float* m, long posStride, long ldm)
+        private void TransformOutput(int img, int ty0, int nRows, int co0, int co1, float* m, long posStride, long ldm)
         {
             float* spill = stackalloc float[16];
             int outRows = Math.Min(_outH, 2 * (ty0 + nRows)) - (2 * ty0);
             long plane = (long)_outH * _outW;
-            for (int co = 0; co < _cout; co++)
+            for (int co = co0; co < co1; co++)
             {
                 float* chanOut = _output + ((((long)img * _cout) + co) * plane);
-                float* src = m + (co * ldm);
+                float* src = m + ((co - co0) * ldm);
                 for (int r = 0; r < nRows; r++)
                 {
                     int oy = 2 * (ty0 + r);
