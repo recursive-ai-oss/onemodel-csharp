@@ -377,6 +377,47 @@ foreach (ArithmeticMode gm in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact 
 }
 
 {
+    // A 3x3 fp32 convolution with 32 channels (fast mode packs its weights in the Winograd layout): traced, run through a session and
+    // compared with the eager convolution.
+    Tensor R(int seed, params int[] dims)
+    {
+        var rng = new Random(seed);
+        Shape sh = Shape.Create(dims);
+        var d = new float[sh.Length];
+        for (int i = 0; i < d.Length; i++)
+        {
+            d[i] = (float)(rng.NextDouble() - 0.5);
+        }
+
+        return Tensor.FromSpan<float>(d, sh);
+    }
+
+    Tensor w3 = R(21, 40, 32, 3, 3), b3 = R(22, 40);
+    Tensor Conv3(Tensor x) => Ops.Relu(Ops.Conv2d(x, w3, b3, new Conv2dParams(PadH: 1, PadW: 1)));
+    using Tracer wt = Tracer.Begin();
+    Tensor wx = wt.Input("x", R(23, 2, 32, 6, 10), "n", null, null, null);
+    using TracedModel wm = wt.Finish("y", Conv3(wx));
+    using Session ws = wm.CreateSession();
+    Tensor wp = R(24, 3, 32, 6, 10);
+    Span<Tensor> wo = new Tensor[1];
+    ws.Run(["x"], [wp], ["y"], wo);
+    using Tensor weager = Conv3(wp);
+    float[] wa = wo[0].ToArray<float>(), we = weager.ToArray<float>();
+    double wmax = 0, wdiff = 0;
+    for (int i = 0; i < wa.Length; i++)
+    {
+        wmax = Math.Max(wmax, Math.Abs(we[i]));
+        wdiff = Math.Max(wdiff, Math.Abs(wa[i] - we[i]));
+    }
+
+    Console.WriteLine($"conv3x3 32->40: scaled error vs eager {wdiff / wmax:E2}");
+    if (!(wdiff / wmax < 1e-5))
+    {
+        return 30;
+    }
+}
+
+{
     // Tracing: record a small conv / pooling / linear model with a symbolic batch, run it, save it, load it, run it again.
     Tensor W(int seed, params int[] dims)
     {
