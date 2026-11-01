@@ -90,15 +90,15 @@ and any `pads` are handled; the unpacked path and exact mode keep the direct sum
   256 x 256 layers at 14 x 14 ran 20% slower and its 512 x 512 layers at 7 x 7 almost three times slower than the direct path on one thread. With 16 to 32
   channels the transforms cost as much as they save (DBNet, 32 x 40 maps). Measured gain on one thread: the CRNN front end's five 3x3 layers (32 to 192
   channels, batch 8) 20.6 -> 13.2 ms; ResNet-50's 64-channel 56x56 layers -21%, its 128-channel 28x28 layers -31 to -35%.
-* **Accuracy.** About 3 to 6 times the direct convolution's rounding error (the transforms add and subtract before the sum); the tests bound it at
+* **Accuracy.** Larger rounding error than the direct convolution (the transforms add and subtract before the sum); the tests bound it at
   16 * K * 2^-24 * sum|w x|, and the reference models stay within 4e-5 of ONNX Runtime scaled.
 
 ## Batches
 
 When the rows of a convolution need several tiles, the strips of each (image, group) are gathered once and shared by its row tiles. Several
 (image, group) pairs go together in a wave, as many as it takes to give each of the two parallel phases (gather, tiles) about 48 chunks, limited so
-the shared strips stay under 4 M floats (16 MB): a batch of 8 runs a 14x14, 256-channel 3x3 layer in two parallel phases of 48 chunks instead of sixteen
-phases of 6. The wave size depends on the shape only; every output is still computed in one tile.
+the shared strips stay under 4 M floats (16 MB): a batch of 8 runs a layer of 6 tiles per image in two parallel phases instead of sixteen
+phases of 6 chunks. The wave size depends on the shape only; every output is still computed in one tile.
 
 ## Threads
 
