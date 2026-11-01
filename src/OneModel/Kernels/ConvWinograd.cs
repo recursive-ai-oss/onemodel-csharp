@@ -42,6 +42,12 @@ internal static unsafe class ConvWinograd
 
     private const int Positions = 16;
 
+    // Multiply-adds per nanosecond a core sustains through the transforms and products together (measured: 10.7 M multiply-adds of a
+    // 128 x 128 layer in 268 us on one thread), and the cost of one more parallel phase (waking helpers, the barrier, and the transformed
+    // input crossing between cores).
+    private const long MacsPerNs = 40;
+    private const long PhasedOverheadNs = 60_000;
+
     [ThreadStatic]
     private static Job? t_job;
 
@@ -143,17 +149,39 @@ internal static unsafe class ConvWinograd
         split = (rowStrips + stripsPerGroup - 1) / stripsPerGroup;
 
         int blocks = checked(s.N * blocksPerImage);
+        long macs = (long)s.N * Positions * s.Cin * s.Cout * tilesY * txPad;
+
+        // Fused or two phases. Fused: one chunk per block does the input transform, the products and the output transform with the
+        // block's data in its own core's cache, and the call is one parallel phase. Two phases (transform shared, products split by output
+        // channels) keep more cores busy when there are fewer blocks than threads, at the price of a second barrier and of moving the
+        // transformed input between cores. The choice follows an estimate of the wall time of each: it may depend on the thread count
+        // because it changes only who computes what, never the order of any sum, so the bits are the same either way.
+        long totalNs = macs / MacsPerNs;
+        long fusedNs = totalNs / blocks * ((blocks + Math.Max(1, threads) - 1) / Math.Max(1, threads));
+        long phasedNs = (totalNs / Math.Max(1, threads)) + PhasedOverheadNs;
+        bool fused = split == 1 || fusedNs <= phasedNs;
+        if (fused)
+        {
+            split = 1;
+            stripsPerGroup = rowStrips;
+        }
+
         // One cache line is added to the distance between positions: a distance that is a multiple of 4 KiB would send the 16 stores of one
         // tile group (and later the 16 loads of the output transform) to the same few cache sets.
         long posStrideV = ((long)stripsFull * blk.Nr * s.Cin) + 16;
-        float* v = Scratch.Get(Scratch.WinogradV, blocks * Positions * posStrideV);
+        float* v = Scratch.Get(Scratch.WinogradV, (fused ? 1 : blocks) * Positions * posStrideV);
         Job job = t_job ??= new Job();
-        job.Setup(path, blk, s, input, packed, output, epilogue, rows, blocksPerImage, txPad, coutPad, stripsFull, split, stripsPerGroup, v, posStrideV);
+        job.Setup(path, blk, s, input, packed, output, epilogue, rows, blocksPerImage, txPad, coutPad, stripsFull, split, stripsPerGroup, v, posStrideV, fused);
         try
         {
+            if (fused)
+            {
+                ParallelFor.Run(job.Product, blocks, threads, macs / 8);
+                return;
+            }
+
             long tileChannels = (long)s.N * tilesY * txPad * s.Cin;
             ParallelFor.Run(job.Transform, checked(blocks * job.ChannelGroups), threads, tileChannels * 5);
-            long macs = (long)s.N * Positions * s.Cin * s.Cout * tilesY * txPad;
             ParallelFor.Run(job.Product, checked(blocks * split), threads, macs / 8);
         }
         finally
@@ -235,6 +263,7 @@ internal static unsafe class ConvWinograd
         private int _mr, _nr, _n, _cin, _cout, _h, _w, _padTop, _padLeft, _outH, _outW;
         private int _tilesX, _tilesY, _rows, _blocksPerImage, _txPad, _coutPad, _stripsFull, _split, _stripsPerGroup;
         private long _posStrideV;
+        private bool _fused;
         private float* _v;
         private float* _input;
         private float* _packed;
@@ -256,7 +285,7 @@ internal static unsafe class ConvWinograd
 
         public void Setup(
             KernelPath path, Gemm.Blocking blk, in ConvShape s, float* input, float* packed, float* output, IGemmEpilogue? epilogue,
-            int rows, int blocksPerImage, int txPad, int coutPad, int stripsFull, int split, int stripsPerGroup, float* v, long posStrideV)
+            int rows, int blocksPerImage, int txPad, int coutPad, int stripsFull, int split, int stripsPerGroup, float* v, long posStrideV, bool fused)
         {
             _mr = blk.Mr;
             _nr = blk.Nr;
@@ -280,6 +309,7 @@ internal static unsafe class ConvWinograd
             _stripsPerGroup = stripsPerGroup;
             _v = v;
             _posStrideV = posStrideV;
+            _fused = fused;
             _input = input;
             _packed = packed;
             _output = output;
@@ -325,7 +355,14 @@ internal static unsafe class ConvWinograd
             int rowStrip0 = group * _stripsPerGroup;
             int rowStrip1 = Math.Min(_coutPad / _mr, rowStrip0 + _stripsPerGroup);
             long posStrideM = ((long)(rowStrip1 - rowStrip0) * _mr * ldm) + 16;
-            float* v = _v + (block * Positions * _posStrideV);
+            // Fused: every thread transforms into its own scratch (the calling thread's is the one Run sized), so the block's data stays
+            // in the cache of the core that multiplies it.
+            float* v = _fused ? Scratch.Get(Scratch.WinogradV, Positions * _posStrideV) : _v + (block * Positions * _posStrideV);
+            if (_fused)
+            {
+                TransformInput(img, ty0, nRows, strips, 0, _cin, v, _posStrideV, ldm);
+            }
+
             float* m = Scratch.Get(Scratch.WinogradM, Positions * posStrideM);
             Multiply(strips, rowStrip0, rowStrip1, v, _posStrideV, m, posStrideM, ldm);
             TransformOutput(img, ty0, nRows, rowStrip0 * _mr, Math.Min(_cout, rowStrip1 * _mr), m, posStrideM, ldm);
