@@ -487,13 +487,13 @@ internal static unsafe class ConvWinograd
                         Vector128<float> m20 = Vector128.Load(q + (8 * posStride)), m21 = Vector128.Load(q + (9 * posStride)), m22 = Vector128.Load(q + (10 * posStride)), m23 = Vector128.Load(q + (11 * posStride));
                         Vector128<float> m30 = Vector128.Load(q + (12 * posStride)), m31 = Vector128.Load(q + (13 * posStride)), m32 = Vector128.Load(q + (14 * posStride)), m33 = Vector128.Load(q + (15 * posStride));
 
-                        // A^T M: for each column j, a0 = m0 + m1 + m2, a1 = m1 - m2 - m3.
+                        // A^T M: for each column j, the two rows are M[0] + M[1] + M[2] and M[1] - M[2] - M[3].
                         Vector128<float> a00 = m00 + m10 + m20, a10 = m10 - m20 - m30;
                         Vector128<float> a01 = m01 + m11 + m21, a11 = m11 - m21 - m31;
                         Vector128<float> a02 = m02 + m12 + m22, a12 = m12 - m22 - m32;
                         Vector128<float> a03 = m03 + m13 + m23, a13 = m13 - m23 - m33;
 
-                        // (A^T M) A: for each row i, y0 = a0 + a1 + a2, y1 = a1 - a2 - a3.
+                        // (A^T M) A: for each row, the two columns are c0 + c1 + c2 and c1 - c2 - c3.
                         Vector128<float> y00 = a00 + a01 + a02, y01 = a01 - a02 - a03;
                         Vector128<float> y10 = a10 + a11 + a12, y11 = a11 - a12 - a13;
 

@@ -327,6 +327,22 @@ public class ConvTests
                     expect = expect <= 0f ? 0f : expect;
                     Assert.Equal(expect, act[i]);
                 }
+
+                // The skip connection is added after the bias and before the activation.
+                var res = new float[len];
+                for (int i = 0; i < len; i++)
+                {
+                    res[i] = ((i * 37) % 11) - 5f;
+                }
+
+                var fused = new float[len];
+                Conv.RunPacked(path, s, input, packed, fused, 3, bias, new ReluActivation(), res);
+                for (int i = 0; i < len; i++)
+                {
+                    float expect = (one[i] + bias[(i / plane) % s.Cout]) + res[i];
+                    expect = expect <= 0f ? 0f : expect;
+                    Assert.Equal(expect, fused[i]);
+                }
             }
         }
     }
