@@ -70,6 +70,9 @@ internal sealed class ConvOp : OpKernel
     /// <summary>True when input 3 is a residual that is added to the result.</summary>
     internal bool HasResidual => _residual;
 
+    /// <summary>True when all strides and dilations are 1 (a 3x3 convolution of this kind can use the Winograd layout of packed weights).</summary>
+    internal bool HasUnitStridesAndDilations => _attrs.HasUnitStridesAndDilations;
+
     /// <summary>The group count.</summary>
     internal int Group => _group;
 

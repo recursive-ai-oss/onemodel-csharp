@@ -31,7 +31,13 @@ internal static unsafe class Scratch
     /// <summary>Slot for all of A packed once, shared by the chunks of one product (the caller's buffer).</summary>
     public const int PackAll = 6;
 
-    private const int Slots = 7;
+    /// <summary>Transformed input patches of one Winograd convolution chunk.</summary>
+    public const int WinogradV = 7;
+
+    /// <summary>Transformed products of one Winograd convolution chunk.</summary>
+    public const int WinogradM = 8;
+
+    private const int Slots = 9;
 
     [ThreadStatic]
     private static float*[]? t_pointers;

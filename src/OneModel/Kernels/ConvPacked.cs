@@ -33,6 +33,9 @@ internal static unsafe class ConvPacked
     // Strips gathered per chunk of the shared gathering phase.
     private const int StripsPerPackChunk = 8;
 
+    // Most floats of gathered strips one wave of (image, group) pairs may hold (16 MB), so the shared strips stay near the caches.
+    private const long MaxSharedFloats = 4L << 20;
+
     [ThreadStatic]
     private static Job? t_job;
 
@@ -60,12 +63,17 @@ internal static unsafe class ConvPacked
             : new(FastConvAvx512M16.Mr, FastConvAvx512M16.Nr, 96, 128);
     }
 
-    private static delegate*<int, float*, float*, float*, nint, int, void> SelectMicro(KernelPath path, Gemm.Blocking blk) =>
+    internal static delegate*<int, float*, float*, float*, nint, int, void> SelectMicro(KernelPath path, Gemm.Blocking blk) =>
         path != KernelPath.Avx512 ? Gemm.SelectMicro(KernelMode.Fast, path) : blk.Mr == FastConvAvx512M8.Mr ? &FastConvAvx512M8.Kernel : &FastConvAvx512M16.Kernel;
 
     /// <summary>Floats <see cref="PackWeights"/> writes for weights of <paramref name="s"/> packed for <paramref name="path"/>.</summary>
     public static long PackedWeightsLength(KernelPath path, in ConvShape s)
     {
+        if (ConvWinograd.Eligible(in s))
+        {
+            return ConvWinograd.PackedLength(path, in s);
+        }
+
         int mr = GetBlocking(path, s.Cout / s.Groups).Mr;
         long coutG = s.Cout / s.Groups;
         long k = (long)(s.Cin / s.Groups) * s.KH * s.KW;
@@ -88,6 +96,21 @@ internal static unsafe class ConvPacked
         if (weights.Length < (long)s.Cout * k)
         {
             throw new ArgumentException("The weights are smaller than Cout x Cin/Groups x KH x KW.", nameof(weights));
+        }
+
+        if (ConvWinograd.Eligible(in s))
+        {
+            if (dst.Length < ConvWinograd.PackedLength(path, in s))
+            {
+                throw new ArgumentException("The destination is smaller than PackedWeightsLength.", nameof(dst));
+            }
+
+            fixed (float* pw = weights, pd = dst)
+            {
+                ConvWinograd.PackWeights(path, in s, pw, pd);
+            }
+
+            return;
         }
 
         long perGroup = PackedWeightsLength(path, s) / s.Groups;
@@ -120,6 +143,12 @@ internal static unsafe class ConvPacked
         KernelPath path, in ConvShape s, float* input, float* weights, float* packedWeights, float* output, int threads,
         IGemmEpilogue? epilogue)
     {
+        if (packedWeights is not null && ConvWinograd.Eligible(in s))
+        {
+            ConvWinograd.Run(path, in s, input, packedWeights, output, threads, epilogue);
+            return;
+        }
+
         int coutG = s.Cout / s.Groups;
         Gemm.Blocking blk = GetBlocking(path, coutG);
         int cinG = s.Cin / s.Groups;
@@ -154,9 +183,17 @@ internal static unsafe class ConvPacked
             }
             else
             {
-                // Several row tiles share the gathered columns: gather once per (image, group), then run the tiles.
+                // Several row tiles share the gathered columns: gather once per (image, group), then run the tiles. At batch N the pairs
+                // go in waves, as many pairs per wave as it takes to give each of the two parallel phases about TargetChunks chunks
+                // (and the shared strips a bounded size), so a layer costs a few barriers instead of two per image, and the idle
+                // cores of a one-image phase have work. The wave size depends on the shape alone.
                 int nStrips = (n + blk.Nr - 1) / blk.Nr;
-                float* shared = Scratch.Get(Scratch.PackB, (long)nStrips * blk.Nr * k);
+                long perPair = (long)nStrips * blk.Nr * k;
+                int pairs = checked(s.N * s.Groups);
+                long wave = Math.Max(1, (TargetChunks + tileWork - 1) / tileWork);
+                wave = Math.Min(wave, Math.Max(1, MaxSharedFloats / perPair));
+                int wavePairs = (int)Math.Min(wave, pairs);
+                float* shared = Scratch.Get(Scratch.PackB, wavePairs * perPair);
                 int stripGroups = (nStrips + StripsPerPackChunk - 1) / StripsPerPackChunk;
                 int kBlocks = (k + Gemm.Kc - 1) / Gemm.Kc;
                 PackJob pack = t_packJob ??= new PackJob();
@@ -164,21 +201,22 @@ internal static unsafe class ConvPacked
                 pack.Dst = shared;
                 pack.NStrips = nStrips;
                 pack.StripGroups = stripGroups;
+                pack.KBlocks = kBlocks;
+                pack.PerPair = perPair;
                 job.SharedPanels = shared;
                 job.SharedStrips = nStrips;
-                long groupMacs = macs / ((long)s.N * s.Groups);
-                for (int img = 0; img < s.N; img++)
+                job.SharedPerPair = perPair;
+                long groupMacs = macs / pairs;
+                for (int first = 0; first < pairs; first += wavePairs)
                 {
-                    for (int g = 0; g < s.Groups; g++)
-                    {
-                        job.Img = img;
-                        job.Group = g;
-                        // Gathering costs about a nanosecond per element it writes (k * n of them). Estimated at an eighth of that, the pool kept
-                        // the gather on one thread for every layer under ~600k elements, which serialised the strip packing of ResNet-50's
-                        // 28x28 and 56x56 layers (8 threads: conv chain 26 -> 18.6 ms).
-                        ParallelFor.Run(pack, kBlocks * stripGroups, threads, (long)k * n);
-                        ParallelFor.Run(job, checked((int)tileWork), threads, groupMacs / MacsPerNs);
-                    }
+                    int count = Math.Min(wavePairs, pairs - first);
+                    job.FirstPair = first;
+                    pack.FirstPair = first;
+                    // Gathering costs about a nanosecond per element it writes (k * n of them). Estimated at an eighth of that, the pool kept
+                    // the gather on one thread for every layer under ~600k elements, which serialised the strip packing of ResNet-50's
+                    // 28x28 and 56x56 layers (8 threads: conv chain 26 -> 18.6 ms).
+                    ParallelFor.Run(pack, checked(count * kBlocks * stripGroups), threads, (long)count * k * n);
+                    ParallelFor.Run(job, checked((int)(count * tileWork)), threads, count * groupMacs / MacsPerNs);
                 }
 
                 pack.Owner = null;
@@ -355,10 +393,16 @@ internal static unsafe class ConvPacked
         public float* Dst;
         public int NStrips;
         public int StripGroups;
+        public int KBlocks;
+        public int FirstPair;
+        public long PerPair;
 
         public override void RunChunk(int chunk)
         {
             Job job = Owner!;
+            int perPairChunks = KBlocks * StripGroups;
+            int pair = chunk / perPairChunks;
+            chunk -= pair * perPairChunks;
             int kb = chunk / StripGroups;
             int sg = chunk % StripGroups;
             int pc = kb * Gemm.Kc;
@@ -368,7 +412,10 @@ internal static unsafe class ConvPacked
             int col0 = s0 * job.Nr;
             int cols = Math.Min(job.N, s1 * job.Nr) - col0;
             // Layout: k block at pc * NStrips * nr, strip s of it at s * kc * nr.
-            job.PackPanel(Dst + ((long)pc * NStrips * job.Nr) + ((long)s0 * kc * job.Nr), job.PlanesOf(job.Img, job.Group), pc, kc, col0, cols);
+            int ig = FirstPair + pair;
+            job.PackPanel(
+                Dst + (pair * PerPair) + ((long)pc * NStrips * job.Nr) + ((long)s0 * kc * job.Nr), job.PlanesOf(ig / job.Groups, ig % job.Groups),
+                pc, kc, col0, cols);
         }
     }
 
@@ -411,8 +458,10 @@ internal static unsafe class ConvPacked
         // The shared-gathering mode: the strips and the (image, group) being computed.
         public float* SharedPanels;
         public int SharedStrips;
-        public int Img;
-        public int Group;
+        public long SharedPerPair;
+        public int FirstPair;
+
+        public int Groups => _groups;
 
         public int Nr { get; private set; }
 
@@ -489,7 +538,9 @@ internal static unsafe class ConvPacked
             }
             else
             {
-                RunTile(Img, Group, chunk, SharedPanels);
+                int pair = chunk / perImage;
+                int ig = FirstPair + pair;
+                RunTile(ig / _groups, ig % _groups, chunk % perImage, SharedPanels + (pair * SharedPerPair));
             }
         }
 

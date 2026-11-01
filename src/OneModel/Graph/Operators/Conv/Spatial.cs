@@ -80,6 +80,31 @@ internal sealed class WindowAttrs
 
     public AutoPad AutoPad { get; }
 
+    /// <summary>True when every stride and dilation is 1 (or unset, which means 1).</summary>
+    public bool HasUnitStridesAndDilations
+    {
+        get
+        {
+            foreach (long v in _strides)
+            {
+                if (v != 1)
+                {
+                    return false;
+                }
+            }
+
+            foreach (long v in _dilations)
+            {
+                if (v != 1)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
     public bool HasKernelShape => _kernel.Length > 0;
 
     /// <summary>Fills the per-axis values for <paramref name="rank"/> spatial axes. The kernel comes from the attribute or, if absent, from <paramref name="weightKernel"/>.</summary>

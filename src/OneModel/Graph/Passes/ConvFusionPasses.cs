@@ -265,7 +265,9 @@ internal sealed class ConvPackPass : IGraphPass
             int group = convOp.Group;
             int kw = w.Shape[w.Rank - 1];
             int kh = w.Rank == 4 ? w.Shape[2] : 1;
-            var s = new ConvShape(1, w.Shape[1] * group, 1, 1, w.Shape[0], kh, kw, 1, 1, 0, 0, 0, 0, 1, 1, group);
+            // The strides decide the packed layout (unit-stride 3x3 convolutions use the Winograd form), so the real ones go in.
+            int stride = convOp.HasUnitStridesAndDilations ? 1 : 2;
+            var s = new ConvShape(1, w.Shape[1] * group, 1, 1, w.Shape[0], kh, kw, stride, stride, 0, 0, 0, 0, 1, 1, group);
             if (s.IsDepthwise)
             {
                 continue;

@@ -6,6 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- Speed of convolution networks (fast mode): 3x3 stride-1 convolutions with 32 to about 200 input and output channels (ResNet-50's 64- and 128-channel stages, the CRNN text recogniser's whole front end) use Winograd's F(2x2, 3x3) transform when the weights are prepacked at load: 16 instead of 36 multiplications per output pair, on the same register-tile microkernels. Their results differ from the direct convolution's in the last bits (within the documented tolerance) and do not depend on the thread count; exact mode is untouched. A convolution that takes several row tiles and runs more than one image now gathers and multiplies the images in waves, so a batch of 8 keeps all cores busy in two parallel phases per layer instead of two per image.
 - Speed of small models (DBNet-class detectors, batch 1): nearest-neighbour `Resize` runs in one threaded pass (about 6x faster on a 2x upsample); the thread pool wakes only the helpers a call uses; depthwise convolution builds its padded copy without clearing the interior, shares it between the output channels of one input channel, fuses bias and Relu in one pass, and computes wide rows' leftover vectors four rows at a time; the Conv epilogue (bias, Relu) runs in one pass per row. Fast-mode results are unchanged bit for bit; exact mode is untouched.
 
 ## [1.0.0] - 2026-10-31

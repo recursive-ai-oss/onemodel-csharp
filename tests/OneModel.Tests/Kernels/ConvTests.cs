@@ -198,17 +198,134 @@ public class ConvTests
                 float[] plain = Run(s, input, weights, KernelMode.Fast, path, 1);
                 var packed = new float[ConvPacked.PackedWeightsLength(path, s)];
                 ConvPacked.PackWeights(path, s, weights, packed);
+                // 3x3 stride-1 layers with enough channels use Winograd's transform: not the direct sums' bits, but the same on every thread count.
+                bool winograd = ConvWinograd.Eligible(s);
+                var first = new float[len];
                 foreach (int threads in new[] { 1, 6 })
                 {
                     var o = new float[len];
                     Conv.RunPacked(path, s, input, packed, o, threads);
-                    Assert.True(KernelTestData.SameBits(plain, o), $"{path} x{threads} packed differs on {s}");
+                    if (winograd)
+                    {
+                        if (threads == 1)
+                        {
+                            o.CopyTo(first, 0);
+                        }
+
+                        Assert.True(KernelTestData.SameBits(first, o), $"{path} x{threads} Winograd thread dependence on {s}");
+                    }
+                    else
+                    {
+                        Assert.True(KernelTestData.SameBits(plain, o), $"{path} x{threads} packed differs on {s}");
+                    }
                 }
 
+                float[] got = winograd ? first : plain;
+                double factor = winograd ? 16 : 1;
                 for (int i = 0; i < len; i++)
                 {
-                    double tol = (k * Math.Pow(2, -24) * scale[i]) + 1e-30;
-                    Assert.True(Math.Abs(plain[i] - dbl[i]) <= tol, $"{path} {s} at {i}: {plain[i]} vs {dbl[i]}");
+                    double tol = (factor * k * Math.Pow(2, -24) * scale[i]) + 1e-30;
+                    Assert.True(Math.Abs(got[i] - dbl[i]) <= tol, $"{path} {s} at {i}: {got[i]} vs {dbl[i]}");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void FastBatchesInWavesGiveTheBitsOfOneImageAtATime()
+    {
+        // Several row tiles with a small tile count per image: the images are gathered and multiplied in waves, which must not change a bit.
+        ConvShape[] shapes =
+        [
+            new(5, 64, 14, 14, 256, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1),
+            new(7, 48, 9, 9, 200, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 2),
+            new(3, 128, 7, 7, 300, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1),
+        ];
+        foreach (ConvShape s in shapes)
+        {
+            (float[] input, float[] weights) = Data(s, false);
+            int inPer = s.Cin * s.H * s.W;
+            int outPer = s.Cout * s.OutH * s.OutW;
+            ConvShape one = s with { N = 1 };
+            foreach (KernelPath path in Paths())
+            {
+                var packed = new float[ConvPacked.PackedWeightsLength(path, s)];
+                ConvPacked.PackWeights(path, s, weights, packed);
+                var expected = new float[s.N * outPer];
+                for (int img = 0; img < s.N; img++)
+                {
+                    var o1 = new float[outPer];
+                    Conv.RunPacked(path, one, input.AsSpan(img * inPer, inPer).ToArray(), packed, o1, 1);
+                    o1.CopyTo(expected, img * outPer);
+                }
+
+                foreach (int threads in new[] { 1, 6 })
+                {
+                    var o = new float[s.N * outPer];
+                    Conv.RunPacked(path, s, input, packed, o, threads);
+                    Assert.True(KernelTestData.SameBits(expected, o), $"{path} x{threads} batch differs on {s}");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void WinogradMatchesTheReferenceAndIsIndependentOfThreads()
+    {
+        // Odd and even output sizes, every padding, several images, more than Kc channels, channel counts that leave ragged row strips,
+        // widths that are and are not multiples of eight, maps smaller than a tile row group.
+        ConvShape[] shapes =
+        [
+            new(1, 32, 8, 32, 64, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+            new(2, 32, 9, 11, 40, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+            new(1, 36, 14, 14, 33, 3, 3, 1, 1, 0, 0, 0, 0, 1, 1, 1),
+            new(3, 48, 7, 7, 40, 3, 3, 1, 1, 2, 2, 2, 2, 1, 1, 1),
+            new(1, 300, 6, 10, 40, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+            new(1, 32, 3, 3, 32, 3, 3, 1, 1, 1, 0, 1, 0, 1, 1, 1),
+            new(2, 40, 29, 37, 72, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+            new(1, 32, 5, 100, 130, 3, 3, 1, 1, 0, 1, 2, 1, 1, 1, 1),
+        ];
+        Assert.False(ConvWinograd.Eligible(new(1, 256, 14, 14, 256, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1)));
+        Assert.False(ConvWinograd.Eligible(new(1, 64, 14, 14, 64, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1)));
+        foreach (ConvShape s in shapes)
+        {
+            Assert.True(ConvWinograd.Eligible(s));
+            (float[] input, float[] weights) = Data(s, false);
+            int len = s.N * s.Cout * s.OutH * s.OutW;
+            var dbl = new double[len];
+            var scale = new double[len];
+            Reference(s, input, weights, new float[len], true, dbl, scale);
+            int k = s.Cin * 9;
+            var bias = new float[s.Cout];
+            for (int i = 0; i < bias.Length; i++)
+            {
+                bias[i] = (i % 7) - 3f;
+            }
+
+            foreach (KernelPath path in Paths())
+            {
+                var packed = new float[ConvPacked.PackedWeightsLength(path, s)];
+                ConvPacked.PackWeights(path, s, weights, packed);
+                var one = new float[len];
+                Conv.RunPacked(path, s, input, packed, one, 1);
+                var many = new float[len];
+                Conv.RunPacked(path, s, input, packed, many, 7);
+                Assert.True(KernelTestData.SameBits(one, many), $"{path} thread dependence on {s}");
+                for (int i = 0; i < len; i++)
+                {
+                    double tol = (16 * k * Math.Pow(2, -24) * scale[i]) + 1e-30;
+                    Assert.True(Math.Abs(one[i] - dbl[i]) <= tol, $"{path} {s} at {i}: {one[i]} vs {dbl[i]}");
+                }
+
+                // Bias and Relu go through the epilogue on each chunk's rows.
+                var act = new float[len];
+                Conv.RunPacked(path, s, input, packed, act, 3, bias, new ReluActivation());
+                int plane = s.OutH * s.OutW;
+                for (int i = 0; i < len; i++)
+                {
+                    float expect = one[i] + bias[(i / plane) % s.Cout];
+                    expect = expect <= 0f ? 0f : expect;
+                    Assert.Equal(expect, act[i]);
                 }
             }
         }
