@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
@@ -142,14 +143,16 @@ internal static unsafe class ConvWinograd
         split = (rowStrips + stripsPerGroup - 1) / stripsPerGroup;
 
         int blocks = checked(s.N * blocksPerImage);
-        long posStrideV = (long)stripsFull * blk.Nr * s.Cin;
+        // One cache line is added to the distance between positions: a distance that is a multiple of 4 KiB would send the 16 stores of one
+        // tile group (and later the 16 loads of the output transform) to the same few cache sets.
+        long posStrideV = ((long)stripsFull * blk.Nr * s.Cin) + 16;
         float* v = Scratch.Get(Scratch.WinogradV, blocks * Positions * posStrideV);
         Job job = t_job ??= new Job();
         job.Setup(path, blk, s, input, packed, output, epilogue, rows, blocksPerImage, txPad, coutPad, stripsFull, split, stripsPerGroup, v, posStrideV);
         try
         {
             long tileChannels = (long)s.N * tilesY * txPad * s.Cin;
-            ParallelFor.Run(job.Transform, checked(blocks * job.ChannelGroups), threads, tileChannels * 3);
+            ParallelFor.Run(job.Transform, checked(blocks * job.ChannelGroups), threads, tileChannels * 5);
             long macs = (long)s.N * Positions * s.Cin * s.Cout * tilesY * txPad;
             ParallelFor.Run(job.Product, checked(blocks * split), threads, macs / 8);
         }
@@ -159,6 +162,7 @@ internal static unsafe class ConvWinograd
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector128<float> Even(Vector128<float> a, Vector128<float> b)
     {
         if (Sse.IsSupported)
@@ -174,6 +178,7 @@ internal static unsafe class ConvWinograd
         return Vector128.Create(a.GetElement(0), a.GetElement(2), b.GetElement(0), b.GetElement(2));
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector128<float> Odd(Vector128<float> a, Vector128<float> b)
     {
         if (Sse.IsSupported)
@@ -189,6 +194,7 @@ internal static unsafe class ConvWinograd
         return Vector128.Create(a.GetElement(1), a.GetElement(3), b.GetElement(1), b.GetElement(3));
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector128<float> ZipLow(Vector128<float> a, Vector128<float> b)
     {
         if (Sse.IsSupported)
@@ -204,6 +210,7 @@ internal static unsafe class ConvWinograd
         return Vector128.Create(a.GetElement(0), b.GetElement(0), a.GetElement(1), b.GetElement(1));
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector128<float> ZipHigh(Vector128<float> a, Vector128<float> b)
     {
         if (Sse.IsSupported)
@@ -317,7 +324,7 @@ internal static unsafe class ConvWinograd
             long ldm = (long)_stripsFull * _nr;
             int rowStrip0 = group * _stripsPerGroup;
             int rowStrip1 = Math.Min(_coutPad / _mr, rowStrip0 + _stripsPerGroup);
-            long posStrideM = (long)(rowStrip1 - rowStrip0) * _mr * ldm;
+            long posStrideM = ((long)(rowStrip1 - rowStrip0) * _mr * ldm) + 16;
             float* v = _v + (block * Positions * _posStrideV);
             float* m = Scratch.Get(Scratch.WinogradM, Positions * posStrideM);
             Multiply(strips, rowStrip0, rowStrip1, v, _posStrideV, m, posStrideM, ldm);
@@ -326,6 +333,7 @@ internal static unsafe class ConvWinograd
 
         // V = B^T d B for every channel and tile of the chunk, four tiles (consecutive columns of one tile row) per vector, written in
         // the packed-B layout of each position: block pc of Kc channels at pc*ldm, strip s of it at s*kc*nr, channel row p at p*nr.
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private void TransformInput(int img, int ty0, int nRows, int strips, int c0, int c1, float* v, long posStride, long ldm)
         {
             int nr = _nr;
@@ -391,6 +399,7 @@ internal static unsafe class ConvWinograd
         // The four input columns j = 0..3 of a 4x4 patch, for four tiles side by side: lane l of column j is x[iy, bx + 2l + j]. The ten
         // floats bx..bx+9 are loaded (from the plane, or from a zero-padded copy at the plane's edges) and split into even and odd
         // positions with shuffles. A row outside the plane is zeros.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void LoadRow(float* plane, int iy, int bx, bool inside, float* window, out Vector128<float> c0, out Vector128<float> c1, out Vector128<float> c2, out Vector128<float> c3)
         {
             if ((uint)iy >= (uint)_h)
@@ -425,6 +434,7 @@ internal static unsafe class ConvWinograd
 
         // For each position, M_p = U_p x V_p over the input channels in blocks of Kc, on the register-tile microkernel. M_p has coutPad
         // rows (the packed weights are padded with zero rows) and ldm columns, so every microkernel call is a full tile.
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private void Multiply(int strips, int rowStrip0, int rowStrip1, float* v, long posStrideV, float* m, long posStrideM, long ldm)
         {
             int mr = _mr, nr = _nr;
@@ -453,6 +463,7 @@ internal static unsafe class ConvWinograd
 
         // Y = A^T M A for every output channel and tile, four tiles per vector; the 2x2 results are stored (interleaved along the row)
         // into the output, clipped at its edges, and the epilogue is applied to the chunk's rows of that channel.
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private void TransformOutput(int img, int ty0, int nRows, int co0, int co1, float* m, long posStride, long ldm)
         {
             float* spill = stackalloc float[16];
