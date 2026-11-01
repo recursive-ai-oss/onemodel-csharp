@@ -97,7 +97,10 @@ result of a separable interpolation equals the multi-dimensional one up to round
   `half_pixel_symmetric` `offset + (j + 0.5)/s - 0.5` with `offset = in/2 * (1 - out / (s * in))`; `tf_crop_and_resize` from `roi`.
   Opset 10 and Upsample are `asymmetric` with nearest mode `floor`.
 * nearest: `floor`, `ceil`, `round_prefer_floor` (`x - floor(x) > 0.5` rounds up), `round_prefer_ceil` (`>= 0.5` rounds up); the index
-  is clamped to `[0, in - 1]`. Nearest copies elements, so any value (NaN, infinities) moves unchanged.
+  is clamped to `[0, in - 1]`. Nearest copies elements, so any value (NaN, infinities) moves unchanged. Because it only selects elements,
+  nearest runs as a single pass over all axes at once (the output row at positions `(j0, ..., jn-1)` is a gather of input row
+  `(i0[j0], ..., in-2[jn-2])` through the last axis's table) with the bits of the axis-by-axis form; rows are split into chunks of about
+  16 384 output elements, so the result does not depend on the thread count. A 2x upsample of the last axis is done with 4-to-8 shuffles.
 * linear: `x` is clamped to `[0, in - 1]`, taps `floor(x)`, `floor(x) + 1` (clamped) with weights `1 - t`, `t`.
 * cubic (Keys 1981): taps `floor(x) - 1 .. floor(x) + 2`; with `exclude_outside` taps outside the input get weight 0 and the others
   are divided by their sum, otherwise tap indices are clamped.

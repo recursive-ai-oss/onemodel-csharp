@@ -86,9 +86,10 @@ internal static class Resize
     /// <param name="tapIdx">Scratch of at least TapsPer(mode) * max output extent.</param>
     /// <param name="tapW">Scratch of the same size.</param>
     /// <param name="canonicalNaN">Rewrite NaN results as the canonical NaN (exact mode).</param>
+    /// <param name="threads">Upper bound on threads (nearest mode only; the result does not depend on it).</param>
     public static void Run(
         in ResizeOptions o, ReadOnlySpan<int> inDims, ReadOnlySpan<int> outDims, ReadOnlySpan<float> scales, ReadOnlySpan<float> roi,
-        ReadOnlySpan<float> x, Span<float> y, Span<float> bufA, Span<float> bufB, Span<int> tapIdx, Span<float> tapW, bool canonicalNaN)
+        ReadOnlySpan<float> x, Span<float> y, Span<float> bufA, Span<float> bufB, Span<int> tapIdx, Span<float> tapW, bool canonicalNaN, int threads = 1)
     {
         int rank = inDims.Length;
         long inLen = 1, outLen = 1;
@@ -103,7 +104,9 @@ internal static class Resize
             return;
         }
 
-        if (x.Length < inLen || y.Length < outLen || bufA.Length < Math.Max(inLen, outLen) || bufB.Length < Math.Max(inLen, outLen))
+        bool gather = o.Mode == ResizeMode.Nearest && rank <= 8;
+        long scratchLen = gather ? 0 : Math.Max(inLen, outLen);
+        if (x.Length < inLen || y.Length < outLen || bufA.Length < scratchLen || bufB.Length < scratchLen)
         {
             throw new ArgumentException("A buffer is smaller than the resize shape needs.");
         }
@@ -126,6 +129,47 @@ internal static class Resize
         Span<int> cur = stackalloc int[Shape8];
         inDims.CopyTo(cur);
         ReadOnlySpan<float> src = x;
+        if (gather && passes > 0)
+        {
+            // Nearest picks elements, so one pass over all axes gives the bits of one pass per axis (see ResizeGather).
+            long tableLen = 0;
+            for (int a = 0; a < rank; a++)
+            {
+                tableLen += outDims[a];
+            }
+
+            if (tapIdx.Length < tableLen || tapW.Length < tableLen)
+            {
+                throw new ArgumentException("A buffer is smaller than the resize shape needs.");
+            }
+
+            int at = 0;
+            for (int a = 0; a < rank; a++)
+            {
+                Span<int> table = tapIdx.Slice(at, outDims[a]);
+                if (IsIdentity(o, inDims[a], outDims[a], scales[a]))
+                {
+                    for (int j = 0; j < table.Length; j++)
+                    {
+                        table[j] = j;
+                    }
+                }
+                else
+                {
+                    BuildTaps(o, inDims[a], outDims[a], scales[a], roi.IsEmpty ? 0f : roi[a], roi.IsEmpty ? 1f : roi[a + rank], table, tapW.Slice(0, outDims[a]));
+                }
+
+                at += outDims[a];
+            }
+
+            ResizeGather.Run(inDims, outDims, tapIdx.Slice(0, (int)tableLen), x, y, threads);
+            passes = 0;
+        }
+        else if (passes == 0)
+        {
+            x.Slice(0, (int)outLen).CopyTo(y);
+        }
+
         for (int p = 0; p < passes; p++)
         {
             int a = order[p];
@@ -154,11 +198,6 @@ internal static class Resize
             ApplyAxis(src, dst, (int)outer, inDims[a], outDims[a], (int)inner, taps, tapIdx, tapW, o.Mode == ResizeMode.Nearest);
             cur[a] = outDims[a];
             src = dst;
-        }
-
-        if (passes == 0)
-        {
-            x.Slice(0, (int)outLen).CopyTo(y);
         }
 
         if (o.Coord == ResizeCoord.TfCropAndResize)

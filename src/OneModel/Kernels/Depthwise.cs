@@ -63,6 +63,14 @@ internal static unsafe class Depthwise
         }
 
         int perChunk = Math.Clamp(ElementsPerChunk / Math.Max(1, outPlane), 1, MaxPlanesPerChunk);
+        int multiplier = s.Cout / s.Cin;
+        if (multiplier > 1)
+        {
+            // Output channels of one input channel read the same padded copy, which a chunk builds once. Up to four per chunk keeps
+            // enough chunks for the pool; the choice depends on the shape alone.
+            perChunk = Math.Max(perChunk, multiplier % 4 == 0 ? 4 : multiplier % 2 == 0 ? 2 : 1);
+        }
+
         int chunks = (planes + perChunk - 1) / perChunk;
         bool exact = mode == KernelMode.Exact;
         ChunkJob job = (exact, path) switch
@@ -166,13 +174,24 @@ internal static unsafe class Depthwise
 
             int firstPlane = chunk * _planesPerChunk;
             int endPlane = Math.Min(planes, firstPlane + _planesPerChunk);
+            // Image and output channel of the plane, counted up rather than divided out for every plane; the padded copy is rebuilt only
+            // when the input channel changes (output channels of one input channel share it).
+            int img = firstPlane / s.Cout;
+            int oc = firstPlane % s.Cout;
+            long builtFor = -1;
             for (int q = firstPlane; q < endPlane; q++)
             {
-                int img = q / s.Cout;
-                int oc = q % s.Cout;
-                float* plane = _input + ((((long)img * s.Cin) + (oc / mult)) * s.H * s.W);
+                int ic = mult == 1 ? oc : oc / mult;
+                float* plane = _input + ((((long)img * s.Cin) + ic) * s.H * s.W);
                 float* w = _weights + ((long)oc * taps);
                 float* dst = _output + ((long)q * outH * outW);
+                int ocNow = oc, imgNow = img;
+                if (++oc == s.Cout)
+                {
+                    oc = 0;
+                    img++;
+                }
+
                 if (!simple)
                 {
                     Reference(plane, w, dst, in s);
@@ -182,7 +201,14 @@ internal static unsafe class Depthwise
                     float* src = plane;
                     if (copy)
                     {
-                        BuildPhases(plane, scratch, in s, phases, hp, pitch, phaseSize);
+                        long key = ((long)imgNow * s.Cin) + ic;
+                        if (key != builtFor)
+                        {
+                            BuildPhases(plane, scratch, in s, phases, hp, pitch, phaseSize);
+                            builtFor = key;
+                        }
+
+
                         src = scratch;
                     }
 
@@ -214,13 +240,29 @@ internal static unsafe class Depthwise
                 // exactly what the stand-alone passes do.
                 if (_bias != null || _activation != null)
                 {
-                    var row = new Span<float>(dst, outH * outW);
-                    if (_bias != null)
+                    int count = outH * outW;
+                    if (_bias != null && _activation is null or ReluActivation)
                     {
-                        BiasActivationEpilogue.AddScalar(row, _bias[q % s.Cout], false);
+                        // The usual case in one pass: one rounded add, then Relu (see RowEpilogue).
+                        if (_activation is null)
+                        {
+                            RowEpilogue.Add(dst, count, _bias[ocNow]);
+                        }
+                        else
+                        {
+                            RowEpilogue.BiasRelu(dst, count, _bias[ocNow]);
+                        }
                     }
+                    else
+                    {
+                        var row = new Span<float>(dst, count);
+                        if (_bias != null)
+                        {
+                            BiasActivationEpilogue.AddScalar(row, _bias[ocNow], false);
+                        }
 
-                    _activation?.Apply(_path, false, row);
+                        _activation?.Apply(_path, false, row);
+                    }
                 }
 
                 if (_canonicalNaN)
@@ -237,6 +279,60 @@ internal static unsafe class Depthwise
             }
         }
 
+        // Rows of a few dozen floats: a vector loop is cheaper than the library calls for the same work, which add up over hundreds of
+        // small planes. Bounds: the callers pass ranges inside the scratch plane, the staging buffer or the output plane.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void CopyFloats(float* src, float* dst, int count)
+        {
+            int i = 0;
+            if (Vector256.IsHardwareAccelerated)
+            {
+                for (; i + 8 <= count; i += 8)
+                {
+                    Vector256.Store(Vector256.Load(src + i), dst + i);
+                }
+            }
+
+            for (; i + 4 <= count; i += 4)
+            {
+                Vector128.Store(Vector128.Load(src + i), dst + i);
+            }
+
+            for (; i < count; i++)
+            {
+                dst[i] = src[i];
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void ZeroFill(float* dst, int count)
+        {
+            if (count >= 512)
+            {
+                new Span<float>(dst, count).Clear();
+                return;
+            }
+
+            int i = 0;
+            if (Vector256.IsHardwareAccelerated)
+            {
+                for (; i + 8 <= count; i += 8)
+                {
+                    Vector256.Store(Vector256<float>.Zero, dst + i);
+                }
+            }
+
+            for (; i + 4 <= count; i += 4)
+            {
+                Vector128.Store(Vector128<float>.Zero, dst + i);
+            }
+
+            for (; i < count; i++)
+            {
+                dst[i] = 0f;
+            }
+        }
+
         /// <summary>
         /// Zero-fills the phase planes and scatters the input plane into them: padded column c goes to phase c % phases, column
         /// c / phases. With one phase this is a row-by-row copy into the padded plane.
@@ -244,13 +340,32 @@ internal static unsafe class Depthwise
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private static void BuildPhases(float* plane, float* scratch, in ConvShape s, int phases, int hp, int pitch, long phaseSize)
         {
-            new Span<float>(scratch, checked((int)(phaseSize * phases))).Clear();
+            if (phases == 1)
+            {
+                // Only the border needs clearing: the rows below overwrite the interior.
+                long top = (long)s.PadTop * pitch;
+                ZeroFill(scratch, checked((int)top));
+                int right = pitch - s.PadLeft - s.W;
+                for (int y = 0; y < s.H; y++)
+                {
+                    float* rowBase = scratch + ((long)(y + s.PadTop) * pitch);
+                    ZeroFill(rowBase, s.PadLeft);
+                    CopyFloats(plane + ((long)y * s.W), rowBase + s.PadLeft, s.W);
+                    ZeroFill(rowBase + s.PadLeft + s.W, right);
+                }
+
+                float* bottom = scratch + ((long)(s.PadTop + s.H) * pitch);
+                ZeroFill(bottom, checked((int)(phaseSize - ((long)(s.PadTop + s.H) * pitch))));
+                return;
+            }
+
+            ZeroFill(scratch, checked((int)(phaseSize * phases)));
             for (int y = 0; y < s.H; y++)
             {
                 float* srcRow = plane + ((long)y * s.W);
                 if (phases == 1)
                 {
-                    Buffer.MemoryCopy(srcRow, scratch + ((long)(y + s.PadTop) * pitch) + s.PadLeft, s.W * sizeof(float), s.W * sizeof(float));
+                    CopyFloats(srcRow, scratch + ((long)(y + s.PadTop) * pitch) + s.PadLeft, s.W);
                     continue;
                 }
 
@@ -364,7 +479,7 @@ internal static unsafe class Depthwise
 
             for (int oy = 0; oy < outH; oy++)
             {
-                Buffer.MemoryCopy(tmp + ((long)oy * pitch), dst + ((long)oy * outW), outW * sizeof(float), outW * sizeof(float));
+                CopyFloats(tmp + ((long)oy * pitch), dst + ((long)oy * outW), outW);
             }
         }
 
@@ -379,8 +494,105 @@ internal static unsafe class Depthwise
                 rows = outH & ~3;
                 FourRows<T>(src, rowStride, tapOff, w, taps, dst, rows, outW);
             }
+            else if (outW > 4 * T.Width && outH >= 4)
+            {
+                // Wide rows: blocks of four vectors per row, then the leftover vectors of four rows together. A lone leftover vector is
+                // one chain of dependent multiply-adds and would wait on the latency of every tap; four rows keep the unit busy.
+                int main = outW / (4 * T.Width) * (4 * T.Width);
+                OneRowMain<T>(src, rowStride, tapOff, w, taps, dst, 0, outH, outW, main);
+                if (main < outW)
+                {
+                    TailRows<T>(src, rowStride, tapOff, w, taps, dst, outH, outW, main);
+                }
+
+                return;
+            }
 
             OneRow<T>(src, rowStride, tapOff, w, taps, dst, rows, outH, outW);
+        }
+
+        // Rows [y0, y1), the columns [0, main) in blocks of four vectors (main is a multiple of four vectors).
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private static void OneRowMain<T>(float* src, long rowStride, int* tapOff, float* w, int taps, float* dst, int y0, int y1, int outW, int main)
+            where T : struct, ILanes<T>
+        {
+            int width = T.Width;
+            for (int oy = y0; oy < y1; oy++)
+            {
+                float* rowIn = src + (oy * rowStride);
+                float* o = dst + ((long)oy * outW);
+                for (int ox = 0; ox < main; ox += 4 * width)
+                {
+                    T a0 = T.Zero, a1 = T.Zero, a2 = T.Zero, a3 = T.Zero;
+                    for (int t = 0; t < taps; t++)
+                    {
+                        T wv = T.Broadcast(w[t]);
+                        float* p = rowIn + tapOff[t] + ox;
+                        a0 = T.MulAdd(wv, T.Load(p), a0);
+                        a1 = T.MulAdd(wv, T.Load(p + width), a1);
+                        a2 = T.MulAdd(wv, T.Load(p + (2 * width)), a2);
+                        a3 = T.MulAdd(wv, T.Load(p + (3 * width)), a3);
+                    }
+
+                    a0.Store(o + ox);
+                    a1.Store(o + ox + width);
+                    a2.Store(o + ox + (2 * width));
+                    a3.Store(o + ox + (3 * width));
+                }
+            }
+        }
+
+        // Columns [main, outW) one vector at a time (the last moved back to end at the last column), four rows at a time, then single rows.
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private static void TailRows<T>(float* src, long rowStride, int* tapOff, float* w, int taps, float* dst, int outH, int outW, int main)
+            where T : struct, ILanes<T>
+        {
+            int width = T.Width;
+            int oy = 0;
+            for (; oy + 4 <= outH; oy += 4)
+            {
+                float* r0 = src + (oy * rowStride);
+                float* r1 = r0 + rowStride;
+                float* r2 = r1 + rowStride;
+                float* r3 = r2 + rowStride;
+                float* o = dst + ((long)oy * outW);
+                for (int ox = main; ox < outW; ox += width)
+                {
+                    int at = ox + width <= outW ? ox : outW - width;
+                    T a0 = T.Zero, a1 = T.Zero, a2 = T.Zero, a3 = T.Zero;
+                    for (int t = 0; t < taps; t++)
+                    {
+                        T wv = T.Broadcast(w[t]);
+                        int off = tapOff[t] + at;
+                        a0 = T.MulAdd(wv, T.Load(r0 + off), a0);
+                        a1 = T.MulAdd(wv, T.Load(r1 + off), a1);
+                        a2 = T.MulAdd(wv, T.Load(r2 + off), a2);
+                        a3 = T.MulAdd(wv, T.Load(r3 + off), a3);
+                    }
+
+                    a0.Store(o + at);
+                    a1.Store(o + outW + at);
+                    a2.Store(o + (2L * outW) + at);
+                    a3.Store(o + (3L * outW) + at);
+                }
+            }
+
+            for (; oy < outH; oy++)
+            {
+                float* rowIn = src + (oy * rowStride);
+                float* o = dst + ((long)oy * outW);
+                for (int ox = main; ox < outW; ox += width)
+                {
+                    int at = ox + width <= outW ? ox : outW - width;
+                    T a = T.Zero;
+                    for (int t = 0; t < taps; t++)
+                    {
+                        a = T.MulAdd(T.Broadcast(w[t]), T.Load(rowIn + tapOff[t] + at), a);
+                    }
+
+                    a.Store(o + at);
+                }
+            }
         }
 
         // Rows [y0, y1), each in steps of four vectors, then one, then the last vector moved back to end at the last column.

@@ -68,6 +68,26 @@ internal sealed unsafe class BiasActivationEpilogue : IGemmEpilogue
     public void Apply(float* tile, nint ldc, int row0, int col0, int rows, int cols, KernelMode mode)
     {
         bool exact = mode == KernelMode.Exact;
+        if (!exact && _perRow && _bias is not null && _activation is null or ReluActivation)
+        {
+            // The common convolution epilogue in one pass over each row, on pointers: one rounded add, then the Relu rule.
+            bool relu = _activation is not null;
+            for (int r = 0; r < rows; r++)
+            {
+                float b = _bias[_rowOffset + row0 + r];
+                if (relu)
+                {
+                    RowEpilogue.BiasRelu(tile + (r * ldc), cols, b);
+                }
+                else
+                {
+                    RowEpilogue.Add(tile + (r * ldc), cols, b);
+                }
+            }
+
+            return;
+        }
+
         for (int r = 0; r < rows; r++)
         {
             var row = new Span<float>(tile + (r * ldc), cols);
@@ -135,6 +155,75 @@ internal sealed unsafe class BiasActivationEpilogue : IGemmEpilogue
         {
             float v = row[i] + bias[i];
             row[i] = exact && float.IsNaN(v) ? ExactElementwise.CanonicalNaN : v;
+        }
+    }
+}
+
+/// <summary>
+/// Fast-mode epilogue loops over one row of finished results, on pointers and 256-bit lanes. Each element gets exactly what
+/// the stand-alone operators give it (one rounded add; then Relu: positive values and NaN pass, everything else becomes +0), in one pass
+/// instead of one per operator, so the bits are those of the separate passes whatever the width.
+/// </summary>
+internal static unsafe class RowEpilogue
+{
+    /// <summary><c>p[i] += b</c> for i below <paramref name="n"/>. Bounds: the caller owns <c>p[0..n)</c>.</summary>
+    public static void Add(float* p, int n, float b)
+    {
+        int i = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            Vector256<float> vb = Vector256.Create(b);
+            for (; i + 8 <= n; i += 8)
+            {
+                (Vector256.Load(p + i) + vb).Store(p + i);
+            }
+        }
+
+        if (Vector128.IsHardwareAccelerated)
+        {
+            Vector128<float> vb = Vector128.Create(b);
+            for (; i + 4 <= n; i += 4)
+            {
+                (Vector128.Load(p + i) + vb).Store(p + i);
+            }
+        }
+
+        for (; i < n; i++)
+        {
+            p[i] += b;
+        }
+    }
+
+    /// <summary><c>p[i] = relu(p[i] + b)</c> for i below <paramref name="n"/>. Bounds: the caller owns <c>p[0..n)</c>.</summary>
+    public static void BiasRelu(float* p, int n, float b)
+    {
+        int i = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            Vector256<float> vb = Vector256.Create(b);
+            Vector256<float> zero = Vector256<float>.Zero;
+            for (; i + 8 <= n; i += 8)
+            {
+                Vector256<float> v = Vector256.Load(p + i) + vb;
+                Vector256.ConditionalSelect(Vector256.LessThanOrEqual(v, zero), zero, v).Store(p + i);
+            }
+        }
+
+        if (Vector128.IsHardwareAccelerated)
+        {
+            Vector128<float> vb = Vector128.Create(b);
+            Vector128<float> zero = Vector128<float>.Zero;
+            for (; i + 4 <= n; i += 4)
+            {
+                Vector128<float> v = Vector128.Load(p + i) + vb;
+                Vector128.ConditionalSelect(Vector128.LessThanOrEqual(v, zero), zero, v).Store(p + i);
+            }
+        }
+
+        for (; i < n; i++)
+        {
+            float v = p[i] + b;
+            p[i] = v <= 0f ? 0f : v;
         }
     }
 }

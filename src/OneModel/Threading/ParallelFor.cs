@@ -30,6 +30,11 @@ internal static class ParallelFor
     private const int SpinsBeforeYield = 4000;
 
     private static readonly object s_gate = new();
+    // One wait gate and one "asleep" flag per helper (flags 128 bytes apart), so a call wakes only the helpers it needs and only those
+    // that are asleep. A shared gate woken with PulseAll sent every sleeping helper through a futex wake and back to spinning on
+    // each call, however few chunks there were, which made all-core runs of small models slower than one thread.
+    private static readonly object?[] s_gates = new object?[MaxThreads];
+    private static readonly int[] s_asleep = new int[MaxThreads * 32];
     private static readonly Thread?[] s_workers = new Thread?[MaxThreads];
     private static int s_workerCount;
     private static int s_busy;
@@ -113,9 +118,19 @@ internal static class ParallelFor
             Volatile.Write(ref s_hot[DoneAt], 0);
             Volatile.Write(ref s_hot[NextAt], Pack(generation, chunks, 0));
             Volatile.Write(ref s_hot[StateAt], (generation << 32) | (uint)helpers);
-            lock (s_gate)
+            // Dekker with the helper's sleep protocol: a helper sets its flag, then re-reads the state; the caller wrote the state,
+            // then reads the flags. With a full fence on each side at least one of them sees the other.
+            Interlocked.MemoryBarrier();
+            for (int i = 0; i < helpers; i++)
             {
-                Monitor.PulseAll(s_gate);
+                if (Volatile.Read(ref s_asleep[i * 32]) != 0)
+                {
+                    object gate = Volatile.Read(ref s_gates[i])!;
+                    lock (gate)
+                    {
+                        Monitor.Pulse(gate);
+                    }
+                }
             }
 
             Drain(generation);
@@ -202,6 +217,7 @@ internal static class ParallelFor
             while (s_workerCount < count)
             {
                 int index = s_workerCount;
+                s_gates[index] = new object();
                 // The worker starts "having seen" the current generation, so it joins the next job and never one already finished.
                 long born = Volatile.Read(ref s_hot[StateAt]) >> 32;
                 var t = new Thread(() => WorkerLoop(index, born)) { IsBackground = true, Name = "OneModel worker " + index };
@@ -226,13 +242,18 @@ internal static class ParallelFor
                     continue;
                 }
 
-                lock (s_gate)
+                object mine = s_gates[index]!;
+                Volatile.Write(ref s_asleep[index * 32], 1);
+                Interlocked.MemoryBarrier();
+                lock (mine)
                 {
                     while (Volatile.Read(ref s_hot[StateAt]) >> 32 == seen)
                     {
-                        Monitor.Wait(s_gate);
+                        Monitor.Wait(mine);
                     }
                 }
+
+                Volatile.Write(ref s_asleep[index * 32], 0);
             }
 
             long state = Volatile.Read(ref s_hot[StateAt]);

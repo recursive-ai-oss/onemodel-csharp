@@ -60,7 +60,9 @@ constants of the kernel and the shape. They are never derived from the number of
 by exactly one chunk, with the whole of `k` in one order, so there are no partial results to combine and a result cannot depend on
 which thread ran a chunk or on how many threads there were. `k` is never split across threads. A fixed-chunk parallel-for
 (`Threading/ParallelFor.cs`) hands out chunk indices through an atomic counter; if the pool is busy serving another caller the
-chunks run on the calling thread, with the same result.
+chunks run on the calling thread, with the same result. A helper spins for about 270 microseconds after its last job and then sleeps on its own wait
+gate; a call wakes only the helpers it uses and only those that are asleep (a shared gate woken all at once cost every sleeping helper a wake-up and
+a return to spinning on each call, which made all-core runs of small models slower than one thread). Which helper runs a chunk is not observable.
 
 How many threads a call uses is a separate matter: the caller passes an estimate of the work (in nanoseconds on one thread), and the pool
 wakes at most one thread per 80 000 ns of it, so a small matrix product or convolution stays on the calling thread instead of paying

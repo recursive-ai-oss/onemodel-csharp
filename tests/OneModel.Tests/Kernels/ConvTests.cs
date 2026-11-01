@@ -37,6 +37,11 @@ public class ConvTests
             new(1, 2, 12, 12, 2, 9, 9, 1, 1, 4, 4, 4, 4, 1, 1, 2),
             new(1, 2, 10, 64, 2, 3, 3, 1, 10, 1, 1, 1, 1, 1, 1, 2),
             new(1, 2, 3, 5, 2, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 2),
+            // Wide rows with leftover vectors (the tails are taken four rows at a time, then singly), and a channel multiplier of four.
+            new(1, 3, 9, 100, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 3),
+            new(1, 2, 7, 70, 2, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 2),
+            new(1, 2, 12, 150, 2, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 2),
+            new(1, 1, 20, 24, 4, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 1),
         };
         return list;
     }

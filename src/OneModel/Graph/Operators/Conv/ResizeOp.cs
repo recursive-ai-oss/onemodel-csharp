@@ -305,22 +305,27 @@ internal sealed class ResizeOp : OpKernel
             }
         }
 
-        long maxLen = Math.Max(x.Length, y.Length);
-        int maxOut = 1;
+        // Nearest runs in one pass that needs only the index tables (one per axis, end to end); the other modes resample an axis at a
+        // time through two intermediates and one table of taps per output position.
+        bool nearest = _options.Mode == ResizeMode.Nearest;
+        long maxLen = nearest ? 1 : Math.Max(x.Length, y.Length);
+        int maxOut = 1, sumOut = 0;
         for (int i = 0; i < rank; i++)
         {
             maxOut = Math.Max(maxOut, outDims[i]);
+            sumOut += outDims[i];
         }
 
         int taps = Resize.MaxTaps(_options, sc.Slice(0, rank));
+        int tableLen = nearest ? Math.Max(sumOut, 1) : taps * maxOut;
         Tensor a1 = run.Scratch(DType.F32, Shape.Create((int)maxLen));
         Tensor b1 = run.Scratch(DType.F32, Shape.Create((int)maxLen));
-        Tensor ti = run.Scratch(DType.I32, Shape.Create(taps * maxOut));
-        Tensor tw = run.Scratch(DType.F32, Shape.Create(taps * maxOut));
+        Tensor ti = run.Scratch(DType.I32, Shape.Create(tableLen));
+        Tensor tw = run.Scratch(DType.F32, Shape.Create(tableLen));
         Shape xs = x.Shape, ys = y.Shape;
         Resize.Run(_options, xs.Dimensions, ys.Dimensions, sc.Slice(0, rank), useRoi ? roi.Slice(0, 2 * rank) : default,
             x.Data<float>(), y.MutableData<float>(), a1.MutableData<float>(), b1.MutableData<float>(), ti.MutableData<int>(),
-            tw.MutableData<float>(), run.Exact);
+            tw.MutableData<float>(), run.Exact, run.Threads);
     }
 
     private static Tensor Get(in OpRun run, int i) =>

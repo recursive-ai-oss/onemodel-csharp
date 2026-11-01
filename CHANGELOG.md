@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Changed
+
+- Speed of small models (DBNet-class detectors, batch 1): nearest-neighbour `Resize` runs in one threaded pass (about 6x faster on a 2x upsample); the thread pool wakes only the helpers a call uses; depthwise convolution builds its padded copy without clearing the interior, shares it between the output channels of one input channel, fuses bias and Relu in one pass, and computes wide rows' leftover vectors four rows at a time; the Conv epilogue (bias, Relu) runs in one pass per row. Fast-mode results are unchanged bit for bit; exact mode is untouched.
+
 ## [1.0.0] - 2026-10-31
 
 The first stable release. The public API is reshaped once, below, and follows Semantic Versioning from here. Speed and peak memory against ONNX Runtime on x64 and arm64, with the rows where it is still slower, are in `docs/performance.md`. Of the 1905 `onnx/backend/test` cases, 1580 pass in fast mode and 1382 in exact mode, none fail, and the rest are listed gaps (`docs/conformance.md`). Exact-mode output hashes of the reference models and every node case are equal across x64 and arm64 JIT (default, one thread, narrower instruction sets, hardware intrinsics off), NativeAOT and browser WebAssembly (interpreted and compiled).

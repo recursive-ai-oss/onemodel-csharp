@@ -36,6 +36,12 @@ paths on that machine). Output columns that a path computes twice (see the last 
 * **Vectors per row.** A row is processed four vectors at a time, then one vector at a time; the last vector of a row is moved back to
   end at the last column (it recomputes up to `W-1` outputs with identical results) instead of a scalar tail. The lane type is the
   widest of 16 (AVX-512), 8 (AVX2), 4 (NEON, SSE, WebAssembly SIMD), 1 (scalar twin) that fits in the output width.
+* **Wide rows.** When the output is wider than four vectors and at least four rows tall, the blocks of four vectors run row by row and the
+  leftover columns (up to three vectors, the last moved back) run four rows at a time, for the same reason: one leftover vector is a single chain of
+  dependent multiply-adds. Every output still takes its taps in the same order, so the bits do not change.
+* **Padded copy.** With one phase (stride 1) only the border of the padded plane is cleared; the rows copied in overwrite the interior. With
+  several phases the whole scratch is cleared first. A channel multiplier above 1 builds the copy once per input channel and chunk: a chunk
+  holds up to four output channels of one input channel when the multiplier allows (`4`, `2` or `1` planes at least; a function of the shape alone).
 * **Narrow rows.** When the output is narrower than four vectors and at least four rows tall, four rows are computed together for one
   vector column, so that each tap's weight is shared by four multiply-adds. Remaining rows use the row-wise form.
 * **Fallback.** Kernels with more than 64 taps or a column stride above 8 take a plain per-output loop in the same tap order.
