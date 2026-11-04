@@ -1,6 +1,6 @@
 # Performance against ONNX Runtime
 
-Latency and peak memory of this library against ONNX Runtime 1.31.1 on CPU, measured for the 1.0 release with `bench/Bar` (method: [bench-method.md](bench-method.md)). Each cell is ours / ONNX Runtime: below 1 means we are faster or smaller. ONNX Runtime runs at `ORT_ENABLE_ALL` with the same thread count as ours. Fast mode, optimization level All, median of 3 repetitions, one process per row and engine.
+Latency and peak memory of this library against ONNX Runtime 1.31.1 on CPU, measured for the 1.0 release (the full table) and re-measured for 1.1 on the fp32 rows that release changed, with `bench/Bar` (method: [bench-method.md](bench-method.md)). Each cell is ours / ONNX Runtime: below 1 means we are faster or smaller. ONNX Runtime runs at `ORT_ENABLE_ALL` with the same thread count as ours. Fast mode, optimization level All, median of 3 repetitions, one process per row and engine.
 
 Machines:
 
@@ -37,16 +37,31 @@ Batch N is 32 for the text encoders and 8 for the convolutional models. The Whis
 | Whisper-small encoder | int8 dynamic | 1 | 1.90 | 0.68 | 1.78 | 1.28 |
 | Whisper-small decoder | int8 dynamic | 1 | 2.84 | 1.12 | 1.50 | 1.08 |
 
+### 1.1 re-measurement (fp32, fast mode)
+
+Release 1.1 changed the recurrent layers, small-model per-call costs and 3x3 convolutions (Winograd), so these fp32 rows were measured again on the same machines; every other row is unchanged from the table above.
+
+| Model | Batch | x64 1 thread | x64 all | arm64 1 thread | arm64 all |
+|---|---|---|---|---|---|
+| ResNet-50 | 1 | 1.18 | 1.02 | 0.98 | 0.70 |
+| ResNet-50 | 8 | 1.24 | 0.97 | 0.98 | 0.55 |
+| MobileNetV3-Large | 1 | 1.46 | 0.80 | 0.81 | 0.60 |
+| MobileNetV3-Large | 8 | 1.47 | 1.23 | 0.79 | 0.54 |
+| MiniLM-L6 | 1 | 1.17 | 0.71 | 1.07 | 1.01 |
+| BERT-base | 1 | 1.11 | 0.60 | 1.04 | 0.99 |
+| CRNN (text lines) | 1 | 1.04 | 1.22 | 1.01 | 1.28 |
+| CRNN (text lines) | 8 | 1.01 | 1.40 | 0.93 | 0.78 |
+| DBNet (text detection) | 1 | 1.58 | 0.84 | 1.08 | 1.23 |
+
 ## Where it is slower, and why
 
 - **int8 matrix products on x64 at one thread** (MiniLM, BERT, Whisper int8, about 2 to 2.8 times). .NET 10 exposes the x86 integer dot-product instructions only in their VEX forms (AVX-VNNI), which the test CPU does not have, so the int8 kernels use `vpmaddwd` on 16-bit operands, half the multiply-adds per instruction of a VNNI kernel (`docs/int8.md`). On CPUs with AVX-VNNI, and on arm64 with its dot-product instructions, the gap is smaller.
-- **CRNN at batch 8 with many threads.** The recurrent layers step through time on one thread at small batches, so extra threads only help the convolutional front end.
-- **DBNet and other very small models** (about 1 to 2 ms per call): fixed per-call costs weigh more.
-- **ResNet-50 at batch 8 on 32 x64 threads:** convolution scaling across both core complexes of the test CPU.
+- **DBNet and other very small models on x64 at one thread** (about 1.5 ms per call; 1.58 times in 1.1, 2.38 at 1.0): fixed per-call costs weigh more.
+- Since 1.1 the recurrent layers run on the thread pool in fixed hidden-unit chunks, and ResNet-50 at batch 8 on 32 x64 threads uses Winograd convolutions; both rows are now within 1.5 times.
 
 ## Peak memory, ours / ONNX Runtime
 
-Peak resident memory is at most 1.40 times ONNX Runtime's on every row on x64 (largest: Whisper decoder fp32 1.40, Whisper decoder int8 1.31, BERT-base fp32 1.29) and below 1 on most int8 and batch-N rows. On arm64 the Whisper decoder fp32 is 1.53 times at one thread (1714 MB against 1122 MB) and 1.45 times at 8; every other arm64 row is at most 1.36 times. Steady-state runs allocate no managed memory per call.
+Peak resident memory is at most 1.40 times ONNX Runtime's on every row on x64 (largest: Whisper decoder fp32 1.40, Whisper decoder int8 1.31, BERT-base fp32 1.29) and below 1 on most int8 and batch-N rows. On arm64 the Whisper decoder fp32 is 1.53 times at one thread (1714 MB against 1122 MB) and 1.45 times at 8; every other arm64 row is at most 1.36 times. In the 1.1 re-measurement the largest ratio is ResNet-50 fp32 batch 1 on arm64 at 1.44 (313 MB against 217 MB); on x64 the re-measured rows are at most 1.29 (BERT-base). Steady-state runs allocate no managed memory per call.
 
 ## Load time
 

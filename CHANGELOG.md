@@ -4,8 +4,13 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-04
+
+Speed only: no API change, fast-mode results within the documented tolerance, exact mode unchanged bit for bit. Re-measured rows are in `docs/performance.md`.
+
 ### Changed
 
+- Speed of recurrent layers (RNN, GRU, LSTM): each time step is split into fixed chunks of 32 hidden units that run on the thread pool, and bidirectional layers step both directions in one pass. Chunk boundaries depend only on the hidden size, so results do not depend on the thread count. A CRNN text recogniser at batch 8 on 32 x64 threads now takes 1.4 times ONNX Runtime's time, from 4.5 times in 1.0.
 - Speed of convolution networks (fast mode): 3x3 stride-1 convolutions with 32 to 256 input and output channels (up to 65 536 channel pairs) (ResNet-50's 64-, 128- and 256-channel stages, the CRNN text recogniser's front end) use Winograd's F(2x2, 3x3) transform when the weights are prepacked at load: 16 instead of 36 multiplications per output pair, on the same register-tile microkernels. Their results differ from the direct convolution's in the last bits (within the documented tolerance) and do not depend on the thread count; exact mode is untouched. A convolution that takes several row tiles and runs more than one image now gathers and multiplies the images in waves, so a batch of 8 keeps all cores busy in two parallel phases per layer instead of two per image.
 - Speed of small models (DBNet-class detectors, batch 1): nearest-neighbour `Resize` runs in one threaded pass (about 6x faster on a 2x upsample); the thread pool wakes only the helpers a call uses; depthwise convolution builds its padded copy without clearing the interior, shares it between the output channels of one input channel, fuses bias and Relu in one pass, and computes wide rows' leftover vectors four rows at a time; the Conv epilogue (bias, Relu) runs in one pass per row. Fast-mode results are unchanged bit for bit; exact mode is untouched.
 
