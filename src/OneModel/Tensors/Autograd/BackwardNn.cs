@@ -511,6 +511,13 @@ internal static partial class BackwardOps
         Shape ts = r.InputShape(0);
         int dim = ts[1];
         long pad = r.Ints[0];
+        if (r.Ints.Length > 1 && r.Ints[1] != 0 && r.InputMeta(0) is { GradFn: null })
+        {
+            // If nothing but padding was looked up the gradient is zero and there is nothing to keep.
+            EmbeddingSparseBackward(r, g, ids, ts, pad);
+            return;
+        }
+
         Tensor dt = Tensor.Zeros(DType.F32, ts);
         Span<float> d = dt.MutableData<float>();
         ReadOnlySpan<float> gv = g.InternalData<float>();
@@ -531,6 +538,65 @@ internal static partial class BackwardOps
         }
 
         Engine.Emit(r, 0, dt, owned: true);
+    }
+
+    // Row-sparse table gradient: sort (id, position) pairs, then sum each id's output rows in increasing position order from zero,
+    // which is what the dense path does, so the rows are bit-equal to the dense gradient's. One thread, fixed order.
+    private static void EmbeddingSparseBackward(BackwardRecord r, in Tensor g, in Tensor ids, Shape ts, long pad)
+    {
+        int dim = ts[1];
+        var keys = new long[ids.Length];
+        int m = 0;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            long id = ids.DType == DType.I32 ? ids.InternalData<int>()[i] : ids.InternalData<long>()[i];
+            if (id != pad)
+            {
+                keys[m++] = (id << 31) | (uint)i;
+            }
+        }
+
+        if (m == 0)
+        {
+            return;
+        }
+
+        Array.Sort(keys, 0, m);
+        int unique = 1;
+        for (int k = 1; k < m; k++)
+        {
+            if ((keys[k] >> 31) != (keys[k - 1] >> 31))
+            {
+                unique++;
+            }
+        }
+
+        var rows = new int[unique];
+        Tensor values = Tensor.Zeros(DType.F32, Shape.Create(unique, dim));
+        Span<float> d = values.MutableData<float>();
+        ReadOnlySpan<float> gv = g.InternalData<float>();
+        int u = -1;
+        long previous = -1;
+        for (int k = 0; k < m; k++)
+        {
+            long id = keys[k] >> 31;
+            int pos = (int)(keys[k] & 0x7FFFFFFF);
+            if (id != previous)
+            {
+                u++;
+                rows[u] = (int)id;
+                previous = id;
+            }
+
+            Span<float> row = d.Slice(u * dim, dim);
+            ReadOnlySpan<float> src = gv.Slice(pos * dim, dim);
+            for (int j = 0; j < dim; j++)
+            {
+                row[j] += src[j];
+            }
+        }
+
+        Engine.EmitSparse(r, 0, new RowSparseGradient(ts, rows, values));
     }
 
     private static void NllBackward(Engine e, BackwardRecord r, in Tensor g)

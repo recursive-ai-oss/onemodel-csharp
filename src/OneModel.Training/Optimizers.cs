@@ -10,8 +10,11 @@ namespace RecursiveAI.OneModel.Training;
 /// <remarks>
 /// <para>Updates are plain scalar float32 code in a fixed order (element by element, parameter by parameter) using only IEEE
 /// <c>+ − × ÷ sqrt</c>, no fused multiply-add: the result is the same in fast and exact mode, on every platform and thread count.
-/// Parameters without a gradient are skipped. State tensors (momentum, moments) are allocated with the optimizer and kept as
-/// float32 tensors shaped like their parameter.</para>
+/// Parameters without a gradient are skipped, and so are frozen parameters (<see cref="Tensor.SetRequiresGrad"/>, <see cref="NnModule.Freeze()"/>).
+/// State tensors (momentum, moments) are allocated with the optimizer and kept as float32 tensors shaped like their parameter,
+/// except for a parameter that is frozen when the optimizer is built: its state tensors are empty (shape [0]) until the parameter is
+/// unfrozen and first updated, when they are created zeroed. A checkpoint therefore records which parameters had state; load it into
+/// an optimizer built with the same parameters frozen, or into any optimizer (state shapes are adopted from the file).</para>
 /// <para>Formulas follow the published algorithms (see <c>docs/training.md</c>). There is one parameter group: one learning rate and
 /// one set of hyper-parameters for all parameters.</para>
 /// </remarks>
@@ -19,10 +22,12 @@ public abstract class Optimizer : IDisposable
 {
     private readonly Tensor[] _parameters;
     private readonly List<(string Name, Tensor Tensor)> _state = new();
+    private readonly List<(Tensor[] Slot, int Start)> _slots = new();
+    private readonly List<int> _stateParam = new();
     private bool _disposed;
 
     /// <summary>Creates the optimizer over the given parameters.</summary>
-    /// <param name="parameters">Contiguous float32 tensors that require gradients (for example <see cref="NnModule.Parameters"/>); at least one.</param>
+    /// <param name="parameters">Contiguous float32 tensors (for example <see cref="NnModule.Parameters"/>, or <see cref="NnModule.TrainableParameters"/>); at least one. Frozen ones are accepted and skipped.</param>
     /// <param name="learningRate">The initial learning rate, finite and not negative.</param>
     protected Optimizer(IEnumerable<Tensor> parameters, float learningRate)
     {
@@ -35,9 +40,10 @@ public abstract class Optimizer : IDisposable
 
         foreach (Tensor p in _parameters)
         {
-            if (p.DType != DType.F32 || !p.IsContiguous || !p.RequiresGrad)
+            // A frozen parameter is still a gradient leaf (it has autograd state); a plain tensor never was and never can be trained.
+            if (p.DType != DType.F32 || !p.IsContiguous || p.Autograd is not { IsLeaf: true })
             {
-                throw new ArgumentException("Parameters must be contiguous float32 tensors that require gradients.", nameof(parameters));
+                throw new ArgumentException("Parameters must be contiguous float32 gradient leaves (frozen ones are allowed).", nameof(parameters));
             }
         }
 
@@ -75,17 +81,82 @@ public abstract class Optimizer : IDisposable
         StepCount = steps;
     }
 
-    /// <summary>Allocates one zeroed float32 state tensor per parameter, shaped like it, named <c>slot.index</c>.</summary>
+    /// <summary>
+    /// Allocates one zeroed float32 state tensor per parameter, shaped like it, named <c>slot.index</c>; empty ([0]) for a parameter that
+    /// is frozen now. Read a slot only through <see cref="StateOf"/>, which creates a missing tensor.
+    /// </summary>
     protected Tensor[] AddStateSlot(string slot)
     {
         var tensors = new Tensor[_parameters.Length];
+        _slots.Add((tensors, _state.Count));
         for (int i = 0; i < tensors.Length; i++)
         {
-            tensors[i] = Tensor.Zeros(DType.F32, _parameters[i].Shape);
+            tensors[i] = Tensor.Zeros(DType.F32, _parameters[i].RequiresGrad ? _parameters[i].Shape : Shape.Create(0));
             _state.Add((slot + "." + i.ToString(System.Globalization.CultureInfo.InvariantCulture), tensors[i]));
+            _stateParam.Add(i);
         }
 
         return tensors;
+    }
+
+    /// <summary>The state tensor of parameter <paramref name="index"/> in <paramref name="slot"/> (from <see cref="AddStateSlot"/>), created zeroed if the parameter was frozen when the optimizer was built.</summary>
+    protected Tensor StateOf(Tensor[] slot, int index)
+    {
+        Tensor t = slot[index];
+        if (t.Length != _parameters[index].Length)
+        {
+            SetState(slot, index, _parameters[index].Shape);
+            t = slot[index];
+        }
+
+        return t;
+    }
+
+    private void SetState(Tensor[] slot, int index, Shape shape)
+    {
+        int start = -1;
+        foreach ((Tensor[] s, int st) in _slots)
+        {
+            if (ReferenceEquals(s, slot))
+            {
+                start = st;
+            }
+        }
+
+        slot[index].Dispose();
+        Tensor fresh = Tensor.Zeros(DType.F32, shape);
+        slot[index] = fresh;
+        _state[start + index] = (_state[start + index].Name, fresh);
+    }
+
+    // Checkpoint loading: can state entry i take the shape the file has (its parameter's shape, or empty)?
+    internal bool CanAdoptState(int stateIndex, ReadOnlySpan<int> dims)
+    {
+        int p = _stateParam[stateIndex];
+        if (p < 0 || _state[stateIndex].Tensor.DType != DType.F32)
+        {
+            return false;
+        }
+
+        return dims.SequenceEqual(_parameters[p].Shape.Dimensions) || (dims.Length == 1 && dims[0] == 0);
+    }
+
+    internal void AdoptState(int stateIndex, ReadOnlySpan<int> dims)
+    {
+        Tensor current = _state[stateIndex].Tensor;
+        if (dims.SequenceEqual(current.Shape.Dimensions))
+        {
+            return;
+        }
+
+        foreach ((Tensor[] slot, int start) in _slots)
+        {
+            if (stateIndex >= start && stateIndex < start + slot.Length)
+            {
+                SetState(slot, stateIndex - start, Shape.Create(dims));
+                return;
+            }
+        }
     }
 
     /// <summary>Allocates a zeroed Int32 flag tensor [parameter count].</summary>
@@ -93,6 +164,7 @@ public abstract class Optimizer : IDisposable
     {
         Tensor t = Tensor.Zeros(DType.I32, Shape.Create(_parameters.Length));
         _state.Add((name, t));
+        _stateParam.Add(-1);
         return t;
     }
 
@@ -106,6 +178,7 @@ public abstract class Optimizer : IDisposable
     }
 
     /// <summary>Applies one update from the current gradients and increments <see cref="StepCount"/>. Recording is off while it runs.</summary>
+    /// <exception cref="InvalidOperationException">A parameter has a row-sparse gradient and this optimizer does not support one.</exception>
     public void Step()
     {
         CheckRate(LearningRate);
@@ -114,6 +187,17 @@ public abstract class Optimizer : IDisposable
         {
             for (int i = 0; i < _parameters.Length; i++)
             {
+                if (!_parameters[i].RequiresGrad)
+                {
+                    continue;
+                }
+
+                if (_parameters[i].SparseGrad is { } sparse)
+                {
+                    UpdateSparse(i, _parameters[i].MutableData<float>(), sparse);
+                    continue;
+                }
+
                 Tensor g = _parameters[i].Grad;
                 if (g.IsEmpty)
                 {
@@ -152,6 +236,13 @@ public abstract class Optimizer : IDisposable
     /// <param name="gradient">The gradient, same length.</param>
     protected abstract void Update(int index, Span<float> parameter, ReadOnlySpan<float> gradient);
 
+    /// <summary>Updates one parameter from a row-sparse gradient. The default throws: only optimizers that define lazy row semantics override it.</summary>
+    /// <param name="index">Index in <see cref="Parameters"/>.</param>
+    /// <param name="parameter">The parameter's values [rows, width], updated in place.</param>
+    /// <param name="gradient">The touched rows' gradient.</param>
+    protected virtual void UpdateSparse(int index, Span<float> parameter, RowSparseGradient gradient) =>
+        throw new InvalidOperationException($"Parameter {index} has a row-sparse gradient, which the {Kind} optimizer does not support. Use Sgd without momentum or weight decay, or SparseAdam, for that parameter, or build the Embedding with sparse: false.");
+
     /// <summary>Releases the state tensors (not the parameters).</summary>
     public void Dispose()
     {
@@ -175,6 +266,8 @@ public abstract class Optimizer : IDisposable
 /// Stochastic gradient descent with optional momentum (Polyak), Nesterov momentum (Sutskever et al. 2013), dampening and L2 weight
 /// decay. Per element: <c>g += wd·p</c>; with momentum <c>b = (first step of this parameter) ? g : μ·b + (1−d)·g</c> and
 /// <c>g = nesterov ? g + μ·b : b</c>; then <c>p −= lr·g</c>.
+/// A row-sparse gradient (<see cref="Tensor.SparseGrad"/>) is supported without momentum and weight decay, as in PyTorch: <c>p[row] −= lr·g[row]</c>
+/// for the touched rows only, which equals the dense update bit for bit.
 /// </summary>
 public sealed class Sgd : Optimizer
 {
@@ -258,7 +351,7 @@ public sealed class Sgd : Optimizer
             return;
         }
 
-        Span<float> buf = _buffers[index].MutableData<float>();
+        Span<float> buf = StateOf(_buffers, index).MutableData<float>();
         Span<int> init = _initialized.MutableData<int>();
         bool first = init[index] == 0;
         init[index] = 1;
@@ -274,6 +367,30 @@ public sealed class Sgd : Optimizer
             buf[i] = b;
             g = _nesterov ? g + mu * b : b;
             p[i] -= lr * g;
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <exception cref="NotSupportedException">Momentum or weight decay is set: PyTorch has no sparse semantics for them either.</exception>
+    protected override void UpdateSparse(int index, Span<float> parameter, RowSparseGradient gradient)
+    {
+        if (_buffers is not null || WeightDecay != 0f)
+        {
+            throw new NotSupportedException("Sgd supports row-sparse gradients only without momentum and weight decay.");
+        }
+
+        int width = gradient.DenseShape[1];
+        float lr = LearningRate;
+        ReadOnlySpan<int> rows = gradient.Rows;
+        ReadOnlySpan<float> g = gradient.Values.Data<float>();
+        for (int k = 0; k < rows.Length; k++)
+        {
+            Span<float> p = parameter.Slice(rows[k] * width, width);
+            ReadOnlySpan<float> gr = g.Slice(k * width, width);
+            for (int j = 0; j < p.Length; j++)
+            {
+                p[j] -= lr * gr[j];
+            }
         }
     }
 }
@@ -359,7 +476,7 @@ public class Adam : Optimizer
         WeightDecay = values["weight_decay"];
     }
 
-    private static double IntPow(double b, long n)
+    internal static double IntPow(double b, long n)
     {
         double result = 1.0;
         while (n > 0)
@@ -394,9 +511,9 @@ public class Adam : Optimizer
         float wd = WeightDecay, lr = LearningRate;
         float b1 = _beta1, b2 = _beta2, omb1 = 1f - _beta1, omb2 = 1f - _beta2, eps = _epsilon, stepSize = _stepSize, sq = _sqrtBc2;
         float decay = 1f - lr * wd;
-        Span<float> m = _m[index].MutableData<float>();
-        Span<float> v = _v[index].MutableData<float>();
-        Span<float> vmax = _vMax is null ? default : _vMax[index].MutableData<float>();
+        Span<float> m = StateOf(_m, index).MutableData<float>();
+        Span<float> v = StateOf(_v, index).MutableData<float>();
+        Span<float> vmax = _vMax is null ? default : StateOf(_vMax, index).MutableData<float>();
         for (int i = 0; i < p.Length; i++)
         {
             float g = grad[i];
@@ -445,5 +562,120 @@ public sealed class AdamW : Adam
         float weightDecay = 0.01f, bool amsgrad = false)
         : base(parameters, learningRate, beta1, beta2, epsilon, weightDecay, decoupledWeightDecay: true, amsgrad: amsgrad)
     {
+    }
+}
+
+/// <summary>
+/// Adam with lazy moments for row-sparse gradients, matching <c>torch.optim.SparseAdam</c>: only the rows that appear in a step's
+/// gradient have their moments and values updated, so a step costs time in the touched rows, not in the whole table. With t the step
+/// number (1 for the first), for each touched element: <c>m = β₁m + (1−β₁)g</c>, <c>v = β₂v + (1−β₂)g²</c>,
+/// <c>p −= lr·√(1−β₂ᵗ)/(1−β₁ᵗ) · m / (√v + ε)</c> (Kingma and Ba 2015, the form with ε added to the uncorrected √v). Moments of
+/// untouched rows neither decay nor move. There is no weight decay and no AMSGrad. The step number is the optimizer's global one, so
+/// it counts every <see cref="Optimizer.Step"/> call, also those in which a parameter received no gradient.
+/// </summary>
+/// <remarks>
+/// Like PyTorch's, it accepts only row-sparse gradients and throws on a dense one. The moments are dense [rows, width] tensors, so
+/// the memory is the same as Adam's for that table; what is saved is the gradient and the per-step work. Use it for the embedding
+/// (<see cref="Embedding"/> built with <c>sparse: true</c>) and another optimizer (for example <see cref="AdamW"/>) for the other
+/// parameters. There is deliberately no sparse AdamW: decoupled weight decay would have to touch every row every step, and PyTorch has none.
+/// All arithmetic is scalar float32 with <c>+ − × ÷ sqrt</c> only, so results are identical in fast and exact mode on every platform.
+/// </remarks>
+public sealed class SparseAdam : Optimizer
+{
+    private readonly float _beta1;
+    private readonly float _beta2;
+    private readonly float _epsilon;
+    private readonly Tensor[] _m;
+    private readonly Tensor[] _v;
+    private float _stepSize;
+
+    /// <summary>Creates the optimizer.</summary>
+    /// <param name="parameters">Parameters to update; rank 2, normally embedding tables with row-sparse gradients.</param>
+    /// <param name="learningRate">Learning rate (default 1e-3).</param>
+    /// <param name="beta1">Decay of the first moment, in [0, 1) (default 0.9).</param>
+    /// <param name="beta2">Decay of the second moment, in [0, 1) (default 0.999).</param>
+    /// <param name="epsilon">Added to the denominator, positive (default 1e-8).</param>
+    public SparseAdam(IEnumerable<Tensor> parameters, float learningRate = 1e-3f, float beta1 = 0.9f, float beta2 = 0.999f, float epsilon = 1e-8f)
+        : base(parameters, learningRate)
+    {
+        if (!(beta1 >= 0f && beta1 < 1f) || !(beta2 >= 0f && beta2 < 1f))
+        {
+            throw new ArgumentOutOfRangeException(nameof(beta1), "Betas must be in [0, 1).");
+        }
+
+        if (!(epsilon > 0f) || !float.IsFinite(epsilon))
+        {
+            throw new ArgumentOutOfRangeException(nameof(epsilon), epsilon, "Epsilon must be positive and finite.");
+        }
+
+        foreach (Tensor p in Parameters)
+        {
+            if (p.Shape.Rank != 2)
+            {
+                throw new ArgumentException("SparseAdam parameters must be rank 2 ([rows, width]) tables.", nameof(parameters));
+            }
+        }
+
+        _beta1 = beta1;
+        _beta2 = beta2;
+        _epsilon = epsilon;
+        _m = AddStateSlot("exp_avg");
+        _v = AddStateSlot("exp_avg_sq");
+    }
+
+    /// <inheritdoc/>
+    public override string Kind => "sparseadam";
+
+    /// <inheritdoc/>
+    public override List<(string Name, float Value)> HyperParameters() =>
+        [("lr", LearningRate), ("beta1", _beta1), ("beta2", _beta2), ("epsilon", _epsilon)];
+
+    /// <inheritdoc/>
+    public override void SetHyperParameters(IReadOnlyDictionary<string, float> values)
+    {
+        if (values["beta1"] != _beta1 || values["beta2"] != _beta2 || values["epsilon"] != _epsilon)
+        {
+            throw new ArgumentException("The saved betas or epsilon differ from this optimizer's.");
+        }
+
+        CheckRate(values["lr"]);
+        LearningRate = values["lr"];
+    }
+
+    /// <inheritdoc/>
+    protected override void BeginStep()
+    {
+        long t = StepCount + 1;
+        double bc1 = 1.0 - Adam.IntPow(_beta1, t);
+        double bc2 = 1.0 - Adam.IntPow(_beta2, t);
+        _stepSize = (float)((double)LearningRate * Math.Sqrt(bc2) / bc1);
+    }
+
+    /// <inheritdoc/>
+    protected override void Update(int index, Span<float> parameter, ReadOnlySpan<float> gradient) =>
+        throw new InvalidOperationException($"SparseAdam got a dense gradient for parameter {index}; it only handles row-sparse gradients (build the Embedding with sparse: true, or use Adam).");
+
+    /// <inheritdoc/>
+    protected override void UpdateSparse(int index, Span<float> parameter, RowSparseGradient gradient)
+    {
+        int width = gradient.DenseShape[1];
+        float b1 = _beta1, b2 = _beta2, omb1 = 1f - _beta1, omb2 = 1f - _beta2, eps = _epsilon, stepSize = _stepSize;
+        Span<float> m = StateOf(_m, index).MutableData<float>();
+        Span<float> v = StateOf(_v, index).MutableData<float>();
+        ReadOnlySpan<int> rows = gradient.Rows;
+        ReadOnlySpan<float> g = gradient.Values.Data<float>();
+        for (int k = 0; k < rows.Length; k++)
+        {
+            int o = rows[k] * width;
+            for (int j = 0; j < width; j++)
+            {
+                float gi = g[k * width + j];
+                float mi = b1 * m[o + j] + omb1 * gi;
+                float vi = b2 * v[o + j] + omb2 * gi * gi;
+                m[o + j] = mi;
+                v[o + j] = vi;
+                parameter[o + j] -= stepSize * mi / (MathF.Sqrt(vi) + eps);
+            }
+        }
     }
 }

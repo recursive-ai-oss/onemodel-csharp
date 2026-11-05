@@ -546,7 +546,23 @@ public static partial class Ops
     /// <param name="pool">Pool for the result; default <see cref="BufferPool.Shared"/>.</param>
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">An id is outside [0, V).</exception>
-    public static Tensor Embedding(in Tensor table, in Tensor ids, int paddingIndex = -1, BufferPool? pool = null)
+    public static Tensor Embedding(in Tensor table, in Tensor ids, int paddingIndex = -1, BufferPool? pool = null) =>
+        Embedding(table, ids, paddingIndex, false, pool);
+
+    /// <summary>
+    /// As <see cref="Embedding(in Tensor, in Tensor, int, BufferPool?)"/>, optionally with a row-sparse table gradient.
+    /// With <paramref name="sparse"/> true and a table that is a gradient leaf, backward leaves <see cref="Tensor.SparseGrad"/> (only the
+    /// touched rows, sorted, duplicates summed in position order, padding row absent) instead of a dense [V, D] <see cref="Tensor.Grad"/>.
+    /// If the table is not a leaf the gradient is dense. Record: as above, Ints = [paddingIndex or -1, sparse].
+    /// </summary>
+    /// <param name="table">Float32 table [V, D].</param>
+    /// <param name="ids">Int32 or Int64 indices of any shape.</param>
+    /// <param name="paddingIndex">Id whose rows get no gradient; -1 for none.</param>
+    /// <param name="sparse">Produce a row-sparse gradient.</param>
+    /// <param name="pool">Pool for the result; default <see cref="BufferPool.Shared"/>.</param>
+    /// <returns>The looked-up rows, [ids..., D].</returns>
+    /// <exception cref="ArgumentOutOfRangeException">An id is outside [0, V).</exception>
+    public static Tensor Embedding(in Tensor table, in Tensor ids, int paddingIndex, bool sparse, BufferPool? pool = null)
     {
         RequireFloat32(table);
         if (table.Rank != 2 || (ids.DType != DType.I32 && ids.DType != DType.I64))
@@ -600,7 +616,15 @@ public static partial class Ops
         BackwardRecord rec = BackwardRecord.Create(OpKind.Embedding, 1, table);
         rec.AddTraceExtras(ids);
         rec.Save(0, ic, owned: !ids.IsContiguous);
-        rec.SetInts(paddingIndex);
+        if (sparse)
+        {
+            rec.SetInts(paddingIndex, 1);
+        }
+        else
+        {
+            rec.SetInts(paddingIndex);
+        }
+
         return rec.Attach(r);
     }
 

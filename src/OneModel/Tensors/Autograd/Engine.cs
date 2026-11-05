@@ -73,9 +73,16 @@ public static class Backprop
         }
     }
 
-    /// <summary>Sets the accumulated gradient of a leaf to zeros in place (or leaves it empty if none exists yet).</summary>
+    /// <summary>Sets the accumulated gradient of a leaf to zeros in place (or leaves it empty if none exists yet). A row-sparse gradient is freed instead: zero is the absence of rows.</summary>
     public static void ZeroGrad(in Tensor leaf)
     {
+        AutogradMeta? meta = leaf.Autograd;
+        if (meta?.SparseGrad is { } sparse)
+        {
+            sparse.Dispose();
+            meta.SparseGrad = null;
+        }
+
         Tensor gr = leaf.Grad;
         if (!gr.IsEmpty)
         {
@@ -83,10 +90,16 @@ public static class Backprop
         }
     }
 
-    /// <summary>Frees a leaf's accumulated gradient and clears it.</summary>
+    /// <summary>Frees a leaf's accumulated gradient (dense or row-sparse) and clears it.</summary>
     public static void ClearGrad(in Tensor leaf)
     {
         AutogradMeta? m = leaf.Autograd;
+        if (m?.SparseGrad is { } sparse)
+        {
+            sparse.Dispose();
+            m.SparseGrad = null;
+        }
+
         if (m is not null && !m.Grad.IsEmpty)
         {
             m.Grad.Dispose();
@@ -235,8 +248,69 @@ internal sealed class Engine
         Emit(rec, i, view, owned: true);
     }
 
+    /// <summary>Sends a row-sparse gradient to input <paramref name="i"/> of <paramref name="rec"/>, which must be a table the record gathered rows from. The engine takes ownership.</summary>
+    public static void EmitSparse(BackwardRecord rec, int i, RowSparseGradient grad)
+    {
+        AutogradMeta? meta = rec.InputMeta(i);
+        if (meta is null)
+        {
+            grad.Dispose();
+            return;
+        }
+
+        if (meta.GradFn is not null)
+        {
+            // The table is itself computed (not a leaf): later operations want a dense gradient.
+            Tensor dense = grad.ToDense();
+            grad.Dispose();
+            Emit(rec, i, dense, owned: true);
+            return;
+        }
+
+        if (!meta.RequiresGrad)
+        {
+            grad.Dispose();
+        }
+        else if (!meta.Grad.IsEmpty)
+        {
+            grad.AddTo(meta.Grad.MutableData<float>());
+            grad.Dispose();
+        }
+        else if (meta.SparseGrad is null)
+        {
+            meta.SparseGrad = grad;
+        }
+        else
+        {
+            RowSparseGradient merged = RowSparseGradient.Merge(meta.SparseGrad, grad);
+            meta.SparseGrad.Dispose();
+            grad.Dispose();
+            meta.SparseGrad = merged;
+        }
+    }
+
     public static void AccumulateLeaf(AutogradMeta leaf, in Tensor grad, bool owned)
     {
+        if (!leaf.RequiresGrad)
+        {
+            // Frozen after the forward pass recorded it: no gradient is kept.
+            if (owned)
+            {
+                grad.Dispose();
+            }
+
+            return;
+        }
+
+        if (leaf.SparseGrad is { } sparse)
+        {
+            // A dense gradient arrives for a leaf that already has a sparse one (a table used by a lookup and by something else): go dense.
+            Tensor dense = sparse.ToDense();
+            sparse.Dispose();
+            leaf.SparseGrad = null;
+            leaf.Grad = dense;
+        }
+
         Tensor cur = leaf.Grad;
         if (cur.IsEmpty)
         {

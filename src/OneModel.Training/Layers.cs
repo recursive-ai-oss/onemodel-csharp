@@ -268,9 +268,13 @@ public sealed class LayerNorm : NnModule
 public sealed class Embedding : NnModule
 {
     private readonly int _paddingIndex;
+    private readonly bool _sparse;
 
     /// <summary>The table [count, width].</summary>
     public Tensor Weight { get; }
+
+    /// <summary>True if backward produces a row-sparse gradient (<see cref="Tensor.SparseGrad"/>) holding only the looked-up rows, instead of a dense [count, width] one.</summary>
+    public bool IsSparse => _sparse;
 
     /// <summary>Creates the table with values uniform in ±√3 (unit variance), in row-major order.</summary>
     /// <param name="count">Number of ids, at least 1.</param>
@@ -278,7 +282,19 @@ public sealed class Embedding : NnModule
     /// <param name="generator">Source of the initial values.</param>
     /// <param name="paddingIndex">An id whose row receives no gradient, or -1 for none (default).</param>
     public Embedding(int count, int width, Generator generator, int paddingIndex = -1)
+        : this(count, width, generator, paddingIndex, false)
     {
+    }
+
+    /// <summary>Creates the table as above, choosing between a dense and a row-sparse gradient.</summary>
+    /// <param name="count">Number of ids, at least 1.</param>
+    /// <param name="width">Vector width, at least 1.</param>
+    /// <param name="generator">Source of the initial values.</param>
+    /// <param name="paddingIndex">An id whose row receives no gradient, or -1 for none.</param>
+    /// <param name="sparse">True for a row-sparse gradient: only the touched rows are kept (use with <see cref="Sgd"/> without momentum or <see cref="SparseAdam"/>).</param>
+    public Embedding(int count, int width, Generator generator, int paddingIndex, bool sparse)
+    {
+        _sparse = sparse;
         ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
         ArgumentNullException.ThrowIfNull(generator);
@@ -288,7 +304,7 @@ public sealed class Embedding : NnModule
 
     /// <summary>Looks up Int32 or Int64 ids of any shape; the result has the id shape plus the vector width.</summary>
     /// <param name="input">Ids.</param>
-    public override Tensor Forward(Tensor input) => Ops.Embedding(Weight, input, _paddingIndex);
+    public override Tensor Forward(Tensor input) => Ops.Embedding(Weight, input, _paddingIndex, _sparse);
 }
 
 /// <summary>

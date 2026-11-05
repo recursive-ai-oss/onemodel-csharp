@@ -263,7 +263,7 @@ public static class Checkpoint
                     state.Add((n, t));
                 }
 
-                CheckFit("optimizer state", optEntries, state, dataLen);
+                CheckFitOptimizerState(optEntries, optimizer, dataLen);
             }
             else if (optimizer is not null)
             {
@@ -296,6 +296,17 @@ public static class Checkpoint
             if (optEntries is not null && optimizer is not null && hyper is not null)
             {
                 var state = new List<(string, Tensor)>();
+                foreach ((string n, Tensor t) in optimizer.StateTensors)
+                {
+                    state.Add((n, t));
+                }
+
+                for (int i = 0; i < optEntries.Count; i++)
+                {
+                    optimizer.AdoptState(i, optEntries[i].Dims);
+                }
+
+                state.Clear();
                 foreach ((string n, Tensor t) in optimizer.StateTensors)
                 {
                     state.Add((n, t));
@@ -342,7 +353,7 @@ public static class Checkpoint
     }
 
     // Names, types and shapes must equal the destination's, in order; offsets and lengths must lie inside the data region.
-    private static void CheckFit(string what, List<Entry> entries, IReadOnlyList<(string Name, Tensor Tensor)> dest, long dataLength)
+    private static void CheckFit(string what, List<Entry> entries, List<(string Name, Tensor Tensor)> dest, long dataLength)
     {
         if (entries.Count != dest.Count)
         {
@@ -364,6 +375,45 @@ public static class Checkpoint
                 throw new CheckpointException(CheckpointErrorKind.BadTensor, $"{what} tensor '{name}' has offset {e.Offset}, length {e.Length} (expected {expected}) in a data region of {dataLength} bytes.");
             }
         }
+    }
+
+    // Optimizer state may be empty ([0]) for a parameter that was frozen when the state was saved, or full-sized; both are adopted
+    // before filling, so a checkpoint loads whichever way the target optimizer's parameters were frozen when it was built.
+    private static void CheckFitOptimizerState(List<Entry> entries, Optimizer optimizer, long dataLength)
+    {
+        IReadOnlyList<(string Name, Tensor Tensor)> dest = optimizer.StateTensors;
+        if (entries.Count != dest.Count)
+        {
+            throw new CheckpointException(CheckpointErrorKind.Mismatch, $"The checkpoint has {entries.Count} optimizer state tensors, the target has {dest.Count}.");
+        }
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            Entry e = entries[i];
+            (string name, Tensor t) = dest[i];
+            if (e.Name != name || e.DType != t.DType ||
+                !(e.Dims.AsSpan().SequenceEqual(t.Shape.Dimensions) || optimizer.CanAdoptState(i, e.Dims)))
+            {
+                throw new CheckpointException(CheckpointErrorKind.Mismatch, $"optimizer state entry {i} is '{e.Name}' {e.DType}[{string.Join(',', e.Dims)}], the target expects '{name}' {t.DType}{t.Shape}.");
+            }
+
+            long expected = ElementCount(e.Dims) * (e.DType == DType.I64 ? 8 : 4);
+            if (e.Length != expected || e.Offset < 0 || e.Offset > dataLength || e.Length > dataLength - e.Offset)
+            {
+                throw new CheckpointException(CheckpointErrorKind.BadTensor, $"optimizer state tensor '{name}' has offset {e.Offset}, length {e.Length} (expected {expected}) in a data region of {dataLength} bytes.");
+            }
+        }
+    }
+
+    private static long ElementCount(int[] dims)
+    {
+        long n = 1;
+        foreach (int d in dims)
+        {
+            n *= d;
+        }
+
+        return n;
     }
 
     private static void Fill(byte[] file, long dataStart, List<Entry> entries, IReadOnlyList<(string Name, Tensor Tensor)> dest)

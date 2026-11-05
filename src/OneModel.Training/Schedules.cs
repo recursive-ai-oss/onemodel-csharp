@@ -4,7 +4,7 @@ using RecursiveAI.OneModel.Tensors;
 
 namespace RecursiveAI.OneModel.Training;
 
-/// <summary>Gradient clipping. Both functions work in place on <see cref="Tensor.Grad"/> and skip parameters without a gradient.</summary>
+/// <summary>Gradient clipping. Both functions work in place on <see cref="Tensor.Grad"/> (or the values of a row-sparse <see cref="Tensor.SparseGrad"/>, whose rows are each counted once) and skip parameters without a gradient, frozen ones included.</summary>
 public static class GradClip
 {
     /// <summary>
@@ -26,7 +26,7 @@ public static class GradClip
         double acc = 0;
         foreach (Tensor p in parameters)
         {
-            Tensor g = p.Grad;
+            Tensor g = p.SparseGrad is { } sg ? sg.Values : p.Grad;
             if (g.IsEmpty)
             {
                 continue;
@@ -65,7 +65,7 @@ public static class GradClip
         {
             foreach (Tensor p in parameters)
             {
-                Tensor g = p.Grad;
+                Tensor g = p.SparseGrad is { } sg ? sg.Values : p.Grad;
                 if (!g.IsEmpty)
                 {
                     Span<float> s = g.MutableData<float>();
@@ -93,7 +93,7 @@ public static class GradClip
 
         foreach (Tensor p in parameters)
         {
-            Tensor g = p.Grad;
+            Tensor g = p.SparseGrad is { } sg ? sg.Values : p.Grad;
             if (g.IsEmpty)
             {
                 continue;

@@ -164,6 +164,120 @@ public abstract class NnModule : IDisposable
         return result;
     }
 
+    /// <summary>The parameters that currently require gradients (not frozen), named, in the same order as <see cref="NamedParameters"/>.</summary>
+    public List<(string Name, Tensor Tensor)> NamedTrainableParameters()
+    {
+        var list = new List<(string, Tensor)>();
+        foreach ((string n, Tensor t) in NamedParameters())
+        {
+            if (t.RequiresGrad)
+            {
+                list.Add((n, t));
+            }
+        }
+
+        return list;
+    }
+
+    /// <summary>The parameters that currently require gradients, without names, in parameter order.</summary>
+    public Tensor[] TrainableParameters()
+    {
+        List<(string Name, Tensor Tensor)> named = NamedTrainableParameters();
+        var result = new Tensor[named.Count];
+        for (int i = 0; i < result.Length; i++)
+        {
+            result[i] = named[i].Tensor;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Freezes every parameter of this module and its descendants: they stop requiring gradients (PyTorch's <c>requires_grad_(False)</c>).
+    /// A frozen parameter receives no gradient (any accumulated one is freed), is skipped by optimizers and by <see cref="GradClip"/>, keeps
+    /// no optimizer state if the optimizer was built while it was frozen, and stays in <see cref="StateDict"/> and checkpoints.
+    /// Freeze before the forward pass: operations record backward information only for inputs that require gradients when they run.
+    /// </summary>
+    /// <returns>The number of parameters whose state changed.</returns>
+    public int Freeze() => SetTrainable(static (_, _) => true, false);
+
+    /// <summary>Freezes one parameter by dotted name (<c>layer0.attn.q.weight</c>) or every parameter under a child module's dotted path (<c>layer0</c>).</summary>
+    /// <param name="nameOrPrefix">A parameter name or a module path.</param>
+    /// <returns>The number of parameters whose state changed.</returns>
+    /// <exception cref="ArgumentException">No parameter has that name or lies under that path.</exception>
+    public int Freeze(string nameOrPrefix) => SetTrainable(nameOrPrefix, false);
+
+    /// <summary>Freezes every parameter for which the predicate is true.</summary>
+    /// <param name="predicate">Called with the dotted name and the parameter.</param>
+    /// <returns>The number of parameters whose state changed.</returns>
+    public int Freeze(Func<string, Tensor, bool> predicate) => SetTrainable(predicate, false);
+
+    /// <summary>Makes every parameter of this module and its descendants require gradients again. Optimizer state of parameters that were frozen when the optimizer was built is created, zeroed, at their first update.</summary>
+    /// <returns>The number of parameters whose state changed.</returns>
+    public int Unfreeze() => SetTrainable(static (_, _) => true, true);
+
+    /// <summary>Unfreezes one parameter by dotted name or every parameter under a module path; see <see cref="Freeze(string)"/>.</summary>
+    /// <param name="nameOrPrefix">A parameter name or a module path.</param>
+    /// <returns>The number of parameters whose state changed.</returns>
+    /// <exception cref="ArgumentException">No parameter has that name or lies under that path.</exception>
+    public int Unfreeze(string nameOrPrefix) => SetTrainable(nameOrPrefix, true);
+
+    /// <summary>Unfreezes every parameter for which the predicate is true.</summary>
+    /// <param name="predicate">Called with the dotted name and the parameter.</param>
+    /// <returns>The number of parameters whose state changed.</returns>
+    public int Unfreeze(Func<string, Tensor, bool> predicate) => SetTrainable(predicate, true);
+
+    /// <summary>True if the named parameter does not require gradients.</summary>
+    /// <param name="name">The parameter's dotted name.</param>
+    /// <exception cref="ArgumentException">There is no parameter of that name.</exception>
+    public bool IsFrozen(string name)
+    {
+        foreach ((string n, Tensor t) in NamedParameters())
+        {
+            if (n == name)
+            {
+                return !t.RequiresGrad;
+            }
+        }
+
+        throw new ArgumentException($"No parameter named '{name}'.", nameof(name));
+    }
+
+    private int SetTrainable(string nameOrPrefix, bool trainable)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(nameOrPrefix);
+        string prefix = nameOrPrefix + ".";
+        bool found = false;
+        int changed = SetTrainable((n, _) =>
+        {
+            bool hit = n == nameOrPrefix || n.StartsWith(prefix, StringComparison.Ordinal);
+            found |= hit;
+            return hit;
+        }, trainable);
+        if (!found)
+        {
+            throw new ArgumentException($"No parameter is named '{nameOrPrefix}' or lies under a module of that path.", nameof(nameOrPrefix));
+        }
+
+        return changed;
+    }
+
+    private int SetTrainable(Func<string, Tensor, bool> predicate, bool trainable)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        int changed = 0;
+        foreach ((string n, Tensor t) in NamedParameters())
+        {
+            if (predicate(n, t) && t.RequiresGrad != trainable)
+            {
+                t.SetRequiresGrad(trainable);
+                changed++;
+            }
+        }
+
+        return changed;
+    }
+
     /// <summary>Parameters and buffers together, per module in the order own parameters, own buffers, children. This is the checkpoint order.</summary>
     public List<(string Name, Tensor Tensor)> StateDict()
     {

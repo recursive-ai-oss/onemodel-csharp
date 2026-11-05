@@ -1,0 +1,147 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261031,
+ "tensors": {
+  "in.emb": {
+   "shape": [
+    40,
+    8
+   ],
+   "offset": 0
+  },
+  "in.hw": {
+   "shape": [
+    3,
+    8
+   ],
+   "offset": 320
+  },
+  "in.hb": {
+   "shape": [
+    3
+   ],
+   "offset": 344
+  },
+  "in.ids": {
+   "shape": [
+    6,
+    6,
+    5
+   ],
+   "offset": 347
+  },
+  "in.y": {
+   "shape": [
+    6,
+    6
+   ],
+   "offset": 527
+  },
+  "out.sgd.grad0": {
+   "shape": [
+    40,
+    8
+   ],
+   "offset": 563
+  },
+  "out.sgd.emb1": {
+   "shape": [
+    40,
+    8
+   ],
+   "offset": 883
+  },
+  "out.sgd.loss": {
+   "shape": [
+    6
+   ],
+   "offset": 1203
+  },
+  "out.sgd.emb": {
+   "shape": [
+    40,
+    8
+   ],
+   "offset": 1209
+  },
+  "out.sgd.hw": {
+   "shape": [
+    3,
+    8
+   ],
+   "offset": 1529
+  },
+  "out.sgd.hb": {
+   "shape": [
+    3
+   ],
+   "offset": 1553
+  },
+  "out.sparseadam.emb1": {
+   "shape": [
+    40,
+    8
+   ],
+   "offset": 1556
+  },
+  "out.sparseadam.loss": {
+   "shape": [
+    6
+   ],
+   "offset": 1876
+  },
+  "out.sparseadam.emb": {
+   "shape": [
+    40,
+    8
+   ],
+   "offset": 1882
+  },
+  "out.sparseadam.hw": {
+   "shape": [
+    3,
+    8
+   ],
+   "offset": 2202
+  },
+  "out.sparseadam.hb": {
+   "shape": [
+    3
+   ],
+   "offset": 2226
+  },
+  "out.sparseadam2.emb1": {
+   "shape": [
+    40,
+    8
+   ],
+   "offset": 2229
+  },
+  "out.sparseadam2.loss": {
+   "shape": [
+    6
+   ],
+   "offset": 2549
+  },
+  "out.sparseadam2.emb": {
+   "shape": [
+    40,
+    8
+   ],
+   "offset": 2555
+  },
+  "out.sparseadam2.hw": {
+   "shape": [
+    3,
+    8
+   ],
+   "offset": 2875
+  },
+  "out.sparseadam2.hb": {
+   "shape": [
+    3
+   ],
+   "offset": 2899
+  }
+ }
+}

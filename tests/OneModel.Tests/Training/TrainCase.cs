@@ -166,7 +166,7 @@ internal sealed class TrainCase
         return tc;
     }
 
-    public static TrainCase Encoder(OracleFile o, float dropout = 0f, Func<Generator>? gen = null)
+    public static TrainCase Encoder(OracleFile o, float dropout = 0f, Func<Generator>? gen = null, Action<NnModule>? beforeOptimizer = null)
     {
         var model = new EncoderClassifier(gen?.Invoke() ?? new Generator(3), 11, 16, 2, 32, 2, 2, dropout, seed: 77);
         var map = new List<(string, string)> { ("emb.weight", "emb") };
@@ -195,6 +195,7 @@ internal sealed class TrainCase
             Set(model, p, o.Values("in." + k));
         }
 
+        beforeOptimizer?.Invoke(model);
         var opt = new Adam(model.Parameters(), 2e-3f);
         var sched = new WarmupLr(new ConstantLr(2e-3f), 10, 0.1f);
         float[] ids = o.Values("in.ids"), y = o.Values("in.y");

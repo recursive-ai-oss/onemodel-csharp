@@ -1,0 +1,236 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261031,
+ "tensors": {
+  "out.loss": {
+   "shape": [
+    80
+   ],
+   "offset": 0
+  },
+  "out.emb": {
+   "shape": [
+    11,
+    16
+   ],
+   "offset": 80
+  },
+  "out.l0.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 256
+  },
+  "out.l0.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 512
+  },
+  "out.l0.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 528
+  },
+  "out.l0.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 784
+  },
+  "out.l0.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 800
+  },
+  "out.l0.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 1056
+  },
+  "out.l0.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 1072
+  },
+  "out.l0.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 1328
+  },
+  "out.l0.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 1344
+  },
+  "out.l0.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 1360
+  },
+  "out.l0.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 1376
+  },
+  "out.l0.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 1888
+  },
+  "out.l0.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 1920
+  },
+  "out.l0.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 2432
+  },
+  "out.l0.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 2448
+  },
+  "out.l0.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 2464
+  },
+  "out.l1.wq": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2480
+  },
+  "out.l1.bq": {
+   "shape": [
+    16
+   ],
+   "offset": 2736
+  },
+  "out.l1.wk": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2752
+  },
+  "out.l1.bk": {
+   "shape": [
+    16
+   ],
+   "offset": 3008
+  },
+  "out.l1.wv": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 3024
+  },
+  "out.l1.bv": {
+   "shape": [
+    16
+   ],
+   "offset": 3280
+  },
+  "out.l1.wo": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 3296
+  },
+  "out.l1.bo": {
+   "shape": [
+    16
+   ],
+   "offset": 3552
+  },
+  "out.l1.ln1g": {
+   "shape": [
+    16
+   ],
+   "offset": 3568
+  },
+  "out.l1.ln1b": {
+   "shape": [
+    16
+   ],
+   "offset": 3584
+  },
+  "out.l1.w1": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 3600
+  },
+  "out.l1.b1": {
+   "shape": [
+    32
+   ],
+   "offset": 4112
+  },
+  "out.l1.w2": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 4144
+  },
+  "out.l1.b2": {
+   "shape": [
+    16
+   ],
+   "offset": 4656
+  },
+  "out.l1.ln2g": {
+   "shape": [
+    16
+   ],
+   "offset": 4672
+  },
+  "out.l1.ln2b": {
+   "shape": [
+    16
+   ],
+   "offset": 4688
+  },
+  "out.clsw": {
+   "shape": [
+    2,
+    16
+   ],
+   "offset": 4704
+  },
+  "out.clsb": {
+   "shape": [
+    2
+   ],
+   "offset": 4736
+  }
+ }
+}

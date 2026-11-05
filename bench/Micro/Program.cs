@@ -38,6 +38,11 @@ internal static class Program
             return UnaryBench.Run(args[1..]);
         }
 
+        if (args.Length > 0 && args[0] == "sparseembed")
+        {
+            return SparseEmbedding.Run(args[1..]);
+        }
+
         if (args.Length > 0 && args[0] == "mixed")
         {
             return MixedPrecision.Run(args[1..]);

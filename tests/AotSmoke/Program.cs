@@ -290,6 +290,45 @@ foreach (ArithmeticMode tm in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact 
     }
 }
 
+// Sparse embedding gradients and freezing: a sparse table trained with SparseAdam beside a head trained with AdamW, the head's
+// bias frozen, and a checkpoint of the sparse optimizer that reloads (state shapes included) to the same bits.
+{
+    var sg = new Generator(21);
+    using var table = new Embedding(20, 4, sg, 0, true);
+    using var head = new Linear(4, 2, sg);
+    head.Freeze("bias");
+    using var sOpt = new SparseAdam([table.Weight], 1e-2f);
+    using var dOpt = new AdamW(head.Parameters(), 1e-2f);
+    var ids = Tensor.FromSpan<int>([0, 3, 3, 7, 5, 3], Shape.Create(2, 3));
+    var lab = Tensor.FromSpan<long>([0, 1], Shape.Create(2));
+    float before = head.Bias.Data<float>()[0];
+    for (int step = 0; step < 5; step++)
+    {
+        using var scope = new ActivationScope();
+        Tensor loss = Losses.CrossEntropy(head.Forward(Ops.Mean(table.Forward(ids), 1)), lab);
+        sOpt.ZeroGrad();
+        dOpt.ZeroGrad();
+        loss.Backward();
+        sOpt.Step();
+        dOpt.Step();
+    }
+
+    RowSparseGradient? rg = table.Weight.SparseGrad;
+    using var ms2 = new MemoryStream();
+    Checkpoint.Save(ms2, table, sOpt);
+    ms2.Position = 0;
+    using var table2 = new Embedding(20, 4, new Generator(1), 0, true);
+    using var sOpt2 = new SparseAdam([table2.Weight], 1e-2f);
+    Checkpoint.Load(ms2, table2, sOpt2);
+    bool ok = rg is not null && rg.RowCount == 3 && head.Bias.Data<float>()[0] == before && head.Bias.Grad.IsEmpty &&
+        table.Weight.Data<float>().SequenceEqual(table2.Weight.Data<float>()) && sOpt2.StepCount == 5;
+    Console.WriteLine($"sparse embedding + frozen bias: touched rows {rg?.RowCount}, checkpoint round trip {(ok ? "equal" : "DIFFERS")}");
+    if (!ok)
+    {
+        return 33;
+    }
+}
+
 // Recurrent, CTC, transposed-convolution and resize gradients: a bidirectional LSTM and a GRU into a CTC loss, and a small decoder.
 foreach (ArithmeticMode gm in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact })
 {

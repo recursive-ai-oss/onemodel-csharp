@@ -401,6 +401,56 @@ public readonly partial struct Tensor : IDisposable
     /// <summary>The accumulated gradient (empty if none).</summary>
     public Tensor Grad => _meta?.Grad ?? default;
 
+    /// <summary>
+    /// The accumulated row-sparse gradient (only the touched rows of an embedding table, see <see cref="Ops.Embedding(in Tensor, in Tensor, int, bool, BufferPool?)"/>),
+    /// or null. A leaf has either a dense <see cref="Grad"/> or a sparse gradient, not both.
+    /// </summary>
+    public RowSparseGradient? SparseGrad => _meta?.SparseGrad;
+
+    /// <summary>
+    /// Turns gradient tracking of a leaf on or off in place, like PyTorch's <c>requires_grad_</c>. The change is seen through every copy of this handle.
+    /// Turning it off frees the accumulated gradient (dense or sparse); a tensor that does not require gradients receives none, costs no
+    /// gradient memory, and is skipped by optimizers and gradient clipping. Operations record backward information only for inputs that
+    /// require gradients when the operation runs, so freeze before the forward pass.
+    /// </summary>
+    /// <param name="requiresGrad">True to track gradients (floating-point tensors only), false to stop.</param>
+    /// <exception cref="InvalidOperationException">The tensor is not a leaf, is not floating point, or was never made a gradient leaf (use <see cref="WithRequiresGrad"/> to get a leaf handle).</exception>
+    public void SetRequiresGrad(bool requiresGrad)
+    {
+        ThrowIfEmpty();
+        AutogradMeta? m = _meta;
+        if (m is null)
+        {
+            if (!requiresGrad)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException("This handle is not a gradient leaf; call WithRequiresGrad() to get one.");
+        }
+
+        if (!m.IsLeaf)
+        {
+            throw new InvalidOperationException("Only a leaf tensor can change whether it requires gradients; this one is the result of an operation.");
+        }
+
+        if (m.RequiresGrad == requiresGrad)
+        {
+            return;
+        }
+
+        if (requiresGrad && !DTypes.IsFloatingPoint(_dtype))
+        {
+            throw new InvalidOperationException($"Only floating-point tensors can require gradients, not {_dtype}.");
+        }
+
+        m.RequiresGrad = requiresGrad;
+        if (!requiresGrad)
+        {
+            Backprop.ClearGrad(this);
+        }
+    }
+
     internal int Generation => _generation;
 
     /// <summary>

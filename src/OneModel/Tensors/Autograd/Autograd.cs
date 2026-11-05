@@ -109,8 +109,8 @@ internal sealed class AutogradMeta
         OutputIndex = outputIndex;
     }
 
-    /// <summary>True if gradients flow to this tensor.</summary>
-    public bool RequiresGrad { get; }
+    /// <summary>True if gradients flow to this tensor. Only a leaf's flag is ever changed afterwards (<see cref="Tensor.SetRequiresGrad"/>).</summary>
+    public bool RequiresGrad { get; set; }
 
     /// <summary>The record of the operation that produced this tensor; null for a leaf (a tensor made by the user).</summary>
     public BackwardRecord? GradFn { get; }
@@ -123,6 +123,9 @@ internal sealed class AutogradMeta
 
     /// <summary>The accumulated gradient of a leaf; empty until a backward pass writes it. The engine owns the accumulation.</summary>
     public Tensor Grad { get; set; }
+
+    /// <summary>The accumulated row-sparse gradient of a leaf (an embedding table), or null. A leaf holds a dense <see cref="Grad"/> or a sparse one, never both.</summary>
+    public RowSparseGradient? SparseGrad { get; set; }
 
     /// <summary>The tracer's value for this tensor while a trace is recording, else null.</summary>
     internal object? Trace { get; set; }

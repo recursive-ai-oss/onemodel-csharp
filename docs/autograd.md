@@ -35,6 +35,14 @@ tensor they belong to.
 
 Leaf gradients accumulate across calls; `Backprop.ZeroGrad(leaf)` zeroes one in place and `Backprop.ClearGrad(leaf)` frees it.
 
+### 2.1 Frozen leaves and sparse gradients
+
+`Tensor.SetRequiresGrad(false)` turns a leaf off in place (shared by every copy of the handle) and frees its gradient; operations record only
+for inputs that require gradients when they run, so subgraphs that lead only to frozen leaves are never recorded, and a leaf frozen after the
+forward pass simply discards what arrives. `AutogradMeta` of a leaf holds either a dense `Grad` or a `SparseGrad` (`RowSparseGradient`, rows
+ascending): the engine adds a dense gradient to a sparse one by densifying it first (sparse part first), merges two sparse ones, and scatters
+a sparse one into an existing dense one in row order. See `training.md` sections 1.3 and 3.1.
+
 ## 3. Memory: `ActivationScope`
 
 While an `ActivationScope` is open on a thread, every tensor an `Ops` operator allocates (and every `Contiguous`/copying `Reshape`
@@ -104,7 +112,7 @@ axes the forward broadcast, to the input's shape.
 | `LstmLayer` (one direction of one layer) | 0 = x, 1 = Wih, 2 = Whh, 3 = activated gates i,f,g,o `[T,B,4H]`, 4 = c `[T,B,H]`, 5 = tanh c, 6 = y, 7 = h0, 8 = c0 (7, 8 empty if not given) | [reverse, T, B, I, H] | backpropagation through time, steps in reverse order of the forward: `dh = gy + dh'`, `do = dh·tanh c`, `dc = dc' + dh·o·(1−tanh²c)`, `di = dc·g`, `df = dc·c_prev`, `dg = dc·i`, `dc' = dc·f`; pre-activation gradients `di·i(1−i)`, `df·f(1−f)`, `dg(1−g²)`, `do·o(1−o)` form `dG[t]` (`[B,4H]`); `dh' = dG[t]·Whh`. After the loop (single products over all steps): `dx = dG·Wih`, `dWih = dGᵀ·x`, `dWhh = dGᵀ·H_prev` (the previous hidden states, h0 at the first step), `dbih = dbhh = Σ dG`, `dh0 = dh'`, `dc0 = dc'` |
 | `GruLayer` | 0 = x, 1 = Wih, 2 = Whh, 3 = activated r,z,n `[T,B,3H]`, 4 = hidden-side n part `Whn h + bhn`, 5 = y, 6 = h0 | [reverse, T, B, I, H] | `dh = gy + dh'`, `dz = dh·(h_prev − n)`, `dn = dh·(1−z)`, `dh'_direct = dh·z`, `dan = dn(1−n²)`, `dr = dan·(Whn h + bhn)`, `dar = dr·r(1−r)`, `daz = dz·z(1−z)`; input side `dX[t] = [dar, daz, dan]`, hidden side `dH[t] = [dar, daz, dan·r]`; `dh' = dH[t]·Whh + dh'_direct`; `dx = dX·Wih`, `dWih = dXᵀ·x`, `dWhh = dHᵀ·H_prev`, `dbih = Σ dX`, `dbhh = Σ dH` |
 | `CtcLoss` | 0 = log-probabilities `[T,B,C]` | [blank, zeroInfinity, reduction, B, input lengths, target lengths, targets] | per sequence, `−exp(log Σ_{s: l'(s)=c} α_t(s)β_t(s) − lp[t,c] + loss)` on frames `t < inputLength` (section 8), times `g` and the reduction weight (`1/(B·max(1, targetLength))` for `Mean`); zero for impossible alignments |
-| `Embedding` | 0 = ids | [paddingIndex] | add each `g` row to its table row in id order, skipping the padding id |
+| `Embedding` | 0 = ids | [paddingIndex] or [paddingIndex, 1] (sparse) | add each `g` row to its table row in id order, skipping the padding id. Sparse (table is a leaf): the same sums, in increasing position order per id from zero, kept as a `RowSparseGradient` (ascending unique rows) instead of a dense table |
 | `NllLoss` | 0 = targets | [mean, ignoreIndex] | `−g/count` (or `−g`) at `[n, target_n]` of non-ignored rows |
 | `CrossEntropy` | (composition: LogSoftmax, NllLoss) | | |
 | `Attention` | 0 = q, 1 = k, 2 = v, 3 = additive mask (or empty) | Floats [scale] | per batch and head, P = softmax(scale·QKᵀ + mask) is recomputed; `dV = Pᵀ·g`; `dP = g·Vᵀ`; `dS = P∘(dP − rowsum(dP∘P))`; `dQ = scale·dS·K`; `dK = scale·dSᵀ·Q`. The mask gets no gradient |

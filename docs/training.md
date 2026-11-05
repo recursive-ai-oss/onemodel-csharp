@@ -24,7 +24,7 @@ copying anything.
 | `Conv1d(in, out, k, stride, padding, dilation, groups, bias)` or `Conv1d(in, out, k, "same" or "valid", dilation, groups, bias)` | `weight` [out,in/groups,k], `bias` [out] | `Ops.Conv1d` on [N,in,L]; `"same"` gives stride 1 and an output of the input's length, with the extra zero (when dilation·(k−1) is odd) on the right, `"valid"` is no padding, as `torch.nn.Conv1d` |
 | `BatchNorm2d(c, momentum 0.1, eps 1e-5)` | `weight` [c] = 1, `bias` [c] = 0; buffers `running_mean` = 0, `running_var` = 1 | `Ops.BatchNorm2d`; batch statistics and running update in training mode, running statistics in evaluation mode |
 | `LayerNorm(n, eps 1e-5)` | `weight` = 1, `bias` = 0 | `Ops.LayerNorm` over the last axis |
-| `Embedding(count, width, paddingIndex)` | `weight` [count,width] | `Ops.Embedding` |
+| `Embedding(count, width, generator, paddingIndex, sparse)` | `weight` [count,width] | `Ops.Embedding`; with `sparse: true` the gradient is row-sparse (section 3.1) |
 | `Dropout(p, seed)` | buffer `draws` Int64 [1] | section 1.2 |
 | `Sequential(layers...)` | children `0`, `1`, ... | applies children in order |
 | `MultiHeadAttention(width, heads)` | children `q`,`k`,`v`,`o` (`Linear`, with bias) | `Ops.Attention` over heads of `width/heads`, scale `1/√(width/heads)`, optional additive mask (no gradient) |
@@ -50,6 +50,31 @@ unsigned 64-bit, wrapping) and for element i (row-major, from 0) `bits = Mix(str
 nothing else, so it is the same on every platform and thread count, and because `draws` is a saved buffer a resumed run continues the
 stream. Evaluation mode, or p = 0, returns the input itself. The mask multiplies through `Ops.Mul`, so backward is the mask.
 
+### 1.3 Freezing parameters
+
+`Freeze()`, `Freeze(nameOrPrefix)`, `Freeze(predicate)` and the matching `Unfreeze` overloads stop or resume gradient tracking of parameters
+(PyTorch's `requires_grad_(False)` / `(True)`; underneath, `Tensor.SetRequiresGrad`). A name selects one parameter (`layer0.attn.q.weight`)
+or, as a module path, every parameter under it (`layer0`); a prefix matches whole path segments. `IsFrozen(name)`, `TrainableParameters()` and
+`NamedTrainableParameters()` report the state. The flag lives on the parameter itself, so every handle to it (the module's property, an
+optimizer's list, a clipping call) sees the change, and it works for any `NnModule`, including ones that register parameters of their own.
+
+Rules:
+
+- A frozen parameter is a leaf that does not require gradients. Freezing frees any gradient it holds (dense or row-sparse); backward never
+  creates one. Freeze before the forward pass: an operation records backward information only for inputs that require gradients when it runs,
+  so a forward over frozen embeddings and frozen layers records nothing for them, and a graph whose parameters are all frozen records nothing at all.
+- It stays in `NamedParameters()`, `StateDict()`, `LoadStateDict` and checkpoints; only `TrainableParameters()` leaves it out.
+- Every optimizer and `GradClip` skip it. Optimizers accept frozen parameters in their list.
+- **Optimizer state rule.** State tensors (`exp_avg.i`, `momentum_buffer.i`, ...) are created when the optimizer is built, full size for a parameter
+  that requires gradients then and empty (shape [0], no memory) for a frozen one. If that parameter is unfrozen later, its state is created
+  zeroed at its first update (for SGD with momentum, the first-step rule of section 3 then applies; for Adam the moments start at zero but
+  the step number is the optimizer's global one). Freezing a parameter again keeps its state; it is untouched while frozen.
+  Build the optimizer over `Parameters()` (frozen ones cost nothing) or over `TrainableParameters()`; both give the same updates.
+- Checkpoints store the optimizer state as it is, so a file records which parameters had state. `Checkpoint.Load` adopts the state shapes
+  of the file (empty or full) into the optimizer, so it loads whichever way the target optimizer was built; resuming after loading is
+  bit-equal to an uninterrupted run when the parameters are frozen the same way as when it was saved. Checkpoints written before this
+  rule have full-size state for every parameter and load as before.
+
 ## 2. Losses (`Losses`)
 
 All return a rank-0 float32 tensor and are compositions of differentiable ops. `mean` (default) divides by the number of counted
@@ -67,7 +92,7 @@ elements; otherwise the sum is returned.
 ## 3. Optimizers
 
 One parameter group per optimizer: one learning rate, one set of hyper-parameters. Parameters are the optimizer's constructor list;
-those without a gradient at a step are skipped (their state does not change). A step applies, parameter by parameter and element
+those without a gradient at a step are skipped (their state does not change), and so are frozen ones (section 1.3). A step applies, parameter by parameter and element
 by element in index order, plain float32 `+ − × ÷ sqrt` with no fused multiply-add (the JIT does not contract float expressions, and
 the code must not use `Fma`), so **the update is bit-identical in fast and exact mode, on every platform and thread count**. State is
 float32, shaped like the parameter, zero at creation, and listed by `StateTensors` (`momentum_buffer.i`, `exp_avg.i`,
@@ -87,11 +112,48 @@ Differences from PyTorch's implementation, all within float rounding of one step
 `β₁m + (1−β₁)g` where PyTorch uses `lerp`; the step number is global, not per parameter; the learning-rate argument is read at each step
 (a schedule sets it). Not provided: parameter groups, maximize, foreach/fused variants, `Adamax`, `RMSprop` and the rest.
 
+### 3.1 Row-sparse embedding gradients, `SparseAdam`
+
+A table such as a 250 002 x 768 token embedding is touched in a few thousand rows per step, yet a dense gradient is 768 MB and every dense
+optimizer updates all rows. `Embedding(..., sparse: true)` (or `Ops.Embedding(table, ids, paddingIndex, sparse: true)`) makes backward leave
+a `RowSparseGradient` in `Tensor.SparseGrad` instead of a dense `Tensor.Grad`:
+
+- `Rows`: the touched row numbers, ascending, each once; the padding row is absent. `Values`: [RowCount, width], the row gradients.
+- The gradient of a row is the sum of the output gradients of its lookups **in increasing position order, starting from zero**, exactly the
+  dense path's additions, so `ToDense()` equals the dense gradient bit for bit. The sort is a single-threaded sort of (id, position) pairs, so
+  the result does not depend on the thread count or the arithmetic mode beyond the upstream gradient (tests: equal hashes at 1 and 8 threads, fast and exact).
+- A leaf holds a dense or a sparse gradient, never both. Backward from a second lookup (or a tied output projection) merges: sparse + sparse
+  gives the union of rows with the earlier values added first; a dense contribution turns the gradient dense (earlier sparse part added first).
+  If the table is not a leaf, its gradient is dense. `Backprop.ZeroGrad` frees a sparse gradient (zero means no rows); `GradClip` counts and
+  scales its values (each row once).
+- Optimizers: **`Sgd`** without momentum and weight decay updates only the touched rows, `p[row] -= lr * g[row]`, bit-equal to the dense
+  update (a zero gradient changes nothing); with momentum or weight decay it throws `NotSupportedException` (PyTorch has no sparse
+  semantics for them either). **`SparseAdam`** is `torch.optim.SparseAdam`: for touched elements only,
+  `m = β₁m + (1−β₁)g`, `v = β₂v + (1−β₂)g²`, `p −= lr·√(1−β₂ᵗ)/(1−β₁ᵗ) · m / (√v + ε)` with t the global step number; moments of untouched rows
+  neither decay nor change. It takes rank-2 parameters, has no weight decay or AMSGrad, throws on a dense gradient, and (like PyTorch's)
+  needs the embedding's gradients to be row-sparse. `Adam` and `AdamW` throw `InvalidOperationException` when handed a sparse gradient, naming the fix.
+- **There is no sparse AdamW.** PyTorch has none, and decoupled decay of rows that were not touched would either make every step dense or
+  need a catch-up rule that PyTorch does not define. For decay use dense AdamW on the table (frozen or not), or `SparseAdam` and no decay.
+- Mixed use: put the table in a `SparseAdam` (or `Sgd`) and the rest in `AdamW`; call `ZeroGrad`, `Step` on both:
+
+```csharp
+var emb = new Embedding(250_002, 768, g, paddingIndex: 1, sparse: true);
+var sparseOpt = new SparseAdam([emb.Weight], 1e-4f);
+var denseOpt = new AdamW(otherParameters, 1e-4f);
+loss.Backward();
+sparseOpt.Step(); denseOpt.Step();
+```
+
+Memory for the 250 002 x 768 table (192 M floats = 768 MB) with 4 096 token lookups per step (at most 4 096 touched rows): a dense gradient is
+768 MB and AdamW's two moment tensors 1 536 MB (2 304 MB together, updated in full each step); the sparse gradient is at most
+4 096 x 768 x 4 B = 12.6 MB plus 16 KB of row numbers, and `SparseAdam` keeps the same two moment tensors (1 536 MB) but reads and writes only the touched rows.
+Freezing the table instead costs 0 B of gradient and 0 B of optimizer state. Measured step times are in section 3.2.
+
 ## 4. Gradient clipping (`GradClip`)
 
 `ClipNorm(params, maxNorm, infinityNorm)`: `norm` = `√Σg²` over every element of every gradient in order (squares added in double),
 or the largest `|g|`; `coef = maxNorm / (norm + 1e-6)` in double, rounded to float; if `coef < 1` every gradient element is multiplied by
-it. Returns `float(norm)`. A non-finite norm is returned without scaling anything. `ClipValue` clamps each element to ±c (NaN stays).
+it. Returns `float(norm)`. Frozen parameters have no gradient and are skipped; a row-sparse gradient contributes its values. A non-finite norm is returned without scaling anything. `ClipValue` clamps each element to ±c (NaN stays).
 
 ## 5. Learning-rate schedules
 
