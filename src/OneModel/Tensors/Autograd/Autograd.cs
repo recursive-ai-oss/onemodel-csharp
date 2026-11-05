@@ -80,6 +80,20 @@ internal enum OpKind
     Resize2d,
     /// <summary>1-D convolution. Inputs x [N,C,L], weight [O,I,K], bias. Saves x and weight. Ints = [stride, padLeft, padRight, dilation, groups].</summary>
     Conv1d,
+    /// <summary>Matrix product over leading batch axes with broadcasting, <c>a[..., m, k] · b[..., k, n]</c>. Saves a (when b needs a gradient) and b (when a does).</summary>
+    BatchMatMul,
+    /// <summary>Error function. Saves the input.</summary>
+    Erf,
+    /// <summary>Natural exponential. Saves the output.</summary>
+    Exp,
+    /// <summary>Square root. Saves the output.</summary>
+    Sqrt,
+    /// <summary>Power with a constant exponent. Saves the input; Floats = [exponent].</summary>
+    Pow,
+    /// <summary>Select between two tensors by a Boolean condition. Saves the condition.</summary>
+    Where,
+    /// <summary>Gather along one axis by an index tensor. Saves the indices; Ints = [axis].</summary>
+    Gather,
 }
 
 /// <summary>

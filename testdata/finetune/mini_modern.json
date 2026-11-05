@@ -1,0 +1,130 @@
+{
+ "torch": "2.15.0+cpu",
+ "onnx": "1.23.2",
+ "seed": 20261105,
+ "tensors": {
+  "in.input_ids": {
+   "shape": [
+    2,
+    7
+   ],
+   "offset": 0
+  },
+  "in.attention_mask": {
+   "shape": [
+    2,
+    7
+   ],
+   "offset": 14
+  },
+  "out.0": {
+   "shape": [
+    2,
+    7,
+    16
+   ],
+   "offset": 28
+  },
+  "w.0": {
+   "shape": [
+    2,
+    7,
+    16
+   ],
+   "offset": 252
+  },
+  "grad.emb.weight": {
+   "shape": [
+    37,
+    16
+   ],
+   "offset": 476
+  },
+  "grad.emb_norm.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1068
+  },
+  "grad.blocks.0.mlp_norm.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1084
+  },
+  "grad.blocks.1.attn_norm.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1100
+  },
+  "grad.blocks.1.mlp_norm.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1116
+  },
+  "grad.final_norm.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1132
+  },
+  "grad.onnx::MatMul_356": {
+   "shape": [
+    16,
+    48
+   ],
+   "offset": 1148
+  },
+  "grad.onnx::MatMul_373": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 1916
+  },
+  "grad.onnx::MatMul_374": {
+   "shape": [
+    16,
+    48
+   ],
+   "offset": 2172
+  },
+  "grad.onnx::MatMul_375": {
+   "shape": [
+    24,
+    16
+   ],
+   "offset": 2940
+  },
+  "grad.onnx::MatMul_376": {
+   "shape": [
+    16,
+    48
+   ],
+   "offset": 3324
+  },
+  "grad.onnx::MatMul_393": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 4092
+  },
+  "grad.onnx::MatMul_394": {
+   "shape": [
+    16,
+    48
+   ],
+   "offset": 4348
+  },
+  "grad.onnx::MatMul_395": {
+   "shape": [
+    24,
+    16
+   ],
+   "offset": 5116
+  }
+ }
+}

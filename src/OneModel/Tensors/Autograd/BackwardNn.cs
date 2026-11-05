@@ -137,7 +137,8 @@ internal static partial class BackwardOps
                 AttentionBackward(e, r, g);
                 break;
             default:
-                throw new NotSupportedException($"No backward function for {r.Op}.");
+                RunGraphOps(e, r, g);
+                break;
         }
     }
 

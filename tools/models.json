@@ -252,6 +252,30 @@
           }
         }
       }
+    },
+    "xlm_roberta_base": {
+      "task": "encoder (multilingual, fine-tuning check)",
+      "source": {
+        "kind": "huggingface",
+        "repo": "FacebookAI/xlm-roberta-base",
+        "revision": "e73636d4f797dec63c3081bb6ed5c7b0bb3f2089",
+        "weightsFile": "model.safetensors",
+        "weightsSha256": "6fd4797bc397c3b8b55d6bb5740366b57e6a3ce91c04c77f22aafc0c128e6feb",
+        "licence": "mit (model card metadata)"
+      },
+      "files": {}
+    },
+    "mmbert_base": {
+      "task": "encoder (multilingual ModernBERT, fine-tuning check)",
+      "source": {
+        "kind": "huggingface",
+        "repo": "jhu-clsp/mmBERT-base",
+        "revision": "c5955035435e2bf121cde7f3c8863ef52ff35d82",
+        "weightsFile": "pytorch_model.bin",
+        "weightsSha256": "8ea64ec1ea4eb8fca0fc14b69a2ae571de6bfbc25fd214bb932dd4aba6a3a04e",
+        "licence": "mit (model card metadata)"
+      },
+      "files": {}
     }
   },
   "backendTest": {

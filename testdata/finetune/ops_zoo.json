@@ -1,0 +1,281 @@
+{
+ "torch": "2.15.0+cpu",
+ "onnx": "1.23.2",
+ "seed": 20261105,
+ "tensors": {
+  "in.x": {
+   "shape": [
+    3,
+    4,
+    6
+   ],
+   "offset": 0
+  },
+  "in.ids": {
+   "shape": [
+    3,
+    2
+   ],
+   "offset": 72
+  },
+  "out.0": {
+   "shape": [
+    3,
+    4,
+    4
+   ],
+   "offset": 78
+  },
+  "w.0": {
+   "shape": [
+    3,
+    4,
+    4
+   ],
+   "offset": 126
+  },
+  "out.1": {
+   "shape": [
+    3,
+    4,
+    2,
+    2
+   ],
+   "offset": 174
+  },
+  "w.1": {
+   "shape": [
+    3,
+    4,
+    2,
+    2
+   ],
+   "offset": 222
+  },
+  "out.2": {
+   "shape": [
+    3,
+    5
+   ],
+   "offset": 270
+  },
+  "w.2": {
+   "shape": [
+    3,
+    5
+   ],
+   "offset": 285
+  },
+  "out.3": {
+   "shape": [
+    4,
+    2
+   ],
+   "offset": 300
+  },
+  "w.3": {
+   "shape": [
+    4,
+    2
+   ],
+   "offset": 308
+  },
+  "out.4": {
+   "shape": [
+    3,
+    24
+   ],
+   "offset": 316
+  },
+  "w.4": {
+   "shape": [
+    3,
+    24
+   ],
+   "offset": 388
+  },
+  "out.5": {
+   "shape": [
+    3,
+    1,
+    6
+   ],
+   "offset": 460
+  },
+  "w.5": {
+   "shape": [
+    3,
+    1,
+    6
+   ],
+   "offset": 478
+  },
+  "out.6": {
+   "shape": [
+    3,
+    4,
+    2
+   ],
+   "offset": 496
+  },
+  "w.6": {
+   "shape": [
+    3,
+    4,
+    2
+   ],
+   "offset": 520
+  },
+  "out.7": {
+   "shape": [
+    1
+   ],
+   "offset": 544
+  },
+  "w.7": {
+   "shape": [
+    1
+   ],
+   "offset": 545
+  },
+  "out.8": {
+   "shape": [
+    3,
+    1,
+    1
+   ],
+   "offset": 546
+  },
+  "w.8": {
+   "shape": [
+    3,
+    1,
+    1
+   ],
+   "offset": 549
+  },
+  "out.9": {
+   "shape": [
+    3,
+    4,
+    3
+   ],
+   "offset": 552
+  },
+  "w.9": {
+   "shape": [
+    3,
+    4,
+    3
+   ],
+   "offset": 588
+  },
+  "grad.E": {
+   "shape": [
+    10,
+    6
+   ],
+   "offset": 624
+  },
+  "grad.W1": {
+   "shape": [
+    6,
+    6
+   ],
+   "offset": 684
+  },
+  "grad.b1": {
+   "shape": [
+    6
+   ],
+   "offset": 720
+  },
+  "grad.g": {
+   "shape": [
+    6
+   ],
+   "offset": 726
+  },
+  "grad.bln": {
+   "shape": [
+    6
+   ],
+   "offset": 732
+  },
+  "grad.Wq": {
+   "shape": [
+    6,
+    6
+   ],
+   "offset": 738
+  },
+  "grad.vv": {
+   "shape": [
+    6
+   ],
+   "offset": 774
+  },
+  "grad.dv": {
+   "shape": [
+    4
+   ],
+   "offset": 780
+  },
+  "grad.ln2g": {
+   "shape": [
+    4,
+    4
+   ],
+   "offset": 784
+  },
+  "grad.Wh": {
+   "shape": [
+    4,
+    6
+   ],
+   "offset": 800
+  },
+  "grad.pe": {
+   "shape": [
+    1,
+    4,
+    1
+   ],
+   "offset": 824
+  },
+  "grad.pb": {
+   "shape": [
+    4,
+    3,
+    2
+   ],
+   "offset": 828
+  },
+  "grad.G": {
+   "shape": [
+    5,
+    4
+   ],
+   "offset": 852
+  },
+  "grad.cg": {
+   "shape": [
+    5
+   ],
+   "offset": 872
+  },
+  "grad.G2": {
+   "shape": [
+    3,
+    2
+   ],
+   "offset": 877
+  },
+  "grad.cg2": {
+   "shape": [
+    2
+   ],
+   "offset": 883
+  }
+ }
+}

@@ -92,10 +92,26 @@ public abstract class NnModule : IDisposable
         return module;
     }
 
-    private void CheckName(string name)
+    // For modules whose parameter names come from a file (an imported graph's initializer names), which may contain dots.
+    // Same rules as RegisterParameter / RegisterBuffer except that the name is taken as it is.
+    private protected Tensor RegisterVerbatim(string name, Tensor value, bool parameter)
+    {
+        CheckName(name, allowDots: true);
+        if (parameter)
+        {
+            Tensor p = value.WithRequiresGrad();
+            _parameters.Add((name, p));
+            return p;
+        }
+
+        _buffers.Add((name, value));
+        return value;
+    }
+
+    private void CheckName(string name, bool allowDots = false)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
-        if (name.Contains('.', StringComparison.Ordinal))
+        if (!allowDots && name.Contains('.', StringComparison.Ordinal))
         {
             throw new ArgumentException($"Name '{name}' must not contain a dot.", nameof(name));
         }
@@ -229,6 +245,11 @@ public abstract class NnModule : IDisposable
         }
     }
 
+    // A hook for modules that own more than tensors and child modules (a model file, scratch memory).
+    private protected virtual void OnDispose()
+    {
+    }
+
     /// <summary>Releases the parameters, buffers, gradients and children. The module must not be used afterwards.</summary>
     public void Dispose()
     {
@@ -239,6 +260,7 @@ public abstract class NnModule : IDisposable
         }
 
         _disposed = true;
+        OnDispose();
         foreach ((_, Tensor p) in _parameters)
         {
             Backprop.ClearGrad(p);

@@ -1,0 +1,294 @@
+{
+ "torch": "2.15.0+cpu",
+ "onnx": "1.23.2",
+ "seed": 20261105,
+ "tensors": {
+  "in.input_ids": {
+   "shape": [
+    2,
+    7
+   ],
+   "offset": 0
+  },
+  "in.attention_mask": {
+   "shape": [
+    2,
+    7
+   ],
+   "offset": 14
+  },
+  "out.0": {
+   "shape": [
+    2,
+    7,
+    16
+   ],
+   "offset": 28
+  },
+  "w.0": {
+   "shape": [
+    2,
+    7,
+    16
+   ],
+   "offset": 252
+  },
+  "out.1": {
+   "shape": [
+    2,
+    16
+   ],
+   "offset": 476
+  },
+  "w.1": {
+   "shape": [
+    2,
+    16
+   ],
+   "offset": 508
+  },
+  "grad.word.weight": {
+   "shape": [
+    41,
+    16
+   ],
+   "offset": 540
+  },
+  "grad.pos.weight": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 1196
+  },
+  "grad.ln0.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1452
+  },
+  "grad.ln0.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1468
+  },
+  "grad.q.0.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1484
+  },
+  "grad.q.1.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1500
+  },
+  "grad.k.0.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1516
+  },
+  "grad.k.1.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1532
+  },
+  "grad.v.0.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1548
+  },
+  "grad.v.1.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1564
+  },
+  "grad.o.0.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1580
+  },
+  "grad.o.1.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1596
+  },
+  "grad.ln1.0.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1612
+  },
+  "grad.ln1.0.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1628
+  },
+  "grad.ln1.1.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1644
+  },
+  "grad.ln1.1.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1660
+  },
+  "grad.f1.0.bias": {
+   "shape": [
+    32
+   ],
+   "offset": 1676
+  },
+  "grad.f1.1.bias": {
+   "shape": [
+    32
+   ],
+   "offset": 1708
+  },
+  "grad.f2.0.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1740
+  },
+  "grad.f2.1.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1756
+  },
+  "grad.ln2.0.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1772
+  },
+  "grad.ln2.0.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1788
+  },
+  "grad.ln2.1.weight": {
+   "shape": [
+    16
+   ],
+   "offset": 1804
+  },
+  "grad.ln2.1.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 1820
+  },
+  "grad.pooler.weight": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 1836
+  },
+  "grad.pooler.bias": {
+   "shape": [
+    16
+   ],
+   "offset": 2092
+  },
+  "grad.onnx::MatMul_278": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2108
+  },
+  "grad.onnx::MatMul_281": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2364
+  },
+  "grad.onnx::MatMul_284": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2620
+  },
+  "grad.onnx::MatMul_289": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 2876
+  },
+  "grad.onnx::MatMul_290": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 3132
+  },
+  "grad.onnx::MatMul_291": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 3644
+  },
+  "grad.onnx::MatMul_292": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 4156
+  },
+  "grad.onnx::MatMul_295": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 4412
+  },
+  "grad.onnx::MatMul_298": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 4668
+  },
+  "grad.onnx::MatMul_301": {
+   "shape": [
+    16,
+    16
+   ],
+   "offset": 4924
+  },
+  "grad.onnx::MatMul_302": {
+   "shape": [
+    16,
+    32
+   ],
+   "offset": 5180
+  },
+  "grad.onnx::MatMul_303": {
+   "shape": [
+    32,
+    16
+   ],
+   "offset": 5692
+  }
+ }
+}
