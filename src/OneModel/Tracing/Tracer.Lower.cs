@@ -327,6 +327,8 @@ public sealed partial class Tracer
 
             case OpKind.Conv2d:
                 return LowerConv(rec, "Conv", ins, ints, output);
+            case OpKind.Conv1d:
+                return LowerConv1d(ins, ints, output);
             case OpKind.ConvTranspose2d:
                 return LowerConv(rec, "ConvTranspose", ins, ints, output);
             case OpKind.MaxPool2d:
@@ -746,6 +748,21 @@ public sealed partial class Tracer
 
         string[] names = ins.Length > 2 && ins[2].Name.Length > 0 ? [ins[0].Name, ins[1].Name, ins[2].Name] : [ins[0].Name, ins[1].Name];
         string name = Emit(op, names, [.. attrs]);
+        return NewSpatial(name, ins[0], output);
+    }
+
+    private TraceValue LowerConv1d(Opd[] ins, ReadOnlySpan<long> ints, in Tensor output)
+    {
+        // ints: [stride, padLeft, padRight, dilation, groups]; ONNX Conv with one spatial axis (Operators.md, Conv).
+        var attrs = new List<OnnxAttrSpec>
+        {
+            OnnxAttrSpec.OfInts("strides", ints[0]),
+            OnnxAttrSpec.OfInts("pads", ints[1], ints[2]),
+            OnnxAttrSpec.OfInts("dilations", ints[3]),
+            OnnxAttrSpec.OfInt("group", ints[4]),
+        };
+        string[] names = ins.Length > 2 && ins[2].Name.Length > 0 ? [ins[0].Name, ins[1].Name, ins[2].Name] : [ins[0].Name, ins[1].Name];
+        string name = Emit("Conv", names, [.. attrs]);
         return NewSpatial(name, ins[0], output);
     }
 

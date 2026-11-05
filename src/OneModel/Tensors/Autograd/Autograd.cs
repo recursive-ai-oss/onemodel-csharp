@@ -78,6 +78,8 @@ internal enum OpKind
     ConvTranspose2d,
     /// <summary>2-D resize of an NCHW tensor (nearest or bilinear). Ints = [mode, alignCorners, outH, outW].</summary>
     Resize2d,
+    /// <summary>1-D convolution. Inputs x [N,C,L], weight [O,I,K], bias. Saves x and weight. Ints = [stride, padLeft, padRight, dilation, groups].</summary>
+    Conv1d,
 }
 
 /// <summary>

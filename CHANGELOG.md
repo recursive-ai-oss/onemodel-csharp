@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- `Ops.Conv1d(x, weight, bias, Conv1dParams)` and the `Conv1d` module: 1-D convolution on [N, C, L] input with stride, left/right padding, dilation and groups (depthwise included), backward for input, weight and bias, `padding="same"`/`"valid"` on the module, and PyTorch's default initialisation. It runs on the 2-D convolution kernels, so fast results do not depend on the thread count and exact results are bit-identical on every ISA path. A traced `Conv1d` becomes an ONNX `Conv` with 1-D attributes.
+
 ## [1.1.0] - 2026-11-04
 
 Speed only: no API change, fast-mode results within the documented tolerance, exact mode unchanged bit for bit. Re-measured rows are in `docs/performance.md`.

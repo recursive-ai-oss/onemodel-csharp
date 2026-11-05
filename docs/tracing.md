@@ -36,6 +36,7 @@ paths fire without edits to the operators; the result tensor gets a tracer value
 | `Softmax`, `LogSoftmax` (last axis) | same, `axis` = -1 (other axes arrive as `Permute` views around it) |
 | `LayerNorm` | `LayerNormalization`, `axis` -1, `epsilon` |
 | `BatchNorm2d`, evaluation mode | `BatchNormalization` with the running statistics as constants (training mode is refused) |
+| `Conv1d` | `Conv` with one-element `strides`, `dilations`, `group`, and `pads` [left, right] (no reshape to an image) |
 | `Conv2d`, `ConvTranspose2d` | `Conv`, `ConvTranspose` (strides, pads, dilations, group; output padding recovered from the shapes) |
 | `MaxPool2d`, `AvgPool2d` | `MaxPool`, `AveragePool` (`count_include_pad`) |
 | `Resize2d` | `Resize` with explicit `sizes`; nearest = `asymmetric` + `floor`, bilinear = `half_pixel` or `align_corners` |

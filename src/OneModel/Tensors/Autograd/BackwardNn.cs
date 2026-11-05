@@ -88,6 +88,9 @@ internal static partial class BackwardOps
             case OpKind.Conv2d:
                 ConvBackward(e, r, g);
                 break;
+            case OpKind.Conv1d:
+                ConvBackward(e, r, g);
+                break;
             case OpKind.Lstm:
                 LstmBackward(r, g);
                 break;
@@ -306,10 +309,15 @@ internal static partial class BackwardOps
         x.Shape[0], x.Shape[1], x.Shape[2], x.Shape[3], w.Shape[0], w.Shape[2], w.Shape[3],
         (int)p[0], (int)p[1], (int)p[2], (int)p[3], (int)p[4], (int)p[5], (int)p[6], (int)p[7], (int)p[8]);
 
+    internal static ConvShape ConvShape1d(in Tensor x, in Tensor w, ReadOnlySpan<long> p) => new(
+        x.Shape[0], x.Shape[1], 1, x.Shape[2], w.Shape[0], 1, w.Shape[2],
+        1, (int)p[0], 0, (int)p[1], 0, (int)p[2], 1, (int)p[3], (int)p[4]);
+
     private static void ConvBackward(Engine e, BackwardRecord r, in Tensor g)
     {
         Tensor x = r.Saved(0).Unpack(), w = r.Saved(1).Unpack();
-        ConvShape s = ConvShapeOf(x, w, r.Ints);
+        // A 1-D convolution is the 2-D one on a height-1 image: same flat layouts, so only the geometry differs.
+        ConvShape s = r.Op == OpKind.Conv1d ? ConvShape1d(x, w, r.Ints) : ConvShapeOf(x, w, r.Ints);
         int cg = s.Cin / s.Groups, og = s.Cout / s.Groups, kk = cg * s.KH * s.KW, plane = s.OutH * s.OutW;
         ReadOnlySpan<float> xv = x.InternalData<float>(), wv = w.InternalData<float>(), gv = g.InternalData<float>();
 

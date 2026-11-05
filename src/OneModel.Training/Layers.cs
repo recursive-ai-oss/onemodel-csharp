@@ -115,6 +115,89 @@ public sealed class Conv2d : NnModule
     public override Tensor Forward(Tensor input) => Ops.Conv2d(input, Weight, Bias, _geometry);
 }
 
+/// <summary>1-D convolution over NCL float32 input (<c>torch.nn.Conv1d</c>).</summary>
+public sealed class Conv1d : NnModule
+{
+    private readonly Conv1dParams _geometry;
+
+    /// <summary>Weights [out, in/groups, kernel].</summary>
+    public Tensor Weight { get; }
+
+    /// <summary>Bias [out], or an empty tensor when the layer has none.</summary>
+    public Tensor Bias { get; }
+
+    /// <summary>Creates the layer with weights and bias drawn uniformly from ±1/√fanIn, fanIn = in/groups·kernelSize (weight first, then bias).</summary>
+    /// <param name="inChannels">Input channels, at least 1, divisible by <paramref name="groups"/>.</param>
+    /// <param name="outChannels">Output channels, at least 1, divisible by <paramref name="groups"/>.</param>
+    /// <param name="kernelSize">Kernel size, at least 1.</param>
+    /// <param name="generator">Source of the initial values.</param>
+    /// <param name="stride">Stride (default 1).</param>
+    /// <param name="padding">Zero padding on both sides (default 0).</param>
+    /// <param name="dilation">Dilation (default 1).</param>
+    /// <param name="groups">Channel groups (default 1); equal to the channels for a depthwise layer.</param>
+    /// <param name="bias">Whether to add a bias (default true).</param>
+    public Conv1d(int inChannels, int outChannels, int kernelSize, Generator generator, int stride = 1, int padding = 0,
+        int dilation = 1, int groups = 1, bool bias = true)
+        : this(inChannels, outChannels, kernelSize, generator, Conv1dParams.Symmetric(stride, padding, dilation, groups), bias)
+    {
+    }
+
+    /// <summary>
+    /// Creates the layer with <c>padding="same"</c> (output length equals input length, stride 1; any extra zero goes on the right) or
+    /// <c>"valid"</c> (no padding), as in <c>torch.nn.Conv1d</c>.
+    /// </summary>
+    /// <param name="inChannels">Input channels, at least 1, divisible by <paramref name="groups"/>.</param>
+    /// <param name="outChannels">Output channels, at least 1, divisible by <paramref name="groups"/>.</param>
+    /// <param name="kernelSize">Kernel size, at least 1.</param>
+    /// <param name="generator">Source of the initial values.</param>
+    /// <param name="padding"><c>"same"</c> or <c>"valid"</c>.</param>
+    /// <param name="dilation">Dilation (default 1).</param>
+    /// <param name="groups">Channel groups (default 1).</param>
+    /// <param name="bias">Whether to add a bias (default true).</param>
+    /// <exception cref="ArgumentException">The padding is neither "same" nor "valid".</exception>
+    public Conv1d(int inChannels, int outChannels, int kernelSize, Generator generator, string padding,
+        int dilation = 1, int groups = 1, bool bias = true)
+        : this(inChannels, outChannels, kernelSize, generator, PaddingFor(padding, kernelSize, dilation, groups), bias)
+    {
+    }
+
+    private Conv1d(int inChannels, int outChannels, int kernelSize, Generator generator, Conv1dParams geometry, bool bias)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(kernelSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(geometry.Groups, 1);
+        ArgumentNullException.ThrowIfNull(generator);
+        int groups = geometry.Groups;
+        if (inChannels < 1 || outChannels < 1 || inChannels % groups != 0 || outChannels % groups != 0)
+        {
+            throw new ArgumentException($"Channels {inChannels} -> {outChannels} must be positive and divisible by groups {groups}.");
+        }
+
+        _geometry = geometry;
+        float bound = 1f / MathF.Sqrt(inChannels / groups * kernelSize);
+        Weight = RegisterParameter("weight", Init.Uniform(generator, bound, outChannels, inChannels / groups, kernelSize));
+        if (bias)
+        {
+            Bias = RegisterParameter("bias", Init.Uniform(generator, bound, outChannels));
+        }
+    }
+
+    private static Conv1dParams PaddingFor(string padding, int kernelSize, int dilation, int groups)
+    {
+        ArgumentNullException.ThrowIfNull(padding);
+        ArgumentOutOfRangeException.ThrowIfLessThan(kernelSize, 1);
+        return padding switch
+        {
+            "same" => Conv1dParams.Same(kernelSize, dilation, groups),
+            "valid" => Conv1dParams.Symmetric(1, 0, dilation, groups),
+            _ => throw new ArgumentException($"Padding must be \"same\" or \"valid\", not \"{padding}\".", nameof(padding)),
+        };
+    }
+
+    /// <summary>Convolves a float32 tensor [N, in, L]; the result is [N, out, L'].</summary>
+    /// <param name="input">Float32 NCL input.</param>
+    public override Tensor Forward(Tensor input) => Ops.Conv1d(input, Weight, Bias, _geometry);
+}
+
 /// <summary>Batch normalization over the channels of an NCHW tensor, with running statistics.</summary>
 public sealed class BatchNorm2d : NnModule
 {

@@ -94,6 +94,7 @@ axes the forward broadcast, to the input's shape.
 | `LayerNorm` (last axis) | 0 = x, 1 = γ, 2 = mean, 3 = 1/σ (owned) | Floats [ε] | x̂ = (x−μ)/σ, ĝ = g·γ: `dx = (ĝ − mean(ĝ) − x̂·mean(ĝ·x̂))/σ`; `dγ = Σ g·x̂`, `dβ = Σ g` over rows (Ba et al. 2016) |
 | `BatchNorm2d` | 0 = x, 1 = γ, 2 = mean, 3 = 1/σ (owned) | Ints [training] | training: `dx = γ/σ·(g − mean(g) − x̂·mean(g·x̂))` over N,H,W per channel; eval: `dx = γ/σ·g`; `dγ = Σ g·x̂`, `dβ = Σ g` (Ioffe and Szegedy 2015) |
 | `Conv2d` (groups, stride, padding, dilation) | 0 = x, 1 = W | [sH, sW, padT, padL, padB, padR, dH, dW, groups] | per image and group, with cols the patch-major unfolding [P, K] of x: `dW += g[og,P]·cols[P,K]`; `dcols[K,P] = W_gᵀ[K,og]·g[og,P]` then col2im adds each tap into `dx`; `dbias = Σ g` |
+| `Conv1d` (groups, stride, padding, dilation) | 0 = x, 1 = W | [stride, padL, padR, dilation, groups] | `Conv2d`'s backward on the same buffers viewed as a one-row image (x [N,C,1,L], W [O,I,1,K]); `dW`, `dx`, `dbias` as above, so the accumulation order is `Conv2d`'s. Asymmetric padding is supported (`"same"` with an even dilated kernel) |
 | `MaxPool2d` | 0 = Int32 flat input index of each winner | window | scatter-add `g` at the index |
 | `AvgPool2d` | none | [kH, kW, sH, sW, padH, padW, countIncludePad] | each output's `g/count` added to every in-bounds element of its window |
 | `GlobalAvgPool2d` | (composition: Reshape, Mean, Reshape) | | |

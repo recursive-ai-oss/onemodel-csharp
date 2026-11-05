@@ -336,6 +336,73 @@ public static partial class Ops
     }
 
     /// <summary>
+    /// 1-D cross-correlation of an NCL input with OIK weights (<c>torch.nn.Conv1d</c> semantics), with an optional bias. It runs on the 2-D
+    /// kernels with a height of 1, so its accumulation order, fast and exact behaviour are those of <see cref="Conv2d"/>.
+    /// Record: slots x and weight (copies, owned, if they were not contiguous); Ints = [stride, padLeft, padRight, dilation, groups].
+    /// Backward is <see cref="Conv2d"/>'s on the height-1 view: dW = g·im2col(x)ᵀ, dx = col2im(Wᵀ·g), dbias = Σg.
+    /// </summary>
+    /// <param name="x">Input [N, Cin, L].</param>
+    /// <param name="weight">Weights [Cout, Cin/Groups, K].</param>
+    /// <param name="bias">Bias [Cout], or an empty tensor (<c>default</c>) for none.</param>
+    /// <param name="p">Stride, padding, dilation and groups; defaults 1, 0, 1, 1 (zero fields mean the default).</param>
+    /// <param name="pool">Pool for the result; default <see cref="BufferPool.Shared"/>.</param>
+    /// <exception cref="TensorShapeException">The shapes do not fit, the geometry is invalid, or the output would be empty.</exception>
+    public static Tensor Conv1d(in Tensor x, in Tensor weight, in Tensor bias = default, Conv1dParams p = default, BufferPool? pool = null)
+    {
+        RequireFloat32(x);
+        RequireFloat32(weight);
+        p = p with { Stride = p.Stride == 0 ? 1 : p.Stride, Dilation = p.Dilation == 0 ? 1 : p.Dilation, Groups = p.Groups == 0 ? 1 : p.Groups };
+        if (x.Rank != 3 || weight.Rank != 3)
+        {
+            throw new TensorShapeException($"Conv1d needs an (N,C,L) input and (O,I,K) weights, not {x.Shape} and {weight.Shape}.");
+        }
+
+        if (p.Groups < 1 || x.Shape[1] % p.Groups != 0 || weight.Shape[0] % p.Groups != 0 || weight.Shape[1] != x.Shape[1] / p.Groups)
+        {
+            throw new TensorShapeException($"Weights {weight.Shape} do not fit input {x.Shape} with {p.Groups} groups.");
+        }
+
+        if (!bias.IsEmpty)
+        {
+            RequireFloat32(bias);
+            if (bias.Rank != 1 || bias.Shape[0] != weight.Shape[0])
+            {
+                throw new TensorShapeException($"The bias must have shape [{weight.Shape[0]}], not {bias.Shape}.");
+            }
+        }
+
+        var s = new ConvShape(x.Shape[0], x.Shape[1], 1, x.Shape[2], weight.Shape[0], 1, weight.Shape[2],
+            1, p.Stride, 0, p.PadLeft, 0, p.PadRight, 1, p.Dilation, p.Groups);
+        if (p.Stride < 1 || p.Dilation < 1 || p.PadLeft < 0 || p.PadRight < 0 || s.OutW < 1)
+        {
+            throw new TensorShapeException($"Invalid convolution geometry for input {x.Shape} and kernel {weight.Shape}.");
+        }
+
+        Tensor xc = Contig(x, out bool xcopied), wc = Contig(weight, out bool wcopied);
+        Tensor bc = bias.IsEmpty ? default : Contig(bias, out _);
+        Tensor r = NewOut(Shape.Create(s.N, s.Cout, s.OutW), pool);
+        Conv.Run(TensorCompute.KMode, TensorCompute.Path, s, xc.InternalData<float>(), wc.InternalData<float>(), r.MutableData<float>(), TensorCompute.Threads,
+            bc.IsEmpty ? default : bc.InternalData<float>());
+        if (!bias.IsEmpty && !bias.IsContiguous)
+        {
+            bc.Dispose();
+        }
+
+        if (!Recording(x, weight, bias))
+        {
+            Free(xc, xcopied);
+            Free(wc, wcopied);
+            return r;
+        }
+
+        BackwardRecord br = BackwardRecord.Create(OpKind.Conv1d, 2, x, weight, bias);
+        SaveContig(br, 0, xc, xcopied);
+        SaveContig(br, 1, wc, wcopied);
+        br.SetInts(p.Stride, p.PadLeft, p.PadRight, p.Dilation, p.Groups);
+        return br.Attach(r);
+    }
+
+    /// <summary>
     /// Average pooling over an NCHW input. Each output is the in-order float sum of its window divided by the window size, which counts
     /// <param name="x">Float32 input of any shape and strides.</param>
     /// <param name="p">Window geometry.</param>

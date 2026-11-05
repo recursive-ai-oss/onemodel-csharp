@@ -1,0 +1,115 @@
+{
+ "torch": "2.15.0+cpu",
+ "seed": 20261105,
+ "tensors": {
+  "in.x": {
+   "shape": [
+    32,
+    4,
+    11
+   ],
+   "offset": 0
+  },
+  "in.y": {
+   "shape": [
+    32
+   ],
+   "offset": 1408
+  },
+  "in.order": {
+   "shape": [
+    20,
+    8
+   ],
+   "offset": 1440
+  },
+  "in.c1w": {
+   "shape": [
+    6,
+    4,
+    3
+   ],
+   "offset": 1600
+  },
+  "in.c1b": {
+   "shape": [
+    6
+   ],
+   "offset": 1672
+  },
+  "in.c2w": {
+   "shape": [
+    6,
+    3,
+    3
+   ],
+   "offset": 1678
+  },
+  "in.c2b": {
+   "shape": [
+    6
+   ],
+   "offset": 1732
+  },
+  "in.fcw": {
+   "shape": [
+    3,
+    6
+   ],
+   "offset": 1738
+  },
+  "in.fcb": {
+   "shape": [
+    3
+   ],
+   "offset": 1756
+  },
+  "out.loss": {
+   "shape": [
+    20
+   ],
+   "offset": 1759
+  },
+  "out.c1w": {
+   "shape": [
+    6,
+    4,
+    3
+   ],
+   "offset": 1779
+  },
+  "out.c1b": {
+   "shape": [
+    6
+   ],
+   "offset": 1851
+  },
+  "out.c2w": {
+   "shape": [
+    6,
+    3,
+    3
+   ],
+   "offset": 1857
+  },
+  "out.c2b": {
+   "shape": [
+    6
+   ],
+   "offset": 1911
+  },
+  "out.fcw": {
+   "shape": [
+    3,
+    6
+   ],
+   "offset": 1917
+  },
+  "out.fcb": {
+   "shape": [
+    3
+   ],
+   "offset": 1935
+  }
+ }
+}

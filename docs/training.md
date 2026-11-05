@@ -21,6 +21,7 @@ copying anything.
 |---|---|---|
 | `Linear(in, out, bias)` | `weight` [out,in], `bias` [out] | `Ops.Linear` |
 | `Conv2d(in, out, k, stride, padding, dilation, groups, bias)` | `weight` [out,in/groups,k,k], `bias` [out] | `Ops.Conv2d`, square kernel, same stride/padding/dilation on both axes |
+| `Conv1d(in, out, k, stride, padding, dilation, groups, bias)` or `Conv1d(in, out, k, "same" or "valid", dilation, groups, bias)` | `weight` [out,in/groups,k], `bias` [out] | `Ops.Conv1d` on [N,in,L]; `"same"` gives stride 1 and an output of the input's length, with the extra zero (when dilation·(k−1) is odd) on the right, `"valid"` is no padding, as `torch.nn.Conv1d` |
 | `BatchNorm2d(c, momentum 0.1, eps 1e-5)` | `weight` [c] = 1, `bias` [c] = 0; buffers `running_mean` = 0, `running_var` = 1 | `Ops.BatchNorm2d`; batch statistics and running update in training mode, running statistics in evaluation mode |
 | `LayerNorm(n, eps 1e-5)` | `weight` = 1, `bias` = 0 | `Ops.LayerNorm` over the last axis |
 | `Embedding(count, width, paddingIndex)` | `weight` [count,width] | `Ops.Embedding` |
@@ -36,8 +37,8 @@ copying anything.
 
 Weights come from `Generator`, SplitMix64: `state += 0x9E3779B97F4A7C15`, then `z = (z ^ z>>30) * 0xBF58476D1CE4E5B9`,
 `z = (z ^ z>>27) * 0x94D049BB133111EB`, output `z ^ z>>31`. `NextSingle` is `(output >> 40) / 2^24`; `Uniform(a, b) = a + (b−a)·NextSingle()`.
-`Linear` and `Conv2d` draw weight then bias from `Uniform(−1/√fanIn, +1/√fanIn)` in row-major order (fanIn = in, resp.
-in/groups·k·k; the square root is IEEE). `Embedding` draws from `Uniform(−√3, √3)` (unit variance). Children draw in construction order
+`Linear`, `Conv1d` and `Conv2d` draw weight then bias from `Uniform(−1/√fanIn, +1/√fanIn)` in row-major order (fanIn = in, resp.
+in/groups·k, in/groups·k·k; the square root is IEEE). `Embedding` draws from `Uniform(−√3, √3)` (unit variance). Children draw in construction order
 (`MultiHeadAttention`: q, k, v, o; `TransformerEncoderLayer`: attention, ff1, ff2). The streams are not PyTorch's, so a run that must
 match PyTorch loads its initial weights (section 8).
 

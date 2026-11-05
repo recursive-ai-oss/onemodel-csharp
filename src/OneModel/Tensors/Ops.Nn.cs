@@ -3,6 +3,28 @@ using RecursiveAI.OneModel.Kernels;
 using RecursiveAI.OneModel.Kernels.Exact;
 namespace RecursiveAI.OneModel.Tensors;
 
+/// <summary>Geometry of a 1-D convolution: stride, zero padding on each side, dilation and channel groups. Zero fields mean the default (1).</summary>
+/// <param name="Stride">Step between output positions, at least 1.</param>
+/// <param name="PadLeft">Zeros added before the first position, at least 0.</param>
+/// <param name="PadRight">Zeros added after the last position, at least 0.</param>
+/// <param name="Dilation">Spacing between kernel taps, at least 1.</param>
+/// <param name="Groups">Channel groups, at least 1.</param>
+public readonly record struct Conv1dParams(int Stride = 1, int PadLeft = 0, int PadRight = 0, int Dilation = 1, int Groups = 1)
+{
+    /// <summary>Symmetric padding on both sides.</summary>
+    public static Conv1dParams Symmetric(int stride, int padding, int dilation = 1, int groups = 1) => new(stride, padding, padding, dilation, groups);
+
+    /// <summary>
+    /// The padding of <c>padding="same"</c> (stride 1): the output has the input's length. The total <c>dilation·(kernel−1)</c> is split with
+    /// the extra zero, if any, on the right, as <c>torch.nn.Conv1d</c> documents.
+    /// </summary>
+    public static Conv1dParams Same(int kernelSize, int dilation = 1, int groups = 1)
+    {
+        int total = Math.Max(dilation, 1) * (kernelSize - 1);
+        return new Conv1dParams(1, total / 2, total - (total / 2), dilation, groups);
+    }
+}
+
 /// <summary>Geometry of a 2-D convolution: stride, symmetric zero padding, dilation (each per axis) and channel groups.</summary>
 /// <param name="StrideH">Vertical step of the window, at least 1.</param>
 /// <param name="StrideW">Horizontal step, at least 1.</param>
