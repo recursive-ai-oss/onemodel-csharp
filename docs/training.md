@@ -350,3 +350,22 @@ interpreter. The loss is `Σ output·W` for seeded `W`. Requirements: outputs eq
 arithmetic (the key bias under softmax) must stay far below the largest gradient. The two multilingual encoders
 (`tools/export_finetune_models.py`, `tools/finetune_reference.py`, test `OnnxModuleRealModelTests`, fetch-only) are checked the same way
 at 1e-4 on a padded batch of two, and by a five-step AdamW run against PyTorch's loss curve.
+
+**Measured on the two multilingual encoders** (PyTorch 2.15.0, eager attention, float32, 8 threads, x64, padded batch of two, loss
+`mean((mean_over_positions(hidden)·P − target)²)` with seeded `P`, `target`; AdamW lr 1e-5, betas 0.9/0.999, eps 1e-8, wd 0.01). The
+PyTorch reference clears the embeddings' `padding_idx`, because the ONNX export reads the table with a plain Gather, whose gradient
+reaches every row it read. The gradient scale is floored at 1e-4 of the largest reference gradient, which only matters for the key
+biases (zero in exact arithmetic).
+
+| | xlm-roberta-base (197 parameters) | mmBERT-base (134 parameters) |
+|---|---|---|
+| Forward vs `Session` / vs PyTorch (scaled) | 6.2e-7 / 5.7e-7 | 2.8e-7 / 5.2e-7 |
+| Worst gradient (embeddings, layer 0, last layer, final norm), scaled | 2.6e-5 | 6.0e-6 |
+| Loss per step vs PyTorch, worst relative over 5 steps | 6.4e-7 | 1.3e-6 |
+| Written-back model in `Session` vs module after 5 steps (scaled) | 6.3e-7 | 3.5e-6 |
+| Step time (mean after the first), indicative | 1.4 s | 1.5–4.5 s (loaded host) |
+| Peak RSS | 10.0 GiB | 12.7 GiB |
+
+Fine-tuning at a high learning rate is chaotic: at lr 5e-5 the xlm-roberta loss differs from PyTorch's by 2.5e-4 at step 4, and
+mmBERT at 5e-4 by 2.4e-3 at step 3, while the gradients of step 0 still agree to 1e-5. That is the amplification of float32 rounding
+by the optimizer, as in section 10, not a difference in the gradient; the 1e-4 loss check therefore runs at lr 1e-5.

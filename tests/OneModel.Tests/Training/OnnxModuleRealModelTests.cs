@@ -55,7 +55,7 @@ public class OnnxModuleRealModelTests
         public Tensor MakeIds(string name) => Tensor.FromSpan<long>(Read(name).Select(v => (long)v).ToArray(), _items[name].Shape);
     }
 
-    private static double Scaled(ReadOnlySpan<float> a, ReadOnlySpan<float> reference)
+    private static double Scaled(ReadOnlySpan<float> a, ReadOnlySpan<float> reference, double floor = 1e-12)
     {
         double worst = 0, scale = 0;
         for (int i = 0; i < reference.Length; i++)
@@ -64,7 +64,7 @@ public class OnnxModuleRealModelTests
             scale = Math.Max(scale, Math.Abs(reference[i]));
         }
 
-        return worst / Math.Max(scale, 1e-12);
+        return worst / Math.Max(scale, floor);
     }
 
     [Theory]
@@ -121,14 +121,23 @@ public class OnnxModuleRealModelTests
             loss.Backward();
             if (step == 0)
             {
+                var bad = new List<string>();
+                // A key projection's bias gets a gradient of exactly zero in theory (softmax ignores a per-query constant), so both sides
+                // hold rounding noise there; measure every gradient against at least 1e-4 of the largest reference gradient.
+                double floor = 1e-4 * rf.Names.Where(n => n.StartsWith("grad.", StringComparison.Ordinal)).Max(n => rf.Read(n).Max(Math.Abs));
                 foreach (string g in rf.Names.Where(n => n.StartsWith("grad.", StringComparison.Ordinal)))
                 {
                     Tensor grad = parameters[g["grad.".Length..]].Grad;
                     Assert.False(grad.IsEmpty, $"no gradient for {g}");
-                    double e = Scaled(grad.Data<float>(), rf.Read(g));
+                    double e = Scaled(grad.Data<float>(), rf.Read(g), floor);
                     Say($"gradient {g[5..]}: scaled error vs PyTorch {e:E2}");
-                    Assert.True(e <= 1e-4, $"{g}: {e:E2}");
+                    if (!(e <= 1e-4))
+                    {
+                        bad.Add($"{g}: {e:E2}");
+                    }
                 }
+
+                Assert.True(bad.Count == 0, "gradients over 1e-4: " + string.Join("; ", bad));
             }
 
             opt.Step();

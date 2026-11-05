@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PyTorch reference for fine-tuning an exported encoder: forward output, gradients of a fixed loss, and a five-step AdamW loss curve.
 
-    finetune_reference.py <name> [--steps 5] [--lr 5e-4]        (names: xlm_roberta_base mmbert_base, see export_finetune_models.py)
+    finetune_reference.py <name> [--steps 5] [--lr 1e-5]        (names: xlm_roberta_base mmbert_base, see export_finetune_models.py)
 
 Loads the pinned Hugging Face weights in float32 (eager attention, evaluation mode, so dropout is off), tokenizes a few multilingual
 sentences into a padded batch of two with an attention mask, and takes
@@ -42,7 +42,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("name")
     ap.add_argument("--steps", type=int, default=5)
-    ap.add_argument("--lr", type=float, default=5e-4)
+    ap.add_argument("--lr", type=float, default=1e-5)
     a = ap.parse_args()
     torch.set_num_threads(8)
     entry = load_manifest()["models"][a.name]
@@ -51,6 +51,11 @@ def main() -> None:
 
     tok = AutoTokenizer.from_pretrained(d)
     model = AutoModel.from_pretrained(d, attn_implementation="eager", dtype=torch.float32).eval()
+    # The ONNX export has a plain Gather, which has no padding row: its gradient reaches every row it read. PyTorch's
+    # embedding with padding_idx instead zeroes the padding row's gradient, so clear padding_idx to compare like with like.
+    for mod in model.modules():
+        if isinstance(mod, torch.nn.Embedding):
+            mod.padding_idx = None
     enc = tok(SENTENCES, padding=True, return_tensors="pt")
     ids, mask = enc["input_ids"].to(torch.int64), enc["attention_mask"].to(torch.int64)
     log("batch", tuple(ids.shape), "real tokens per row", mask.sum(1).tolist())

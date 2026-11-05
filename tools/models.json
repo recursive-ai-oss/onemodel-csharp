@@ -263,7 +263,13 @@
         "weightsSha256": "6fd4797bc397c3b8b55d6bb5740366b57e6a3ce91c04c77f22aafc0c128e6feb",
         "licence": "mit (model card metadata)"
       },
-      "files": {}
+      "files": {
+        "fp32": {
+          "path": "xlm_roberta_base/xlm_roberta_base.onnx",
+          "sha256": "f605899c16fe44dc0e3780b514baf5b8dffe8a9d87964d30c50ecb3b7d34452d",
+          "bytes": 1110001275
+        }
+      }
     },
     "mmbert_base": {
       "task": "encoder (multilingual ModernBERT, fine-tuning check)",
@@ -275,7 +281,13 @@
         "weightsSha256": "8ea64ec1ea4eb8fca0fc14b69a2ae571de6bfbc25fd214bb932dd4aba6a3a04e",
         "licence": "mit (model card metadata)"
       },
-      "files": {}
+      "files": {
+        "fp32": {
+          "path": "mmbert_base/mmbert_base.onnx",
+          "sha256": "900ff132686f2f8fadee4dfc235532562cce76bfd76e5f5d1bb888bd99da55fa",
+          "bytes": 1228296222
+        }
+      }
     }
   },
   "backendTest": {
