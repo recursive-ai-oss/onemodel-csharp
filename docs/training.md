@@ -147,7 +147,22 @@ sparseOpt.Step(); denseOpt.Step();
 Memory for the 250 002 x 768 table (192 M floats = 768 MB) with 4 096 token lookups per step (at most 4 096 touched rows): a dense gradient is
 768 MB and AdamW's two moment tensors 1 536 MB (2 304 MB together, updated in full each step); the sparse gradient is at most
 4 096 x 768 x 4 B = 12.6 MB plus 16 KB of row numbers, and `SparseAdam` keeps the same two moment tensors (1 536 MB) but reads and writes only the touched rows.
-Freezing the table instead costs 0 B of gradient and 0 B of optimizer state. Measured step times are in section 3.2.
+Freezing the table instead costs 0 B of gradient and 0 B of optimizer state. Measured numbers are in section 3.2.
+
+### 3.2 Measured: a 250 002 x 768 table
+
+`bench/Micro` command `sparseembed dense|sparse|frozen 8 6`: the table, one encoder layer of width 768, 16 x 128 = 2 048 token ids per step
+(about 2 000 distinct rows), AdamW (or SparseAdam on the table) at 8 threads, one process per mode; Ryzen 9 7950X3D, indicative (the host
+was shared, load 14 before the run), median of 6 steps.
+
+| Mode | Table gradient | Optimizer state | Step (median) | Peak working set |
+|---|---|---|---|---|
+| dense gradient + AdamW | 732 MiB | 1 519 MiB | 1 503 ms | 4 153 MiB |
+| sparse gradient + SparseAdam (rest AdamW) | 6.0 MiB | 1 519 MiB | 501 ms | 2 687 MiB |
+| frozen table (rest AdamW) | 0 | 54 MiB | 488 ms | 1 218 MiB |
+
+The table itself is 732 MiB in every mode. SparseAdam keeps full-size moments (the 1 519 MiB), so its saving is the gradient, the
+per-step work and the transient memory, not the state; freezing the table is the only mode that removes the state.
 
 ## 4. Gradient clipping (`GradClip`)
 
