@@ -224,6 +224,41 @@ public class OnnxModuleTests
     }
 
     [Fact]
+    public void FreezingAnImportedGraphsEmbeddingGivesNoGradientAndNoOptimizerState()
+    {
+        OracleFile f = OracleFile.Load("mini_bert", "finetune");
+        using OnnxModule m = OnnxModule.Load(Path("mini_bert"));
+        int frozen = m.Freeze((n, _) => n.StartsWith("word", StringComparison.Ordinal));
+        Assert.Equal(1, frozen);
+        Assert.True(m.IsFrozen("word.weight"));
+        float[] before = m.NamedParameters().First(p => p.Name == "word.weight").Tensor.Data<float>().ToArray();
+        using var opt = new AdamW(m.Parameters(), 1e-2f);
+        using (var scope = new ActivationScope())
+        {
+            Loss(f, m.Forward(Inputs(f, m))).Backward();
+            opt.Step();
+        }
+
+        foreach ((string name, Tensor p) in m.NamedParameters())
+        {
+            if (name == "word.weight")
+            {
+                Assert.True(p.Grad.IsEmpty);
+                Assert.True(p.Data<float>().SequenceEqual(before));
+            }
+            else
+            {
+                Assert.False(p.Grad.IsEmpty, name);
+            }
+        }
+
+        Assert.Equal(m.NamedParameters().Count - 1, m.TrainableParameters().Length);
+        int index = m.NamedParameters().FindIndex(p => p.Name == "word.weight");
+        Assert.All(opt.StateTensors.Where(s => s.Name.EndsWith("." + index, StringComparison.Ordinal)), s => Assert.Equal(0, s.Tensor.Length));
+        Assert.Equal(opt.StateTensors.Count, opt.StateTensors.Count(s => s.Tensor.Length > 0) + 2);
+    }
+
+    [Fact]
     public void ExactModeNamesTheOperatorsWithoutAnExactKernel()
     {
         // Cos and Sin (rotary tables) have no exact kernel in the graph runtime; the module says so instead of computing them inexactly.
