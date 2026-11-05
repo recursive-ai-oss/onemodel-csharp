@@ -129,4 +129,43 @@ internal static class TrainingGuide
         float[] viaFile = reloaded.Run(x.ToArray<float>());
         Check.That(viaFile.AsSpan().SequenceEqual(scores.ToArray<float>()), "traced model from file equals session");
     }
+
+    public static void FineTuneImported(string modelPath, string workDir)
+    {
+        #region finetune-load
+        // An ONNX encoder with Int64 inputs input_ids and attention_mask, outputs hidden and pooled. Its float32 weights become
+        // parameters named as in the file; operators outside the supported set fail here, all of them named.
+        using OnnxModule model = OnnxModule.Load(modelPath);
+        string first = model.NamedParameters()[0].Name;
+        #endregion
+
+        #region finetune-loop
+        using var optimizer = new AdamW(model.Parameters(), learningRate: 1e-3f);
+        using Tensor ids = Tensor.FromSpan<long>([3, 9, 4, 17, 2, 0, 0, 5, 11, 6, 8, 23, 1, 7], 2, 7);
+        using Tensor mask = Tensor.FromSpan<long>([1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1], 2, 7);
+        var inputs = new Dictionary<string, Tensor> { ["input_ids"] = ids, ["attention_mask"] = mask };
+        using Tensor target = Tensor.Zeros(DType.F32, 2, 16);
+
+        float firstLoss = 0, lastLoss = 0;
+        for (int step = 0; step < 5; step++)
+        {
+            using var scope = new ActivationScope();
+            optimizer.ZeroGrad();
+            Tensor pooled = model.Forward(inputs)[1];            // outputs are in model.OutputNames order
+            Tensor loss = Losses.Mse(pooled, target);
+            loss.Backward();
+            optimizer.Step();
+            lastLoss = loss.Item<float>();
+            firstLoss = step == 0 ? lastLoss : firstLoss;
+        }
+        #endregion
+
+        #region finetune-serve
+        using Session session = model.CreateSession();         // the same graph with the trained weights
+        model.Save(Path.Combine(workDir, "tuned.onemodel"));    // or keep it as a file: Model.Load reads it
+        #endregion
+
+        Check.That(lastLoss < firstLoss, $"fine-tuning lowers the loss ({firstLoss} to {lastLoss})");
+        Check.That(first.Length > 0 && session.Outputs.Length == 2, "the trained model runs in a session");
+    }
 }

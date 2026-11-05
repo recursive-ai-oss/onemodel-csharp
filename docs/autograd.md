@@ -108,6 +108,13 @@ axes the forward broadcast, to the input's shape.
 | `NllLoss` | 0 = targets | [mean, ignoreIndex] | `−g/count` (or `−g`) at `[n, target_n]` of non-ignored rows |
 | `CrossEntropy` | (composition: LogSoftmax, NllLoss) | | |
 | `Attention` | 0 = q, 1 = k, 2 = v, 3 = additive mask (or empty) | Floats [scale] | per batch and head, P = softmax(scale·QKᵀ + mask) is recomputed; `dV = Pᵀ·g`; `dP = g·Vᵀ`; `dS = P∘(dP − rowsum(dP∘P))`; `dQ = scale·dS·K`; `dK = scale·dSᵀ·Q`. The mask gets no gradient |
+| `MatMulBatched` (rank ≥ 2, NumPy batching and broadcasting; a rank-2 right operand is one product over the flattened rows) | 0 = a if b needs grad; 1 = b if a does | | `g·bᵀ`, `aᵀ·g` with the last two axes swapped, each a batched product, summed to the operand's shape over broadcast batch axes |
+| `Erf` | 0 = input | | `g·(2/√π)·e^(−x²)` (our polynomials for erf and exp in both modes) |
+| `Exp` | 0 = output y | | `g·y` |
+| `Sqrt` | 0 = output y | | `g/(y+y)` |
+| `Pow` (constant exponent p) | 0 = input | Floats [p] | `g·p·x^(p−1)`; exact for p ∈ {1, 2, 0.5, −1} (IEEE operations only), other p uses `MathF.Pow` and throws in exact mode |
+| `Where` (Bool condition, broadcast) | 0 = condition at the broadcast shape | | `g` where selected and 0 elsewhere for each branch, summed to the input's shape; the condition gets none |
+| `Gather` (any axis, negative indices) | 0 = indices | [axis] | each output slice added to its source slice in index order |
 | Views: `Slice`, `Select`, `Permute`/`Transpose`, `Reshape`/`Squeeze`/`Unsqueeze`/copying `Contiguous`, `Expand`, `Flip`, `Cast` | none | as `tensors.md` | scatter into zeros, inverse permutation, reshape back, sum-to, flip, cast back |
 
 `Gelu`'s saved slot differs from the convention first written in `tensors.md` (input plus the tanh term): the slope is recomputed

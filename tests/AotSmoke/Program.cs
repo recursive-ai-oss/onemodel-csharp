@@ -471,6 +471,50 @@ foreach (ArithmeticMode gm in new[] { ArithmeticMode.Fast, ArithmeticMode.Exact 
     }
 }
 
+{
+    // Training an imported graph: a BERT-style encoder loaded as a module, five AdamW steps, the trained weights served by a session.
+    using OnnxModule fm = OnnxModule.FromModel(OnnxImporter.Load(Open("mini_bert.onnx")));
+    using var fo = new AdamW(fm.Parameters(), 1e-2f);
+    using Tensor fids = Tensor.FromSpan<long>([3, 9, 4, 17, 2, 0, 0, 5, 11, 6, 8, 23, 1, 7], 2, 7);
+    using Tensor fmask = Tensor.FromSpan<long>([1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1], 2, 7);
+    var finputs = new System.Collections.Generic.Dictionary<string, Tensor> { ["input_ids"] = fids, ["attention_mask"] = fmask };
+    using Tensor ftarget = Tensor.Zeros(DType.F32, 2, 16);
+    float first = 0, last = 0;
+    for (int step = 0; step < 5; step++)
+    {
+        using var scope = new ActivationScope();
+        fo.ZeroGrad();
+        Tensor loss = Losses.Mse(fm.Forward(finputs)[1], ftarget);
+        last = loss.Item<float>();
+        first = step == 0 ? last : first;
+        loss.Backward();
+        fo.Step();
+    }
+
+    double ferr;
+    using (var scope = new ActivationScope())
+    {
+        float[] fromModule = fm.Forward(finputs)[0].Detach().Contiguous().ToArray<float>();
+        using Session fs = fm.CreateSession();
+        using SessionOutputs fr = fs.Run(finputs);
+        float[] fromSession = fr["hidden"].ToArray<float>();
+        double fmax = 0, fdiff = 0;
+        for (int i = 0; i < fromModule.Length; i++)
+        {
+            fmax = Math.Max(fmax, Math.Abs(fromModule[i]));
+            fdiff = Math.Max(fdiff, Math.Abs(fromModule[i] - fromSession[i]));
+        }
+
+        ferr = fdiff / fmax;
+    }
+
+    Console.WriteLine($"imported graph training: loss {first:G5} -> {last:G5}, trained weights in a session, scaled error {ferr:E2}");
+    if (!(last < first) || !(ferr < 1e-4))
+    {
+        return 13;
+    }
+}
+
 TensorCompute.Mode = ArithmeticMode.Fast;
 return 0;
 

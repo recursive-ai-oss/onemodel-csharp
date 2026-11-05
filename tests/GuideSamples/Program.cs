@@ -23,6 +23,7 @@ try
     FormatGuide.Convert(model, work);
     TrainingGuide.TrainAndResume(work);
     TrainingGuide.Trace(work);
+    TrainingGuide.FineTuneImported(Path.GetFullPath(Path.Combine(graphs, "..", "finetune", "mini_bert.onnx")), work);
     MigrationGuide.FromOnnxRuntime(model);
     MigrationGuide.FromTorchSharp();
     Console.WriteLine("guide samples ok");

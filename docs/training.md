@@ -268,3 +268,85 @@ generated-photo source of the original recipe is left out, which changes the mix
 
 So a CPU step here takes about twice PyTorch's, mostly in the convolutions' forward and backward; peak memory is 1.15× PyTorch's. The
 2000-step run took 7.7 h wall-clock with queue waits; the work itself is far below what a GPU does, and no speed tuning was attempted.
+
+## 11. Training an imported graph (`OnnxModule`)
+
+A model that exists only as an ONNX (or OneModel-format) file can be fine-tuned without rewriting it as modules. `OnnxModule` loads the
+file, makes its float32 weights parameters and runs the graph's nodes on the eager tensor operators, so `Backward` reaches every
+weight. The trained weights go back into the graph, which then runs in the ordinary `Session`.
+
+```csharp
+public sealed class OnnxModule : NnModule
+{
+    public static OnnxModule Load(string path, OnnxModuleOptions? options = null, CancellationToken cancellationToken = default);
+    public static OnnxModule FromModel(IrModel model, OnnxModuleOptions? options = null);   // takes ownership of the model
+    public IReadOnlyList<string> InputNames { get; }
+    public IReadOnlyList<string> OutputNames { get; }
+    public Tensor[] Forward(IReadOnlyDictionary<string, Tensor> inputs);                    // all outputs, in OutputNames order
+    public override Tensor Forward(Tensor input);                                           // one-input graphs: the first output
+    public IrModel ToModel();                                                               // weights written into the module's graph
+    public Session CreateSession(ModelOptions? options = null, CancellationToken cancellationToken = default);
+    public void Save(string path, CancellationToken cancellationToken = default);           // OneModel format
+    public void Save(Stream output, CancellationToken cancellationToken = default);
+}
+
+public sealed class OnnxModuleOptions
+{
+    public Func<string, bool>? IsTrainable { get; init; }   // by initializer name; false freezes it (default: null, all train)
+    public ModelLoadOptions? Load { get; init; }
+}
+```
+
+**Parameters.** A float32 initializer with more than one element is a parameter, registered under exactly its name in the file (dots
+and `::` included) and listed by `NamedParameters`, `StateDict`, checkpoints and optimizers in the order the file lists its
+initializers. The weights an exporter transposed for `MatMul` (`onnx::MatMul_1234`) are parameters like the rest. Other float32
+initializers are frozen *buffers*, in the same order: scalars, anything `IsTrainable` rejects, and every initializer that reaches a
+`Sin` or `Cos` through nodes other than `Shape`/`Size` (rotary-embedding frequency tables, which are constants of the architecture).
+Initializers of other element types (integer shape constants, half precision, int8) are graph constants and are not part of the
+module's state. A parameter that the outputs do not depend on gets no gradient and is skipped by the optimizers. Freezing a
+parameter after loading uses the per-parameter freezing of `NnModule` and the optimizers; freezing at load time is `IsTrainable`.
+
+**Forward.** Nodes run in graph order. A node whose inputs depend on a parameter runs on the eager operators below and records a
+backward pass. Every other node (shape arithmetic, mask construction, position tables, integer work, `Constant` nodes) runs on the
+graph runtime's own kernel, exactly as `Session` would run it, and carries no gradient; nodes whose inputs are all constants and whose
+result does not depend on the arithmetic mode are evaluated once at load. A node that needs gradients but has no entry below makes
+`Load` throw `SessionException` (`SessionErrorKind.UnsupportedOperator`) with every such operator in `Operators`; so does an operator
+with no kernel at all. Intermediate tensors belong to the open `ActivationScope`: run forward and backward inside one, as for any module.
+Inputs keep the element types the graph declares (token ids are Int64). `Dropout` nodes run as the identity in both modes (an imported
+graph is an inference graph; exporters write inference-mode Dropout, and the library has no mask to replay). The module is not
+thread-safe.
+
+**Operators with gradients.** Add, Sub, Mul, Div, Neg, Relu, Sigmoid, Tanh, Erf, Exp, Sqrt, Reciprocal, Pow (a single-element exponent),
+Gelu (opset 20), Identity, Dropout, MatMul (any ranks, NumPy batching and broadcasting, rank-1 operands), Gemm, Transpose, Reshape
+(`0` and `-1`, `allowzero`), Flatten, Squeeze, Unsqueeze, Slice (positive steps), Split, Concat, Gather (any axis, negative indices),
+Softmax and LogSoftmax (opset-13 and the older flattening semantics), LayerNormalization (axis, optional bias; the optional Mean and
+InvStdDev outputs are not supported if used), ReduceMean, ReduceSum, Cast (to float32), Expand, Where. Operators in the graph
+runtime's table that never carry gradients whatever their inputs (Shape, Size, comparisons, And/Or/Not/Xor, ArgMax/ArgMin, NonZero,
+ConstantOfShape, Range, Floor/Ceil/Round/Sign, EyeLike) are always run on the runtime's kernels.
+
+**Not trainable.** Control-flow operators (If, Loop, Scan, SequenceMap) and operators in other domains; sparse initializers; any
+operator outside the list above on a path from a parameter (for example Clip, Tile, Conv, LSTM, the trigonometric functions);
+Slice with a non-positive step and Pow with a tensor exponent on such a path; operators whose output size depends on the data; graphs
+with more than eight dimensions. Quantized and half-precision weights are constants. Convolution, recurrent and pooling graphs are
+not covered by this path (write them as modules).
+
+**Exactness.** `Erf`, `Exp`, `Where`, `Gather`, `Sqrt`, the batched matrix product and `Pow` with exponent 1, 2, 0.5 or -1 run in both
+modes with the existing exact rules (own polynomials, IEEE operations, the exact GEMM order); `Pow` with another exponent throws in
+exact mode. In exact mode a node on the runtime's kernels that has no exact kernel makes `Forward` throw `ExactModeUnavailable`
+naming it. Fast-mode gradients are identical at 1 and 8 threads (every sum is in a fixed order).
+
+**Writing the weights back.** `ToModel`, `CreateSession` and `Save` copy the current parameter values into the module's graph
+(replacing the initializers by the parameters' bytes) and then use it. `CreateSession` and `Save` leave the module usable; a session
+holds its own copy of the weights and does not see later training steps. `Save` writes the OneModel format, which `Model.Load`,
+`Session.Load` and `OnnxModule.Load` read; it is the same graph, so the served model runs through the usual optimizations.
+
+**Method of the checks** (`tools/finetune_oracle.py`, `tests/OneModel.Tests/Training/OnnxModuleTests.cs`). Three small graphs are
+committed in `testdata/finetune` with PyTorch 2.15.0's gradients of the same function: a ModernBERT-style encoder exported from PyTorch
+at opset 17 (embedding, bias-free layer norm, fused QKV projection, rotary embeddings computed in the graph from a frequency buffer,
+local-window plus padding mask, GeGLU, final norm), a BERT-style encoder (biased projections, post-norm, additive mask, erf GELU, tanh
+pooler through Gemm) and a hand-written graph that uses every operator in the list (opset 20), evaluated by a small PyTorch
+interpreter. The loss is `Σ output·W` for seeded `W`. Requirements: outputs equal the `Session`'s, and PyTorch's, with scaled error
+(`max|a−b|/max|b|`) at most 1e-5, and every parameter gradient equal to PyTorch's at most 1e-5; gradients that are zero in exact
+arithmetic (the key bias under softmax) must stay far below the largest gradient. The two multilingual encoders
+(`tools/export_finetune_models.py`, `tools/finetune_reference.py`, test `OnnxModuleRealModelTests`, fetch-only) are checked the same way
+at 1e-4 on a padded batch of two, and by a five-step AdamW run against PyTorch's loss curve.

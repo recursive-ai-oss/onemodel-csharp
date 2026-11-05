@@ -78,4 +78,48 @@ public class GraphOpsGradTests
             Assert.True(y.Data<float>().SequenceEqual([1f, 4f]));
         }
     }
+
+    // Exact mode: the new operators and an imported graph's gradients hash the same under every instruction-set setting and thread
+    // count. The test checks 1 against 8 threads; the instruction-set rows come from running it under DOTNET_EnableAVX512=0 and
+    // DOTNET_EnableHWIntrinsic=0 with ONEMODEL_HASH_OUT set and comparing the files.
+    [Fact]
+    public void ExactHashesAreEqualAtOneAndEightThreads()
+    {
+        string[] lines = new string[2];
+        int slot = 0;
+        foreach (int threads in new[] { 1, 8 })
+        {
+            using var compute = TensorCompute.Use(ArithmeticMode.Exact, threads);
+            using var scope = new ActivationScope();
+            var rng = new Random(11);
+            using var h = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+            void Add(Tensor t)
+            {
+                foreach (float v in t.Detach().Contiguous().Data<float>())
+                {
+                    h.AppendData(BitConverter.GetBytes(v));
+                }
+            }
+
+            Tensor a = Fill(S(2, 3, 5, 4), rng, Uniform(-1, 1)).WithRequiresGrad(), b = Fill(S(3, 4, 6), rng, Uniform(-1, 1)).WithRequiresGrad();
+            Tensor y = Ops.MatMulBatched(a, b);
+            Tensor z = Ops.Add(Ops.Erf(y), Ops.Exp(y * 0.3f));
+            Tensor w = Ops.Add(z, Ops.Sqrt((y * y) + 1f));
+            using Tensor cond = Tensor.FromSpan<bool>(Enumerable.Range(0, 6).Select(i => i % 3 != 0).ToArray(), S(6));
+            Tensor sel = Ops.Where(cond, w, Ops.Pow(w, 2f));
+            using Tensor ids = Tensor.FromSpan<long>([1, 0, 2, 1], S(2, 2));
+            Tensor picked = Ops.Gather(sel, ids, 1);
+            Ops.Sum(picked).Backward();
+            Add(picked);
+            Add(a.Grad);
+            Add(b.Grad);
+            lines[slot++] = Convert.ToHexString(h.GetHashAndReset());
+        }
+
+        Assert.Equal(lines[0], lines[1]);
+        if (Environment.GetEnvironmentVariable("ONEMODEL_HASH_OUT") is { Length: > 0 } outPath)
+        {
+            File.AppendAllText(outPath, "graph-ops " + lines[0] + "\n");
+        }
+    }
 }

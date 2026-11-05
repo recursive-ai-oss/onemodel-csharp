@@ -7,6 +7,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Added
 
 - `Ops.Conv1d(x, weight, bias, Conv1dParams)` and the `Conv1d` module: 1-D convolution on [N, C, L] input with stride, left/right padding, dilation and groups (depthwise included), backward for input, weight and bias, `padding="same"`/`"valid"` on the module, and PyTorch's default initialisation. It runs on the 2-D convolution kernels, so fast results do not depend on the thread count and exact results are bit-identical on every ISA path. A traced `Conv1d` becomes an ONNX `Conv` with 1-D attributes.
+- Training package: `OnnxModule` loads an ONNX file (or a OneModel file) as a trainable `NnModule`. Its float32 initializers are parameters named as in the file, in file order, so state dicts, checkpoints, optimizers and freezing apply; its `Forward` runs the graph on the eager tensor operators with gradients (attention, rotary embeddings, local-window masks, GeGLU, bias-free layer norm and the other operators of BERT-class exports), while shape and mask arithmetic runs on the graph runtime's own kernels. `CreateSession`, `Save` and `ToModel` write the trained weights back so the model is served by the ordinary `Session`. A graph that needs an operator without a gradient fails at load, naming all of them (`docs/training.md` section 11, `docs/guide/training.md`).
+- Tensor layer: `Ops.MatMulBatched` (batched product with NumPy broadcasting), `Ops.Erf`, `Ops.Exp`, `Ops.Sqrt`, `Ops.Pow` (constant exponent), `Ops.Where` and `Ops.Gather`, each with a backward record (`docs/autograd.md`).
+- `tools/export_finetune_models.py` and `tools/finetune_reference.py` export xlm-roberta-base and mmBERT-base (pinned revisions in `tools/models.json`) and produce PyTorch reference gradients and loss curves; `tools/finetune_oracle.py` generates the small committed graphs in `testdata/finetune`.
 
 ## [1.1.0] - 2026-11-04
 

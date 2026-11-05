@@ -77,3 +77,49 @@ long resumedAt = info.Extra["step"];                                // 100; the 
 ```
 
 Loading checks the whole file against the model before it changes anything: a file that does not fit (a missing parameter, a different shape or optimizer) throws `CheckpointException` with a precise `Kind` and message, and leaves the model and optimizer untouched. A missing file is the BCL's `FileNotFoundException`.
+
+## Fine-tuning an ONNX model
+
+A model that exists as an ONNX file does not have to be rewritten as modules to be fine-tuned. `OnnxModule` loads it with its float32 weights as parameters, named as in the file, so everything above applies: optimizers, clipping, schedules, checkpoints.
+
+<!-- sample: finetune-load -->
+```csharp
+// An ONNX encoder with Int64 inputs input_ids and attention_mask, outputs hidden and pooled. Its float32 weights become
+// parameters named as in the file; operators outside the supported set fail here, all of them named.
+using OnnxModule model = OnnxModule.Load(modelPath);
+string first = model.NamedParameters()[0].Name;
+```
+
+The loop is the one above, with the module's `Forward` taking the graph's inputs by name:
+
+<!-- sample: finetune-loop -->
+```csharp
+using var optimizer = new AdamW(model.Parameters(), learningRate: 1e-3f);
+using Tensor ids = Tensor.FromSpan<long>([3, 9, 4, 17, 2, 0, 0, 5, 11, 6, 8, 23, 1, 7], 2, 7);
+using Tensor mask = Tensor.FromSpan<long>([1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1], 2, 7);
+var inputs = new Dictionary<string, Tensor> { ["input_ids"] = ids, ["attention_mask"] = mask };
+using Tensor target = Tensor.Zeros(DType.F32, 2, 16);
+
+float firstLoss = 0, lastLoss = 0;
+for (int step = 0; step < 5; step++)
+{
+    using var scope = new ActivationScope();
+    optimizer.ZeroGrad();
+    Tensor pooled = model.Forward(inputs)[1];            // outputs are in model.OutputNames order
+    Tensor loss = Losses.Mse(pooled, target);
+    loss.Backward();
+    optimizer.Step();
+    lastLoss = loss.Item<float>();
+    firstLoss = step == 0 ? lastLoss : firstLoss;
+}
+```
+
+The trained weights go back into the graph, which then runs in an ordinary session or as a file:
+
+<!-- sample: finetune-serve -->
+```csharp
+using Session session = model.CreateSession();         // the same graph with the trained weights
+model.Save(Path.Combine(workDir, "tuned.onemodel"));    // or keep it as a file: Model.Load reads it
+```
+
+The operators that can sit between a weight and the loss are listed in [training.md](../training.md) (section 11); a graph that needs another one fails at `Load`, naming all of them. Shape arithmetic, masks and position tables run on the same kernels as `Session` and carry no gradient. Dropout nodes in an exported graph run as the identity. Constants that feed `Sin` or `Cos` (rotary-embedding frequencies) stay frozen; `OnnxModuleOptions.IsTrainable` freezes more by name.

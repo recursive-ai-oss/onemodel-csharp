@@ -222,4 +222,46 @@ public class OnnxModuleTests
         Loss(f, m.Forward(Inputs(f, m))).Backward();
         Assert.All(m.NamedParameters(), p => Assert.False(p.Tensor.Grad.IsEmpty));
     }
+
+    [Fact]
+    public void ExactModeNamesTheOperatorsWithoutAnExactKernel()
+    {
+        // Cos and Sin (rotary tables) have no exact kernel in the graph runtime; the module says so instead of computing them inexactly.
+        OracleFile f = OracleFile.Load("mini_modern", "finetune");
+        using OnnxModule m = OnnxModule.Load(Path("mini_modern"));
+        using var scope = new ActivationScope();
+        using var compute = TensorCompute.Use(ArithmeticMode.Exact);
+        SessionException e = Assert.Throws<SessionException>(() => m.Forward(Inputs(f, m)));
+        Assert.Equal(SessionErrorKind.ExactModeUnavailable, e.Kind);
+        Assert.Equal(["Cos", "Sin"], e.Operators.ToArray());
+    }
+
+    [Theory]
+    [InlineData("mini_bert")]
+    public void ExactModeGradientsAreEqualAtOneAndEightThreads(string name)
+    {
+        OracleFile f = OracleFile.Load(name, "finetune");
+        string[] hashes = new string[2];
+        int slot = 0;
+        foreach (int threads in new[] { 1, 8 })
+        {
+            using OnnxModule m = OnnxModule.Load(Path(name));
+            using var scope = new ActivationScope();
+            using var compute = TensorCompute.Use(ArithmeticMode.Exact, threads);
+            Loss(f, m.Forward(Inputs(f, m))).Backward();
+            using var h = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+            foreach ((_, Tensor p) in m.NamedParameters())
+            {
+                h.AppendData(System.Runtime.InteropServices.MemoryMarshal.AsBytes(p.Grad.Data<float>()));
+            }
+
+            hashes[slot++] = Convert.ToHexString(h.GetHashAndReset());
+        }
+
+        Assert.Equal(hashes[0], hashes[1]);
+        if (Environment.GetEnvironmentVariable("ONEMODEL_HASH_OUT") is { Length: > 0 } outPath)
+        {
+            File.AppendAllText(outPath, $"{name} {hashes[0]}\n");
+        }
+    }
 }
