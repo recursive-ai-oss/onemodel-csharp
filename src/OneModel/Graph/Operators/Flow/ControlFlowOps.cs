@@ -42,7 +42,8 @@ internal sealed class IfOp : OpKernel, ISubgraphKernel
         }
 
         NestedGraph body = cond.Data<bool>()[0] ? _then! : _else!;
-        Tensor[] outs = body.Run([], run.Inputs.Slice(_info.InputCount));
+        using var call = body.Run([], run.Inputs.Slice(_info.InputCount));
+        Tensor[] outs = call.Outputs;
         try
         {
             for (int i = 0; i < outs.Length; i++)
@@ -137,13 +138,13 @@ internal sealed class LoopOp : OpKernel, ISubgraphKernel
             {
                 Tensor iter = Tensor.FromSpan<long>([it], FlowUtil.ScalarShape);
                 Tensor c = Tensor.FromSpan<bool>([true], FlowUtil.ScalarShape);
-                Tensor[] outs;
+                NestedGraph.Call result;
                 try
                 {
                     declared[0] = iter;
                     declared[1] = c;
                     carried.CopyTo(declared, 2);
-                    outs = _body.Run(declared, captured);
+                    result = _body.Run(declared, captured);
                 }
                 finally
                 {
@@ -151,6 +152,8 @@ internal sealed class LoopOp : OpKernel, ISubgraphKernel
                     c.Dispose();
                 }
 
+                using var call = result;
+                Tensor[] outs = call.Outputs;
                 if (outs[0].DType != DType.Bool || outs[0].Length != 1)
                 {
                     FlowUtil.DisposeAll(outs);
@@ -320,12 +323,12 @@ internal sealed class ScanOp : OpKernel, ISubgraphKernel
                     slices[j] = FlowUtil.Narrow(inputs[n + j], axes[j], at, 1, drop: true);
                 }
 
-                Tensor[] outs;
+                NestedGraph.Call result;
                 try
                 {
                     state.CopyTo(declared, 0);
                     slices.CopyTo(declared, n);
-                    outs = _body.Run(declared, captured);
+                    result = _body.Run(declared, captured);
                 }
                 finally
                 {
@@ -333,6 +336,8 @@ internal sealed class ScanOp : OpKernel, ISubgraphKernel
                     Array.Clear(slices);
                 }
 
+                using var call = result;
+                Tensor[] outs = call.Outputs;
                 try
                 {
                     for (int q = 0; q < k; q++)
@@ -436,7 +441,8 @@ internal sealed class ScanOp : OpKernel, ISubgraphKernel
 
                         state.CopyTo(declared, 0);
                         slices.CopyTo(declared, n);
-                        Tensor[] outs = _body.Run(declared, captured);
+                        using var call = _body.Run(declared, captured);
+                        Tensor[] outs = call.Outputs;
                         try
                         {
                             for (int q = 0; q < k; q++)

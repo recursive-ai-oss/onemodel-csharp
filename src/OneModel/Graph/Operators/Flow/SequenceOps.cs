@@ -391,7 +391,8 @@ internal sealed class SequenceMapOp : OpKernel, ISubgraphKernel
                     declared[i] = isSeq[i] ? seqs[i][l] : run.Inputs[i];
                 }
 
-                Tensor[] outs = _body.Run(declared, run.Inputs.Slice(n));
+                using var call = _body.Run(declared, run.Inputs.Slice(n));
+                Tensor[] outs = call.Outputs;
                 for (int q = 0; q < k; q++)
                 {
                     results[q].Add(outs[q]);

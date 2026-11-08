@@ -64,6 +64,14 @@ internal static class FlowUtil
         }
     }
 
+    public static void DisposeAll(Tensor[] tensors)
+    {
+        foreach (Tensor t in tensors)
+        {
+            if (!t.IsEmpty) t.Dispose();
+        }
+    }
+
     public static void DisposeAll(IEnumerable<Tensor> tensors)
     {
         foreach (Tensor t in tensors)

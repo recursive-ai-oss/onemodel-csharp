@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using RecursiveAI.OneModel.Tensors;
+using RecursiveAI.OneModel.Threading;
 
 namespace RecursiveAI.OneModel.Training;
 
@@ -8,8 +9,9 @@ namespace RecursiveAI.OneModel.Training;
 /// Base of the optimizers. An optimizer updates a fixed list of float32 parameters in place from their <see cref="Tensor.Grad"/>.
 /// </summary>
 /// <remarks>
-/// <para>Updates are plain scalar float32 code in a fixed order (element by element, parameter by parameter) using only IEEE
+/// <para>Updates use scalar float32 arithmetic in a fixed order within each element, with parameters visited in list order, using only IEEE
 /// <c>+ − × ÷ sqrt</c>, no fused multiply-add: the result is the same in fast and exact mode, on every platform and thread count.
+/// Dense Adam/AdamW can update independent elements concurrently, limited by <see cref="TensorCompute.Threads"/>.
 /// Parameters without a gradient are skipped, and so are frozen parameters (<see cref="Tensor.SetRequiresGrad"/>, <see cref="NnModule.Freeze()"/>).
 /// State tensors (momentum, moments) are allocated with the optimizer and kept as float32 tensors shaped like their parameter,
 /// except for a parameter that is frozen when the optimizer is built: its state tensors are empty (shape [0]) until the parameter is
@@ -413,6 +415,7 @@ public class Adam : Optimizer
     private readonly Tensor[]? _vMax;
     private float _stepSize;
     private float _sqrtBc2;
+    private readonly UpdateJob _updateJob;
 
     /// <summary>Weight decay (L2, or decoupled for AdamW); changeable.</summary>
     public float WeightDecay { get; set; }
@@ -447,6 +450,7 @@ public class Adam : Optimizer
         WeightDecay = weightDecay;
         _decoupled = decoupledWeightDecay;
         _amsgrad = amsgrad;
+        _updateJob = new UpdateJob(this);
         _m = AddStateSlot("exp_avg");
         _v = AddStateSlot("exp_avg_sq");
         if (amsgrad)
@@ -506,14 +510,52 @@ public class Adam : Optimizer
     /// <inheritdoc/>
     protected override void Update(int index, Span<float> parameter, ReadOnlySpan<float> gradient)
     {
-        Span<float> p = parameter;
-        ReadOnlySpan<float> grad = gradient;
+        Tensor mt = StateOf(_m, index), vt = StateOf(_v, index);
+        Tensor max = _vMax is null ? default : StateOf(_vMax, index);
+        Span<float> m = mt.MutableData<float>(), v = vt.MutableData<float>();
+        Span<float> vmax = max.IsEmpty ? default : max.MutableData<float>();
+        int threads = TensorCompute.Threads;
+        if (threads == 1 || parameter.Length < UpdateJob.ChunkSize)
+        {
+            UpdateRange(parameter, gradient, m, v, vmax);
+            return;
+        }
+
+        _updateJob.Parameter = Parameters[index];
+        _updateJob.Gradient = Parameters[index].Grad;
+        _updateJob.M = mt;
+        _updateJob.V = vt;
+        _updateJob.Max = max;
+        try
+        {
+            ParallelFor.Run(_updateJob, 1 + (parameter.Length - 1) / UpdateJob.ChunkSize, threads, (long)parameter.Length * 8);
+        }
+        finally
+        {
+            _updateJob.Parameter = _updateJob.Gradient = _updateJob.M = _updateJob.V = _updateJob.Max = default;
+        }
+    }
+
+    private sealed class UpdateJob(Adam owner) : ChunkJob
+    {
+        internal const int ChunkSize = 32768;
+        internal Tensor Parameter, Gradient, M, V, Max;
+
+        public override void RunChunk(int chunk)
+        {
+            int start = chunk * ChunkSize, length = Math.Min(ChunkSize, Parameter.Length - start);
+            // Step validated contiguous float32 storage and bumped each writable buffer's version before publishing this job.
+            Span<float> Slice(Tensor t) => t.Buffer!.GetSpan<float>(t.Generation).Slice(t.Offset + start, length);
+            owner.UpdateRange(Slice(Parameter), Gradient.Data<float>().Slice(start, length), Slice(M), Slice(V),
+                Max.IsEmpty ? default : Slice(Max));
+        }
+    }
+
+    private void UpdateRange(Span<float> p, ReadOnlySpan<float> grad, Span<float> m, Span<float> v, Span<float> vmax)
+    {
         float wd = WeightDecay, lr = LearningRate;
         float b1 = _beta1, b2 = _beta2, omb1 = 1f - _beta1, omb2 = 1f - _beta2, eps = _epsilon, stepSize = _stepSize, sq = _sqrtBc2;
         float decay = 1f - lr * wd;
-        Span<float> m = StateOf(_m, index).MutableData<float>();
-        Span<float> v = StateOf(_v, index).MutableData<float>();
-        Span<float> vmax = _vMax is null ? default : StateOf(_vMax, index).MutableData<float>();
         for (int i = 0; i < p.Length; i++)
         {
             float g = grad[i];

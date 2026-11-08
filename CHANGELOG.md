@@ -2,6 +2,16 @@
 
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `If` no longer allocates argument arrays or an output-disposal enumerator on each call. Warm runs with caller-owned contiguous tensor inputs/outputs allocate no managed memory when the branches are allocation-free. Concurrent calls lease independent arrays; `Loop`, `Scan` and `SequenceMap` also reuse body argument arrays, though their other iteration bookkeeping still allocates.
+
+### Changed
+
+- Dense Adam/AdamW and `GradClip.ClipNorm`'s scaling pass use fixed-size chunks on the shared thread pool, limited by `TensorCompute.Threads`. The global norm's running double sum stays serial to preserve rounding. Parameters, gradients, moments and recorded training hashes are unchanged bit for bit at every thread count.
+
 ## [1.2.0-preview.1] - 2026-11-05
 
 Training additions; no breaking change, inference and existing training results unchanged bit for bit.

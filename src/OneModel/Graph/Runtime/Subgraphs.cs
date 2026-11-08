@@ -84,6 +84,7 @@ internal sealed class NestedGraph : IDisposable
     private readonly string[] _names;
     private readonly int[] _slots;
     private readonly int _declared;
+    private readonly Stack<CallBuffers> _idle = new();
 
     public NestedGraph(Session session, string[] names, int[] slots, int declared, string[] outputs)
     {
@@ -105,23 +106,61 @@ internal sealed class NestedGraph : IDisposable
     /// Runs the body. <paramref name="declared"/> holds one tensor per declared body input (the ones the body gives an initializer are
     /// ignored); <paramref name="captured"/> the node's implicit inputs. Outputs are new tensors the caller disposes.
     /// </summary>
-    public Tensor[] Run(ReadOnlySpan<Tensor> declared, ReadOnlySpan<Tensor> captured)
+    public Call Run(ReadOnlySpan<Tensor> declared, ReadOnlySpan<Tensor> captured)
     {
         if (declared.Length != _declared)
         {
             throw new SessionException(SessionErrorKind.InvalidModel, $"A subgraph takes {_declared} inputs but {declared.Length} were given.");
         }
 
-        var inputs = new Tensor[_names.Length];
-        for (int i = 0; i < inputs.Length; i++)
+        CallBuffers buffers;
+        lock (_idle)
         {
-            int slot = _slots[i];
-            inputs[i] = slot < _declared ? declared[slot] : captured[slot - _declared];
+            buffers = _idle.Count == 0 ? new CallBuffers(_names.Length, OutputCount) : _idle.Pop();
         }
 
-        var outputs = new Tensor[OutputNames.Length];
-        _session.Run(_names, inputs, OutputNames, outputs);
-        return outputs;
+        try
+        {
+            for (int i = 0; i < buffers.Inputs.Length; i++)
+            {
+                int slot = _slots[i];
+                buffers.Inputs[i] = slot < _declared ? declared[slot] : captured[slot - _declared];
+            }
+
+            _session.Run(_names, buffers.Inputs, OutputNames, buffers.Outputs);
+            return new Call(this, buffers);
+        }
+        catch
+        {
+            foreach (Tensor output in buffers.Outputs)
+            {
+                if (!output.IsEmpty && !output.IsReleased) output.Dispose();
+            }
+
+            Return(buffers);
+            throw;
+        }
+    }
+
+    private void Return(CallBuffers buffers)
+    {
+        // Never retain a caller's storage after its run. Each concurrent invocation leases its own arrays.
+        Array.Clear(buffers.Inputs);
+        Array.Clear(buffers.Outputs);
+        lock (_idle) _idle.Push(buffers);
+    }
+
+    internal sealed class CallBuffers(int inputs, int outputs)
+    {
+        internal Tensor[] Inputs { get; } = new Tensor[inputs];
+        internal Tensor[] Outputs { get; } = new Tensor[outputs];
+    }
+
+    /// <summary>Leases only the argument arrays; the caller still owns and disposes each output tensor.</summary>
+    internal readonly struct Call(NestedGraph owner, CallBuffers buffers) : IDisposable
+    {
+        internal Tensor[] Outputs => buffers.Outputs;
+        public void Dispose() => owner.Return(buffers);
     }
 
     public void Dispose() => _session.Dispose();

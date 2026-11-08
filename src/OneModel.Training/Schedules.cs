@@ -1,15 +1,19 @@
 using System;
 using System.Collections.Generic;
 using RecursiveAI.OneModel.Tensors;
+using RecursiveAI.OneModel.Threading;
 
 namespace RecursiveAI.OneModel.Training;
 
 /// <summary>Gradient clipping. Both functions work in place on <see cref="Tensor.Grad"/> (or the values of a row-sparse <see cref="Tensor.SparseGrad"/>, whose rows are each counted once) and skip parameters without a gradient, frozen ones included.</summary>
 public static class GradClip
 {
+    [ThreadStatic]
+    private static ScaleJob? s_scaleJob;
     /// <summary>
     /// Scales all gradients by <c>min(1, maxNorm/(norm + 1e-6))</c>, where norm is the global norm over every element of every gradient:
     /// the L2 norm (<c>√Σg²</c>, squares summed in double in parameter and element order) or, for infinity, the largest <c>|g|</c>.
+    /// Norm accumulation is serial; independent scaling elements may run concurrently up to <see cref="TensorCompute.Threads"/>.
     /// </summary>
     /// <param name="parameters">Parameters whose gradients are clipped together.</param>
     /// <param name="maxNorm">The largest allowed norm, positive.</param>
@@ -69,15 +73,45 @@ public static class GradClip
                 if (!g.IsEmpty)
                 {
                     Span<float> s = g.MutableData<float>();
-                    for (int i = 0; i < s.Length; i++)
+                    int threads = TensorCompute.Threads;
+                    if (threads == 1 || s.Length < ScaleJob.ChunkSize)
                     {
-                        s[i] *= coef;
+                        for (int i = 0; i < s.Length; i++) s[i] *= coef;
+                    }
+                    else
+                    {
+                        ScaleJob job = s_scaleJob ??= new ScaleJob();
+                        job.Gradient = g;
+                        job.Coefficient = coef;
+                        try
+                        {
+                            ParallelFor.Run(job, 1 + (s.Length - 1) / ScaleJob.ChunkSize, threads, s.Length);
+                        }
+                        finally
+                        {
+                            job.Gradient = default;
+                        }
                     }
                 }
             }
         }
 
         return total;
+    }
+
+    private sealed class ScaleJob : ChunkJob
+    {
+        internal const int ChunkSize = 32768;
+        internal Tensor Gradient;
+        internal float Coefficient;
+
+        public override void RunChunk(int chunk)
+        {
+            int start = chunk * ChunkSize, length = Math.Min(ChunkSize, Gradient.Length - start);
+            // ClipNorm validated the contiguous float32 span and bumped its version once, before publishing this job.
+            Span<float> s = Gradient.Buffer!.GetSpan<float>(Gradient.Generation).Slice(Gradient.Offset + start, length);
+            for (int i = 0; i < s.Length; i++) s[i] *= Coefficient;
+        }
     }
 
     /// <summary>Clamps every gradient element to [−<paramref name="clipValue"/>, +<paramref name="clipValue"/>]; NaN stays NaN.</summary>

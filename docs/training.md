@@ -170,6 +170,34 @@ per-step work and the transient memory, not the state; freezing the table is the
 or the largest `|g|`; `coef = maxNorm / (norm + 1e-6)` in double, rounded to float; if `coef < 1` every gradient element is multiplied by
 it. Returns `float(norm)`. Frozen parameters have no gradient and are skipped; a row-sparse gradient contributes its values. A non-finite norm is returned without scaling anything. `ClipValue` clamps each element to ±c (NaN stays).
 
+### Threading without changing rounding
+
+`TensorCompute.Threads` controls dense Adam/AdamW (including L2 decay and AMSGrad) and the scaling pass of `ClipNorm`.
+Each parameter or gradient is split into consecutive **32,768-element chunks**, the last shortened. Parameters are processed in list
+order; chunks only write their own elements. The work estimates are 8 ns per Adam element and 1 ns per scaling element; the shared
+parallel-for uses at most one thread per 20 µs of estimated work. Small tensors run inline. No multiply-add is fused, and each
+Adam element keeps the same sequence of rounded operations as the serial formula. Writable buffer versions are advanced before
+publishing work, not by the workers. Scratch job objects are reused; gradient references are cleared when dispatch completes.
+
+The global L2 norm still uses **one running double sum, in parameter and element order**, starting from zero. It is deliberately
+serial: splitting it into partial sums would change rounding, clipping coefficients and training state. The infinity norm traversal
+is unchanged too, including NaN handling. Only multiplication by the resulting coefficient is threaded, for dense and row-sparse
+gradient values alike. `ClipValue`, SGD and SparseAdam are unchanged. Norms, gradients, parameters and moments must therefore remain
+bit-identical at 1, 3 and 8 threads in both arithmetic modes. `bench/Micro training-step` measures clipping and AdamW on 110 million
+parameters without a forward/backward pass; these are indicative microbenchmarks, not model throughput claims.
+
+Indicative run on a shared Ryzen 9 7950X3D host, .NET SDK 10.0.403 / runtime 10.0.14, 110 million parameters in one tensor,
+constant gradients, one warm step and the mean of three measured steps (gradient refill excluded), same process harness before/after:
+
+| Operation | Threads | Before (ms) | After (ms) |
+|---|---:|---:|---:|
+| ClipNorm | 1 | 323.8 | 302.1 |
+| ClipNorm | 8 | 327.3 | 283.4 |
+| AdamW | 1 | 725.1 | 727.6 |
+| AdamW | 8 | 726.3 | 105.6 |
+
+Clipping still spends most of its time in the serial running sum; this change does not close the whole-model clipping performance gap.
+
 ## 5. Learning-rate schedules
 
 A schedule is a pure function `LrAt(stepIndex)` of the number of optimizer steps already taken (0 for the first step); `Apply(optimizer)`
@@ -239,7 +267,7 @@ the sample counter in `extra`).
 ## 7. Determinism
 
 Fast mode: forward and backward are the engine's ([autograd.md](autograd.md), thread-count independent); the optimizer, clipping,
-schedules, losses' constants, dropout and the checkpoint code are scalar, fixed-order code. Exact mode: all of it is bit-identical across ISA paths,
+schedules, losses' constants, dropout and the checkpoint code use fixed scalar arithmetic. Adam/AdamW and clipping's scale pass may run independent elements concurrently without changing their arithmetic. Exact mode: all of it is bit-identical across ISA paths,
 OS and thread counts; checked by pinned hashes of the full training state after 20 steps of the conv net (AdamW + cosine + clipping) and of
 the transformer classifier with dropout (`TrainingDeterminismTests`), under default, `DOTNET_EnableAVX512=0`, `DOTNET_EnableAVX2=0` and
 `DOTNET_EnableHWIntrinsic=0`, at 1 and 8 threads, and by CI on every platform. Fast-mode state hashes are equal at 1, 3 and 8 threads.

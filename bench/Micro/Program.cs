@@ -48,6 +48,11 @@ internal static class Program
             return MixedPrecision.Run(args[1..]);
         }
 
+        if (args.Length > 0 && args[0] == "training-step")
+        {
+            return TrainingStep.Run(args[1..]);
+        }
+
         BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
         return 0;
     }
