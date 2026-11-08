@@ -117,7 +117,7 @@ A swap of a file or link after the check is not defended against.
 
 ## 6. Memory
 
-Initializer bytes are views: into the mapped model file, into a byte array the caller supplied, or into a small array holding converted
+Initializer bytes are views: into the mapped model file, into caller-owned read-only memory or an unmanaged stream, or into a small array holding converted
 typed-field data. Importing therefore allocates only the graph itself. Disposing the model releases the mappings; reading tensor data
 afterwards throws. Copying a tensor out (`ToTensor`) is the only step that allocates its bytes. Models up to 1 MiB are read instead of
 mapped. 
@@ -157,3 +157,11 @@ and the field path (`ModelProto.graph.node[3].attribute[1].t`). Offsets are from
 The [protobuf encoding specification](https://protobuf.dev/programming-guides/encoding/#size-limit) says: “Protos must be smaller than 2 GiB when serialized.” A single ONNX protobuf above this limit is refused with `OnnxImportException(Unsupported)`, naming external data as the supported alternative. ONNX external-data files may exceed 2 GiB: offsets and lengths are checked in 64-bit arithmetic and mapped views address each tensor separately. A single tensor still holds at most 2^31 − 1 bytes; this does not impose a per-file limit. Unmapped external data reads only the requested tensor range.
 
 OneModel containers also use 64-bit file offsets and may exceed 2 GiB when loaded from a file path with `MemoryMap` enabled. Ordinary streams and unmapped whole files must fit one managed byte array. Unsupported loading paths fail with the format's typed `Unsupported` exception, suggesting a mapped file path or external ONNX weights. `MaxModelBytes` can impose a lower application limit; file lengths are checked before reading or allocating the whole input.
+
+## Caller-owned memory and embedded resources
+
+`OnnxImporter.Load(ReadOnlyMemory<byte>)`, `Session.Load(ReadOnlyMemory<byte>)` and `Model.Load(ReadOnlyMemory<byte>)` accept a complete serialized model without copying the serialized bytes. Sliced memory is supported. Raw initializer bytes are views over that memory; typed repeated protobuf fields still need decoding into their own arrays. Keep the memory owner alive and the bytes valid and unchanged until the model or session is disposed. The loader neither pins managed memory nor disposes the caller's memory owner: each bounded access obtains a span from the retained memory value.
+
+The stream overloads also avoid a serialized-file copy for `UnmanagedMemoryStream` inputs exposing `PositionPointer`, including embedded assembly resources. They capture the pointer at the current position, retain the stream as a lifetime root, and consume the remaining range. Keep the stream open and its underlying storage valid and unchanged until the imported model or session is disposed. Disposing the model does not close the caller's stream. Subclasses not exposing a pointer, and ordinary streams, retain the buffered fallback. An unmanaged OneModel container may exceed 2 GiB; an ONNX protobuf may not.
+
+For bytes and streams, external ONNX weights require `ModelLoadOptions.ExternalDataDirectory`; otherwise external references fail with `OnnxImportException(ExternalData)`. Path confinement is identical to path loading. Session preparation still creates tensor and packed weights as it does for mapped files: these APIs eliminate the *serialized input copy*, not that preparation step.

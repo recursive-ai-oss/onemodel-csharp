@@ -48,12 +48,28 @@ public sealed class Model : IDisposable
         new(Session.Load(path, options, loadOptions, cancellationToken));
 
     /// <summary>
-    /// Loads an ONNX model, or a model in the OneModel format (chosen by the first eight bytes), from a stream, read to its end but
-    /// never past <see cref="ModelLoadOptions.MaxModelBytes"/>. Models with external data files must be loaded from a path.
+    /// Loads an ONNX model, or a model in the OneModel format (chosen by the first eight bytes), from a stream. Inputs exceeding
+    /// <see cref="ModelLoadOptions.MaxModelBytes"/> are refused (up to eight discriminator bytes may be read first). External data requires <see cref="ModelLoadOptions.ExternalDataDirectory"/>.
+    /// UnmanagedMemoryStream inputs exposing a pointer are viewed in place; keep their storage unchanged and the stream open while the model lives.
+    /// Other streams are buffered. The stream is left open.
     /// </summary>
     /// <inheritdoc cref="Load(string, ModelOptions?, ModelLoadOptions?, CancellationToken)"/>
     public static Model Load(Stream stream, ModelOptions? options = null, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default) =>
         new(Session.Load(stream, options, loadOptions, cancellationToken));
+
+    /// <summary>Loads caller-owned ONNX or OneModel bytes without copying the serialized file. Keep the bytes valid and unchanged while the model lives.
+    /// Prepared tensor and packed weights are owned by the session, as with path loads.</summary>
+    /// <param name="data">The complete model file.</param>
+    /// <param name="options">Execution options; defaults when null.</param>
+    /// <param name="loadOptions">Limits and optional external-data base directory; defaults when null.</param>
+    /// <param name="cancellationToken">Checked while importing and preparing operators.</param>
+    /// <returns>The runnable model.</returns>
+    /// <exception cref="Onnx.OnnxImportException">The ONNX bytes are invalid or unsupported.</exception>
+    /// <exception cref="Format.ModelFormatException">The OneModel bytes are invalid or unsupported.</exception>
+    /// <exception cref="SessionException">The graph cannot be prepared.</exception>
+    /// <exception cref="OperationCanceledException">Cancelled.</exception>
+    public static Model Load(ReadOnlyMemory<byte> data, ModelOptions? options = null, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default) =>
+        new(Session.Load(data, options, loadOptions, cancellationToken));
 
     /// <summary>Runs the model on float values. The input's shape comes from the model's declared shape (see <see cref="Run{TIn, TOut}(ReadOnlySpan{TIn}, ReadOnlySpan{int})"/>).</summary>
     /// <param name="input">The values in row-major order.</param>

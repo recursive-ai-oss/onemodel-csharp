@@ -110,13 +110,31 @@ public sealed class Session : IDisposable
 
     /// <summary>
     /// Imports an ONNX model, or a model in the OneModel format (chosen by the first eight bytes), from a stream and creates a
-    /// session from it. The stream is read to its end, but never past <see cref="ModelLoadOptions.MaxModelBytes"/>; external data is
-    /// not available unless <see cref="ModelLoadOptions.ExternalDataDirectory"/> is set.
+    /// session from it. Inputs exceeding <see cref="ModelLoadOptions.MaxModelBytes"/> are refused (up to eight discriminator bytes may be read first); external data is
+    /// not available unless <see cref="ModelLoadOptions.ExternalDataDirectory"/> is set. UnmanagedMemoryStream inputs exposing a pointer
+    /// are viewed in place; keep their storage unchanged and the stream open while the session lives. Other streams are buffered; all are left open.
     /// </summary>
     /// <inheritdoc cref="Load(string, ModelOptions?, ModelLoadOptions?, CancellationToken)"/>
     public static Session Load(Stream stream, ModelOptions? options = null, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default)
     {
         using IrModel model = Format.ModelFormat.LoadAny(stream, loadOptions, cancellationToken);
+        return Create(model, options, cancellationToken);
+    }
+
+    /// <summary>Loads caller-owned ONNX or OneModel bytes without copying the serialized file. Raw initializers are imported as views;
+    /// session creation still prepares its own tensor and packed weights as for path loads.</summary>
+    /// <param name="data">Complete model bytes. Keep the storage valid and unchanged while the session lives.</param>
+    /// <param name="options">Defaults to fast mode, one thread per core.</param>
+    /// <param name="loadOptions">Limits and optional external-data directory. Without a directory external ONNX data is refused.</param>
+    /// <param name="cancellationToken">Checked while importing and preparing operators.</param>
+    /// <returns>A session owning its prepared weights, not the caller's storage.</returns>
+    /// <exception cref="OperationCanceledException">Cancelled.</exception>
+    /// <exception cref="OnnxImportException">The ONNX model is invalid, unsupported or over the size limit.</exception>
+    /// <exception cref="Format.ModelFormatException">The OneModel container is invalid or unsupported.</exception>
+    /// <exception cref="SessionException">As <see cref="Create(IrModel, ModelOptions?, CancellationToken)"/>.</exception>
+    public static Session Load(ReadOnlyMemory<byte> data, ModelOptions? options = null, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default)
+    {
+        using IrModel model = Format.ModelFormat.LoadAny(data, loadOptions, cancellationToken);
         return Create(model, options, cancellationToken);
     }
 

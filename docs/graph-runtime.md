@@ -5,7 +5,7 @@ This note says how an imported model becomes something that runs: how operators 
 ## 1. Layers
 
 ```
-Model.Load(path|stream)            happy path: arrays/spans in, float[] out, no names or shapes needed
+Model.Load(path|stream|memory)            happy path: arrays/spans in, float[] out, no names or shapes needed
   └─ Session                       graph layer: named inputs/outputs as tensors or spans, thread-safe Run
        └─ CompiledGraph            operators resolved, weights loaded; independent of input shapes
             └─ ExecutionPlan       per set of input element types and shapes: shapes, constants, schedule, memory
@@ -62,7 +62,7 @@ A plan is immutable after creation and is shared by any number of concurrent run
 
 ## 4. Sessions
 
-- **Creation** (`Session.Create(IrModel, options, ct)`, `Session.Load(path|stream, options, ct)`): resolves every operator and reports *all* missing ones together (`UnsupportedOperator`, with `Operators` listing `Type (opset N)`), checks the mode, copies weights out of the model (the `IrModel` can be disposed afterwards), picks the kernel path once from the hardware checks (`KernelPaths.Best`). The token is checked between operators and while importing.
+- **Creation** (`Session.Create(IrModel, options, ct)`, `Session.Load(path|stream|memory, options, ct)`): resolves every operator and reports *all* missing ones together (`UnsupportedOperator`, with `Operators` listing `Type (opset N)`), checks the mode, copies weights out of the model (the `IrModel` can be disposed afterwards), picks the kernel path once from the hardware checks (`KernelPaths.Best`). The token is checked between operators and while importing.
 - **Options.** `Mode` (`Fast` default, `Exact`), `IntraOpThreads` (0 = one per logical core, up to 256; changes speed only), `OptimizationLevel` (`None`, `Basic`, `All`; default `All`), `WeightStorage` (`Original`, `Binary16`, `BFloat16`; [fp16.md](fp16.md)), `MaxCachedPlans`.
 - **`Run`** has two forms. The tensor form takes names and tensors for every input and the outputs wanted; empty (or already released) output tensors are allocated for the caller, others are checked and overwritten. The dictionary form, `Run(IReadOnlyDictionary<string, Tensor> inputs, outputNames?)`, returns a `SessionOutputs` that owns the output tensors. Using a disposed session throws `ObjectDisposedException`. The span form (single-input models) copies the input into the plan's staging area and the output out of the result and returns the output shape. Inputs are never modified or kept. Non-contiguous input tensors are copied first.
 - **Errors** are `SessionException` with a `Kind`: `UnsupportedOperator`, `ExactModeUnavailable`, `InvalidModel`, `Unsupported`, `InvalidInput`, and the node name where there is one. Input validation (unknown name, wrong element type, wrong rank or fixed extent, short output buffer) happens before anything runs.
@@ -104,3 +104,9 @@ Between operator lookup and the first plan, `CompiledGraph` runs the **graph pas
 
 **Sequences and optionals** are carried through plans as one rank-1 `uint8` tensor each (`PackedValue`): a four-byte tag, a kind byte and the elements back to back (type, rank, extents, row-major bytes), little-endian. A graph input or output declared as a sequence or an optional reports `TensorInfo.Kind` `Sequence` or `Optional` and a U8 element type with no shape. Kernels decide whether an input is packed by the model's declared type and, where the model gives none, by the tag. This keeps one value kind in sessions, plans and the memory planner; the cost is a copy per sequence operation. Sequences hold tensors only (ONNX's rule); an optional holds a tensor, a sequence, or nothing.
 
+
+## Caller-owned model bytes
+
+`Model.Load(ReadOnlyMemory<byte>, ...)` and `Session.Load(ReadOnlyMemory<byte>, ...)` detect ONNX versus OneModel from the first bytes, just like path loads. They import raw initializers as views without copying the serialized file; normal session preparation still owns its tensor and packed weights. The caller keeps the memory valid and unchanged while the model or session lives; disposal does not dispose the memory owner. The importer also accepts sliced memory.
+
+An `UnmanagedMemoryStream` exposing its pointer (including an embedded assembly resource stream) follows the same in-place import path through the existing stream overloads. Its remaining range is the file; the stream is consumed to its end and left open. The caller must keep it open, with its storage valid and unchanged, while the model or session lives. Ordinary streams and pointer-hiding subclasses are buffered. External ONNX data requires `ModelLoadOptions.ExternalDataDirectory`; no base directory is inferred for caller-owned bytes or streams.

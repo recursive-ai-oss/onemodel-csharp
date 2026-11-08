@@ -20,7 +20,7 @@ public sealed class ModelLoadOptions
 
     /// <summary>
     /// The directory ONNX external-data locations are relative to and confined to. For a path it defaults to the model file's
-    /// directory. For a stream or byte array it defaults to null, which makes any external-data reference an error.
+    /// directory. For a stream or caller-owned memory it defaults to null, which makes any external-data reference an error.
     /// </summary>
     public string? ExternalDataDirectory { get; init; }
 

@@ -5,10 +5,15 @@
     <RootNamespace>$(PackagePrefix).$(LibName).Tests</RootNamespace>
     <AssemblyName>$(PackagePrefix).$(LibName).Tests</AssemblyName>
     <IsTestProject>true</IsTestProject>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Test results go with the other build output, not into the checkout. -->
     <TestingPlatformCommandLineArguments>--results-directory "$(ArtifactsPath)/TestResults"</TestingPlatformCommandLineArguments>
     <NoWarn>$(NoWarn);xUnit1051;xUnit1031</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="../../testdata/graphs/mlp.onnx" LogicalName="test-model.onnx" />
+  </ItemGroup>
 
   <ItemGroup>
     <Using Include="System" />

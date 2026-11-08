@@ -174,7 +174,7 @@ public static class ModelFormat
     }
 
     /// <summary>Loads a model from a stream, read to its end (or until <see cref="ModelLoadOptions.MaxModelBytes"/> is passed, which is an error).</summary>
-    /// <param name="stream">The stream, positioned at the start of the file.</param>
+    /// <param name="stream">The stream, positioned at the start of the file. UnmanagedMemoryStream inputs exposing a pointer are viewed in place; keep the stream open and its storage valid and unchanged until the returned model is disposed. Other streams are buffered. The stream is left open.</param>
     /// <param name="loadOptions">Limits; defaults when null.</param>
     /// <param name="cancellationToken">Checked while reading.</param>
     /// <exception cref="ModelFormatException">As <see cref="Load(string, ModelLoadOptions?, CancellationToken)"/>.</exception>
@@ -184,6 +184,14 @@ public static class ModelFormat
     {
         ArgumentNullException.ThrowIfNull(stream);
         loadOptions ??= new ModelLoadOptions();
+        ByteSource? view = ByteSource.FromUnmanagedStream(stream);
+        if (view is not null)
+        {
+            IrModel model = ReadOwning(view, "<stream>", loadOptions, cancellationToken);
+            stream.Position = stream.Length;
+            return model;
+        }
+
         return Load(ReadAll(stream, loadOptions, cancellationToken), loadOptions, cancellationToken);
     }
 
@@ -198,6 +206,16 @@ public static class ModelFormat
         ArgumentNullException.ThrowIfNull(data);
         return ReadOwning(ByteSource.FromArray(data), "<memory>", loadOptions ?? new ModelLoadOptions(), cancellationToken);
     }
+
+    /// <summary>Loads caller-owned bytes in place. Raw initializers are views over this memory, not copies.</summary>
+    /// <param name="data">The complete container; its storage must stay valid and unchanged until the returned model is disposed.</param>
+    /// <param name="loadOptions">Limits; defaults when null.</param>
+    /// <param name="cancellationToken">Checked while reading the manifest.</param>
+    /// <returns>The imported model; disposing it does not dispose the caller's memory owner.</returns>
+    /// <exception cref="OperationCanceledException">Cancelled.</exception>
+    /// <exception cref="ModelFormatException">The container is invalid, unsupported or exceeds the size limit.</exception>
+    public static IrModel Load(ReadOnlyMemory<byte> data, ModelLoadOptions? loadOptions = null, CancellationToken cancellationToken = default) =>
+        ReadOwning(ByteSource.FromMemory(data), "<memory>", loadOptions ?? new ModelLoadOptions(), cancellationToken);
 
     /// <summary>
     /// Says what kind of model file the first bytes of a file are, from the format's magic or the first protobuf key of an ONNX
@@ -245,9 +263,22 @@ public static class ModelFormat
     {
         ArgumentNullException.ThrowIfNull(stream);
         options ??= new ModelLoadOptions();
+        ByteSource? view = ByteSource.FromUnmanagedStream(stream);
+        if (view is not null)
+        {
+            bool isFormat = IsModelFormat(view.GetSpan(0, (int)Math.Min(8, view.Length)));
+            IrModel model = isFormat ? ReadOwning(view, "<stream>", options, ct)
+                : OnnxImporter.LoadCore(view, "<stream>", options.ExternalDataDirectory, options, ct);
+            stream.Position = stream.Length;
+            return model;
+        }
+
         byte[] bytes = ReadAll(stream, options, ct, forAny: true);
-        return IsModelFormat(bytes) ? Load(bytes, options, ct) : OnnxImporter.Load(bytes, options, ct);
+        return LoadAny(bytes.AsMemory(), options, ct);
     }
+
+    internal static IrModel LoadAny(ReadOnlyMemory<byte> bytes, ModelLoadOptions? options, CancellationToken ct) =>
+        IsModelFormat(bytes.Span) ? Load(bytes, options, ct) : OnnxImporter.Load(bytes, options, ct);
 
     private static IrModel ReadOwning(ByteSource source, string name, ModelLoadOptions options, CancellationToken ct)
     {

@@ -28,7 +28,10 @@ internal static class StreamBytes
                 long remaining = stream.Length - stream.Position;
                 if (remaining > limit)
                 {
-                    throw tooLarge(over, []);
+                    // Preserve the format discriminator even when refusing before a whole-stream allocation.
+                    byte[] head = new byte[8];
+                    int got = stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
+                    throw tooLarge(over, head.AsSpan(0, got).ToArray());
                 }
 
                 var exact = new byte[Math.Max(remaining, 0)];

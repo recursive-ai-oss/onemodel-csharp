@@ -58,6 +58,25 @@ foreach (ArithmeticMode mode in new[] { ArithmeticMode.Fast, ArithmeticMode.Exac
     }
 }
 
+// Caller-owned memory uses the same static import and preparation paths in a trimmed binary.
+using (var source = Open("mlp.onnx"))
+using (var serialized = new MemoryStream())
+{
+    source.CopyTo(serialized);
+    ReadOnlyMemory<byte> bytes = serialized.ToArray();
+    using Model memory = Model.Load(bytes, new ModelOptions { IntraOpThreads = 1 });
+    using IrModel imported = OnnxImporter.Load(bytes);
+    using var container = new MemoryStream();
+    ModelFormat.Save(imported, container);
+    using Model ownFormat = Model.Load(container.ToArray().AsMemory(), new ModelOptions { IntraOpThreads = 1 });
+    if (!memory.Run(input, shape).AsSpan().SequenceEqual(ownFormat.Run(input, shape)))
+    {
+        return 21;
+    }
+
+    Console.WriteLine("caller-owned ONNX and OneModel memory: equal");
+}
+
 // The README one-liner on a real encoder, when its file is supplied (ONEMODEL_MINILM); skipped otherwise.
 string? minilm = Environment.GetEnvironmentVariable("ONEMODEL_MINILM");
 if (!string.IsNullOrEmpty(minilm) && File.Exists(minilm))

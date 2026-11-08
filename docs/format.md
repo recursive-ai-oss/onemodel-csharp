@@ -225,8 +225,8 @@ Weights that an ONNX file keeps in external data files are copied into the data 
 
 `Model.Load`, `Session.Load` and `ModelFormat.Load` read the file. `Model.Load` and `Session.Load` look at the first eight bytes to
 choose between this format and ONNX. Files of 1 MiB or more are memory-mapped (where the platform allows it) and each tensor is a
-view of the mapping, copied only when a session builds its weights; smaller files, streams and platforms without mapping read the
-file into memory. Alignment to 64 bytes lets a consumer use mapped weights in place with any vector width.
+view of the mapping, copied only when a session builds its weights; smaller files, ordinary streams and platforms without mapping read the
+file into memory. `ReadOnlyMemory<byte>` and pointer-exposing `UnmanagedMemoryStream` inputs are viewed in place. The caller keeps their storage valid and unchanged, and unmanaged streams open, while the model or session lives; loaders never dispose caller-owned storage. Alignment to 64 bytes lets a consumer use mapped weights in place with any vector width.
 
 Saving: `ModelFormat.Save(model, path | stream)` and `ModelFormat.Convert(inputPath, outputPath)`, which refuses to write over its input and also accepts a file already in this format. `ModelFormat.Detect(path | bytes)` says whether a file is ONNX, this format or neither by its first bytes. Loading takes `ModelLoadOptions`; its `MaxModelBytes` (default `long.MaxValue`) is enforced while a stream is read, so an endless stream fails with an `Unsupported` error instead of exhausting memory.
 

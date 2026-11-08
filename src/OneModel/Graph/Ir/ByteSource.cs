@@ -5,24 +5,32 @@ using System.IO.MemoryMappedFiles;
 namespace RecursiveAI.OneModel.Graph;
 
 /// <summary>
-/// Read-only bytes that tensor data points into: an array, or a file mapped into memory. This is one of the two places in the
-/// importer that uses pointers: a mapped view is addressed through its base pointer.
+/// Read-only bytes that tensor data points into: caller-owned memory, an unmanaged stream or a mapped file.
+/// Unmanaged sources are addressed through a captured base pointer and kept alive by the source.
 /// Bounds: every span handed out comes from <see cref="GetSpan"/>, which checks <c>0 &lt;= offset</c>, <c>0 &lt;= length</c> and
-/// <c>offset + length &lt;= Length</c> in 64-bit arithmetic against the mapped length before building the span, and refuses once
+/// <c>offset + length &lt;= Length</c> in 64-bit arithmetic against the source length before building the span, and refuses once
 /// the source is disposed. A span must not be used after the source is disposed.
 /// </summary>
 internal sealed unsafe class ByteSource : IDisposable
 {
-    private readonly byte[]? _array;
+    private readonly ReadOnlyMemory<byte>? _memory;
+    private readonly UnmanagedMemoryStream? _stream;
     private readonly MemoryMappedFile? _file;
     private readonly MemoryMappedViewAccessor? _view;
     private readonly byte* _pointer;
     private volatile bool _disposed;
 
-    private ByteSource(byte[] array)
+    private ByteSource(ReadOnlyMemory<byte> memory)
     {
-        _array = array;
-        Length = array.Length;
+        _memory = memory;
+        Length = memory.Length;
+    }
+
+    private ByteSource(UnmanagedMemoryStream stream)
+    {
+        _stream = stream;
+        _pointer = stream.PositionPointer;
+        Length = stream.Length - stream.Position;
     }
 
     private ByteSource(MemoryMappedFile file, MemoryMappedViewAccessor view, byte* pointer, long length)
@@ -41,6 +49,32 @@ internal sealed unsafe class ByteSource : IDisposable
 
     /// <summary>Wraps an array without copying it.</summary>
     public static ByteSource FromArray(byte[] array) => new(array);
+
+    /// <summary>Wraps caller-owned memory without copying or pinning it. Its owner must keep it valid and unchanged.</summary>
+    public static ByteSource FromMemory(ReadOnlyMemory<byte> memory) => new(memory);
+
+    /// <summary>Views the remaining unmanaged bytes without copying. The caller must keep the stream open and its storage unchanged.</summary>
+    public static ByteSource? FromUnmanagedStream(Stream stream)
+    {
+        if (stream is UnmanagedMemoryStream unmanaged && unmanaged.CanRead && unmanaged.CanSeek)
+        {
+            if (unmanaged.Position >= unmanaged.Length)
+            {
+                return FromMemory(ReadOnlyMemory<byte>.Empty);
+            }
+
+            try
+            {
+                return new ByteSource(unmanaged);
+            }
+            catch (NotSupportedException)
+            {
+                // Some subclasses (notably mapped view streams) do not expose PositionPointer.
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Opens a file for reading. With <paramref name="allowMap"/> the file is mapped when it is at least <paramref name="mapThreshold"/>
@@ -116,9 +150,14 @@ internal sealed unsafe class ByteSource : IDisposable
             throw new ArgumentOutOfRangeException(nameof(offset), $"Range {offset}+{length} is outside the {Length} bytes of the source.");
         }
 
-        if (_array is not null)
+        if (_memory is ReadOnlyMemory<byte> memory)
         {
-            return new ReadOnlySpan<byte>(_array, (int)offset, length);
+            return memory.Span.Slice((int)offset, length);
+        }
+
+        if (_stream is not null && !_stream.CanRead)
+        {
+            throw new ObjectDisposedException(nameof(UnmanagedMemoryStream), "The caller-owned model stream was closed.");
         }
 
         return new ReadOnlySpan<byte>(_pointer + offset, length);
