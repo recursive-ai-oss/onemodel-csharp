@@ -2,6 +2,25 @@
 
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-11-08
+
+Everything since 1.0.0, the previous nuget.org release: the 1.1.0 speed work, trainable imported graphs and the other training additions of 1.2.0-preview.1, and the loading fixes of 1.2.0-preview.2 (details in those sections below). No breaking change; inference and training results are unchanged bit for bit except where 1.1.0 documents fast-mode convolution differences within tolerance.
+
+### Added
+
+- Training: `OnnxModule` trains an imported ONNX (or OneModel) graph as an `NnModule` and writes the weights back to a `Session`; per-parameter freezing (`NnModule.Freeze`, `Tensor.SetRequiresGrad`); row-sparse embedding gradients with `SparseAdam` and sparse `Sgd`; `Ops.Conv1d` and the `Conv1d` module; `Ops.MatMulBatched`, `Erf`, `Exp`, `Sqrt`, `Pow`, `Where` and `Gather` with backward.
+- Loading from caller-owned memory without a copy: `ReadOnlyMemory<byte>` overloads of `Model.Load`, `Session.Load`, `OnnxImporter.Load` and `ModelFormat.Load`, and in-place loading of an `UnmanagedMemoryStream` (an embedded resource) through the stream overloads.
+
+### Fixed
+
+- Checkpoints above 2 GiB: `Checkpoint.Save` and `Load` stream with a bounded buffer instead of building the file in memory. Loading needs a seekable stream; the file format is unchanged.
+- Models above 2 GiB load from ONNX with external data and from OneModel files on the memory-mapped path; a single-file ONNX above 2 GiB (a protobuf limit) and unmapped loads above 2 GiB fail with a typed error naming the supported path.
+- `If` allocates nothing per call once warm, with caller-owned inputs and outputs.
+
+### Changed
+
+- Speed: recurrent layers threaded in fixed hidden-unit chunks, Winograd F(2x2, 3x3) for prepacked 3x3 convolutions in fast mode, batched convolution waves, and lower per-call overhead on small models (1.1.0); Adam and AdamW update in fixed-size chunks on the thread pool, and gradient clipping threads its scaling pass.
+
 ## [1.2.0-preview.2] - 2026-11-08
 
 Loading and training fixes for large files, in-place loading, an allocation-free `If`, and threaded Adam/AdamW; no breaking change, inference and training results unchanged bit for bit.
