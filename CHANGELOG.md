@@ -2,7 +2,9 @@
 
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.2.0-preview.2] - 2026-11-08
+
+Loading and training fixes for large files, in-place loading, an allocation-free `If`, and threaded Adam/AdamW; no breaking change, inference and training results unchanged bit for bit.
 
 ### Added
 
