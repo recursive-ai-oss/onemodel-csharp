@@ -77,7 +77,7 @@ The public API is reshaped for 1.0. Every change below lists its replacement.
 - **File-system errors are the BCL's.** The `Io` kinds are gone (`OnnxErrorKind.Io`, `ModelFormatErrorKind.Io`): a missing or unreadable file or a failing stream throws `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException` or `IOException` unwrapped, from `Model.Load`, `Session.Load`, `OnnxImporter.Load`, `ModelFormat.Load/Save/Convert` alike (as `Checkpoint.Load` already did). Replace `catch (OnnxImportException e) when (e.Kind == OnnxErrorKind.Io)` with `catch (IOException)`.
 - **Use after dispose** throws `ObjectDisposedException` from `Session`, `Model` and `TracedModel`. `SessionErrorKind.Disposed` is removed.
 - **Load options reach every entry point.** `OnnxLoadOptions` (namespace `Onnx`) is now `ModelLoadOptions` (namespace `RecursiveAI.OneModel`) and gains `MaxModelBytes` (default and maximum 2^31 − 1). `Model.Load`, `Session.Load`, `ModelFormat.Load` and `Convert` take it (`Model.Load(path, options, loadOptions, cancellationToken)`; a positional `CancellationToken` third argument must become the fourth). `MaxNesting` is validated when set (8 to 250). A stream is read only up to the limit: an endless or huge stream fails with an `Unsupported` import or format error, never `OutOfMemoryException`.
-- **Names that collide with ONNX Runtime.** `SessionOptions` is now `ModelOptions` and `ExecutionMode` is now `ArithmeticMode` (namespace `RecursiveAI.OneModel`); the values are unchanged (`Fast`, `Exact`).
+- **Names that collide with ONNX Runtime.** `SessionOptions` is now `ModelOptions` (namespace `RecursiveAI.OneModel.Graph`) and `ExecutionMode` is now `ArithmeticMode` (namespace `RecursiveAI.OneModel`); the values are unchanged (`Fast`, `Exact`).
 - **Smaller public surface.** Internal now: `BackwardRecord`, `AutogradMeta`, `SavedTensor`, `OpKind`, `Tensor.Autograd`, `GradMode.ShouldRecord`, `TensorBuffer.Address`, `BufferPool.ClassSize`, `OneModelInfo`, and the kernel plumbing `ITensorKernels`, `KernelSet`, `DenseKernels`, `ReferenceKernels`, `UnaryOp`, `BinaryOp` (the `kernels` argument of `Ops.Add/Sub/Mul/Div/Neg/Relu/MatMul/MaxPool2d` is gone; the `Ops` functions take the default kernels). `PackedValue` and `PackedKind` are marked `[Experimental("ONEMODEL0001")]`: sequences and optionals as packed values may change.
 - **`ModelFormat.Convert`** refuses an output that is its input (`ArgumentException`) and now also accepts a file already in the OneModel format (it is read and rewritten). Parameter names are `inputPath` and `outputPath`.
 - Eager `Ops` on an empty tensor throw `ArgumentException` saying so, instead of the float32-only message.
@@ -89,7 +89,7 @@ The public API is reshaped for 1.0. Every change below lists its replacement.
 - `ActivationScope.Keep(tensor)` moves a result out of a scope. `TensorCompute.Use(mode, threads)` scopes the eager compute settings to a flow of execution.
 - `ModelFormat.Detect(path | bytes)` returns `ModelFileKind` (`Onnx`, `OneModel`, `Unknown`).
 - `Model.Run(input, shape, out Shape outputShape)` reports the output's shape.
-- `TensorInfo.ToString()` prints `x: F32[N, 16]`.
+- `TensorInfo.ToString()` prints `TensorInfo { x: F32[N, 16] }`.
 
 ### Changed
 

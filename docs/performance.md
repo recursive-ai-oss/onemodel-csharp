@@ -66,3 +66,5 @@ Peak resident memory is at most 1.40 times ONNX Runtime's on every row on x64 (l
 ## Load time
 
 Session creation (import, graph passes, weight packing) is reported per row in the raw results and is not gated.
+
+Loading from an `UnmanagedMemoryStream` (an embedded resource), which 1.2 views in place instead of buffering, is about twice as fast as in 1.0 and 1.1 (indicative: x64, 4 threads, fresh processes, 2-3 recorded repetitions on a shared machine; XLM-RoBERTa-base 1.1 GB 0.85-0.94 s against 1.84-1.97 s with peak memory 2.19 against 3.25 GB, MiniLM-L6 124-152 ms against 218-229 ms); loading from a path or another stream, and the first run, are unchanged.

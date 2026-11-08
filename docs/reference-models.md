@@ -36,7 +36,7 @@ With one thread, a steady-state `Session.Run` of MiniLM (reused output tensor) a
 
 ### Indicative single-thread latency (not a published measurement)
 
-One arm64 laptop-class machine (8 cores, other work running), batch 1, 1 thread, both engines in the same harness, median of 2 repetitions; no weight prepacking, fusion or folding yet.
+One arm64 laptop-class machine (8 cores, other work running), batch 1, 1 thread, both engines in the same harness, median of 2 repetitions. Measured on 0.1, before weight prepacking, operator fusion and constant folding were added, so these ratios are historical; current ones are in [performance.md](performance.md).
 
 | Model | Ours (ms) | ONNX Runtime (ms) | Ratio |
 |---|---|---|---|

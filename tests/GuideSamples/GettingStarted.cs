@@ -44,7 +44,7 @@ internal static class GettingStarted
     {
         #region session-tensors
         using var session = Session.Load(modelPath);
-        Console.WriteLine(session.Inputs[0]);       // x: F32[N, 16]
+        Console.WriteLine(session.Inputs[0]);       // TensorInfo { x: F32[N, 16] }
 
         using Tensor x = Tensor.FromSpan<float>(new float[32], 2, 16);
         using SessionOutputs outputs = session.Run(new Dictionary<string, Tensor> { ["x"] = x });
