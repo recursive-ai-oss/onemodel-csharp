@@ -19,6 +19,8 @@ public enum CheckpointErrorKind
     BadTensor,
     /// <summary>The checkpoint is well-formed but does not fit the model or optimizer it is loaded into.</summary>
     Mismatch,
+    /// <summary>The input stream does not support reading and seeking.</summary>
+    UnsupportedStream,
 }
 
 /// <summary>A checkpoint could not be read or applied. <see cref="Kind"/> says which check failed; the message names the field.</summary>
@@ -113,16 +115,24 @@ public static class Checkpoint
         stream.Write(manifest);
         WriteZeros(stream, dataOffset - HeaderSize - manifest.Length);
 
+        byte[] buffer = new byte[64 * 1024];
         long written = 0;
         for (int i = 0; i < offsets.Length; i++)
         {
             Tensor t = i < modelState.Count ? modelState[i].Tensor : optState[i - modelState.Count].Tensor;
             WriteZeros(stream, offsets[i] - written);
             written = offsets[i];
-            byte[] bytes = new byte[ByteLength(t)];
-            Encode(t, bytes);
-            stream.Write(bytes);
-            written += bytes.Length;
+            int elements = buffer.Length / t.ElementSize;
+            for (int first = 0; first < t.Length;)
+            {
+                int count = Math.Min(elements, t.Length - first);
+                Span<byte> bytes = buffer.AsSpan(0, count * t.ElementSize);
+                Encode(t, bytes, first, count);
+                stream.Write(bytes);
+                first += count;
+            }
+
+            written += ByteLength(t);
         }
 
         WriteZeros(stream, cursor - written);
@@ -142,7 +152,7 @@ public static class Checkpoint
     }
 
     /// <summary>Reads a checkpoint from a stream (read to its end) into a module and optionally an optimizer.</summary>
-    /// <param name="stream">A readable stream positioned at the start of the checkpoint; it is left open.</param>
+    /// <param name="stream">A readable, seekable stream positioned at the start of the checkpoint; it is left open. Non-seekable inputs are refused with UnsupportedStream.</param>
     /// <param name="model">The module to fill.</param>
     /// <param name="optimizer">The optimizer to fill, or null.</param>
     /// <returns>The extra values and whether optimizer state was present.</returns>
@@ -151,27 +161,31 @@ public static class Checkpoint
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(model);
-        using var ms = new MemoryStream();
-        stream.CopyTo(ms);
-        byte[] file = ms.ToArray();
-        return Read(file, model, optimizer);
-    }
-
-    // ---------------------------------------------------------------------------------------------------------------- reading
-
-    private static CheckpointInfo Read(byte[] file, NnModule model, Optimizer? optimizer)
-    {
-        if (file.Length < HeaderSize)
+        if (!stream.CanRead || !stream.CanSeek)
         {
-            throw new CheckpointException(CheckpointErrorKind.BadHeader, $"The file has {file.Length} bytes, less than the {HeaderSize}-byte header.");
+            throw new CheckpointException(CheckpointErrorKind.UnsupportedStream, "Checkpoint.Load requires a readable, seekable stream; load from a file path or spool the input to a file first.");
         }
 
-        if (Encoding.ASCII.GetString(file, 0, 8) != Magic)
+        return Read(stream, stream.Position, model, optimizer);
+    }
+
+    // Validate all metadata before changing the destination. Tensor payloads are read one at a time.
+    private static CheckpointInfo Read(Stream file, long start, NnModule model, Optimizer? optimizer)
+    {
+        long length = file.Length - start;
+        if (length < HeaderSize)
+        {
+            throw new CheckpointException(CheckpointErrorKind.BadHeader, $"The file has {length} bytes, less than the {HeaderSize}-byte header.");
+        }
+
+        byte[] header = new byte[HeaderSize];
+        file.ReadExactly(header);
+        if (Encoding.ASCII.GetString(header, 0, 8) != Magic)
         {
             throw new CheckpointException(CheckpointErrorKind.BadHeader, "The magic is not ONEMCKPT.");
         }
 
-        ReadOnlySpan<byte> h = file;
+        ReadOnlySpan<byte> h = header;
         uint version = BinaryPrimitives.ReadUInt32LittleEndian(h[8..]);
         uint flags = BinaryPrimitives.ReadUInt32LittleEndian(h[12..]);
         ulong manifestOffset = BinaryPrimitives.ReadUInt64LittleEndian(h[16..]);
@@ -185,9 +199,9 @@ public static class Checkpoint
             throw new CheckpointException(CheckpointErrorKind.BadHeader, $"Unsupported version {version}, flags {flags} or reserved field.");
         }
 
-        if (fileLength != (ulong)file.Length)
+        if (fileLength != (ulong)length)
         {
-            throw new CheckpointException(CheckpointErrorKind.BadHeader, $"The header says {fileLength} bytes, the file has {file.Length} (truncated or extended).");
+            throw new CheckpointException(CheckpointErrorKind.BadHeader, $"The header says {fileLength} bytes, the file has {length} (truncated or extended).");
         }
 
         if (manifestOffset != HeaderSize || manifestLength > MaxManifest || manifestLength > fileLength - HeaderSize ||
@@ -199,7 +213,9 @@ public static class Checkpoint
         JsonDocument doc;
         try
         {
-            doc = JsonDocument.Parse(file.AsMemory(HeaderSize, (int)manifestLength), new JsonDocumentOptions { MaxDepth = 32 });
+            byte[] manifest = new byte[(int)manifestLength];
+            file.ReadExactly(manifest);
+            doc = JsonDocument.Parse(manifest, new JsonDocumentOptions { MaxDepth = 32 });
         }
         catch (JsonException e)
         {
@@ -292,7 +308,7 @@ public static class Checkpoint
                 }
             }
 
-            Fill(file, dataStart, modelEntries, modelState);
+            Fill(file, start + dataStart, modelEntries, modelState);
             if (optEntries is not null && optimizer is not null && hyper is not null)
             {
                 var state = new List<(string, Tensor)>();
@@ -312,10 +328,11 @@ public static class Checkpoint
                     state.Add((n, t));
                 }
 
-                Fill(file, dataStart, optEntries, state);
+                Fill(file, start + dataStart, optEntries, state);
                 optimizer.RestoreStepCount(step);
             }
 
+            file.Position = start + length;
             return new CheckpointInfo(extra, hasOptimizer);
         }
     }
@@ -416,11 +433,22 @@ public static class Checkpoint
         return n;
     }
 
-    private static void Fill(byte[] file, long dataStart, List<Entry> entries, IReadOnlyList<(string Name, Tensor Tensor)> dest)
+    private static void Fill(Stream file, long dataStart, List<Entry> entries, IReadOnlyList<(string Name, Tensor Tensor)> dest)
     {
+        byte[] buffer = new byte[64 * 1024];
         for (int i = 0; i < entries.Count; i++)
         {
-            Decode(file.AsSpan((int)(dataStart + entries[i].Offset), (int)entries[i].Length), dest[i].Tensor);
+            file.Position = dataStart + entries[i].Offset;
+            Tensor t = dest[i].Tensor;
+            int elements = buffer.Length / t.ElementSize;
+            for (int first = 0; first < t.Length;)
+            {
+                int count = Math.Min(elements, t.Length - first);
+                Span<byte> bytes = buffer.AsSpan(0, count * t.ElementSize);
+                file.ReadExactly(bytes);
+                Decode(bytes, t, first, count);
+                first += count;
+            }
         }
     }
 
@@ -555,12 +583,12 @@ public static class Checkpoint
         }
     }
 
-    private static void Encode(in Tensor t, Span<byte> dst)
+    private static void Encode(in Tensor t, Span<byte> dst, int first, int count)
     {
         switch (t.DType)
         {
             case DType.F32:
-                ReadOnlySpan<float> f = t.Data<float>();
+                ReadOnlySpan<float> f = t.Data<float>().Slice(first, count);
                 for (int i = 0; i < f.Length; i++)
                 {
                     BinaryPrimitives.WriteInt32LittleEndian(dst[(4 * i)..], BitConverter.SingleToInt32Bits(f[i]));
@@ -568,7 +596,7 @@ public static class Checkpoint
 
                 break;
             case DType.I32:
-                ReadOnlySpan<int> n = t.Data<int>();
+                ReadOnlySpan<int> n = t.Data<int>().Slice(first, count);
                 for (int i = 0; i < n.Length; i++)
                 {
                     BinaryPrimitives.WriteInt32LittleEndian(dst[(4 * i)..], n[i]);
@@ -576,7 +604,7 @@ public static class Checkpoint
 
                 break;
             case DType.I64:
-                ReadOnlySpan<long> l = t.Data<long>();
+                ReadOnlySpan<long> l = t.Data<long>().Slice(first, count);
                 for (int i = 0; i < l.Length; i++)
                 {
                     BinaryPrimitives.WriteInt64LittleEndian(dst[(8 * i)..], l[i]);
@@ -588,12 +616,12 @@ public static class Checkpoint
         }
     }
 
-    private static void Decode(ReadOnlySpan<byte> src, in Tensor t)
+    private static void Decode(ReadOnlySpan<byte> src, in Tensor t, int first, int count)
     {
         switch (t.DType)
         {
             case DType.F32:
-                Span<float> f = t.MutableData<float>();
+                Span<float> f = t.MutableData<float>().Slice(first, count);
                 for (int i = 0; i < f.Length; i++)
                 {
                     f[i] = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(src[(4 * i)..]));
@@ -601,7 +629,7 @@ public static class Checkpoint
 
                 break;
             case DType.I32:
-                Span<int> n = t.MutableData<int>();
+                Span<int> n = t.MutableData<int>().Slice(first, count);
                 for (int i = 0; i < n.Length; i++)
                 {
                     n[i] = BinaryPrimitives.ReadInt32LittleEndian(src[(4 * i)..]);
@@ -609,7 +637,7 @@ public static class Checkpoint
 
                 break;
             case DType.I64:
-                Span<long> l = t.MutableData<long>();
+                Span<long> l = t.MutableData<long>().Slice(first, count);
                 for (int i = 0; i < l.Length; i++)
                 {
                     l[i] = BinaryPrimitives.ReadInt64LittleEndian(src[(8 * i)..]);
