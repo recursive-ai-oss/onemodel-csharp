@@ -156,7 +156,20 @@ public static class ModelFormat
     {
         ArgumentNullException.ThrowIfNull(path);
         loadOptions ??= new ModelLoadOptions();
-        ByteSource source = ByteSource.OpenFile(path, loadOptions.MemoryMap, MapThreshold, readWholeIfUnmapped: true);
+        if (new FileInfo(path).Length > loadOptions.MaxModelBytes)
+        {
+            throw new ModelFormatException(ModelFormatErrorKind.Unsupported, "The file exceeds ModelLoadOptions.MaxModelBytes.", path);
+        }
+
+        ByteSource source;
+        try
+        {
+            source = ByteSource.OpenFile(path, loadOptions.MemoryMap, MapThreshold, readWholeIfUnmapped: true);
+        }
+        catch (NotSupportedException e)
+        {
+            throw new ModelFormatException(ModelFormatErrorKind.Unsupported, e.Message, path, inner: e);
+        }
         return ReadOwning(source, path, loadOptions, cancellationToken);
     }
 

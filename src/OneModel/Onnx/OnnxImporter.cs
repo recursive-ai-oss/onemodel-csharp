@@ -28,7 +28,23 @@ public static class OnnxImporter
     {
         ArgumentNullException.ThrowIfNull(path);
         options ??= new ModelLoadOptions();
-        ByteSource source = ByteSource.OpenFile(path, options.MemoryMap, MapThreshold, readWholeIfUnmapped: true);
+        // A protobuf message itself must remain below 2 GiB, even on the mapped path.
+        long length = new FileInfo(path).Length;
+        if (length > Math.Min(options.MaxModelBytes, int.MaxValue))
+        {
+            throw new OnnxImportException(OnnxErrorKind.Unsupported,
+                "The ONNX protobuf exceeds the model size limit or 2 GiB; save the weights as external data.", path);
+        }
+
+        ByteSource source;
+        try
+        {
+            source = ByteSource.OpenFile(path, options.MemoryMap, MapThreshold, readWholeIfUnmapped: true);
+        }
+        catch (NotSupportedException e)
+        {
+            throw new OnnxImportException(OnnxErrorKind.Unsupported, e.Message, path, inner: e);
+        }
 
         string? directory = options.ExternalDataDirectory ?? Path.GetDirectoryName(Path.GetFullPath(path));
         return LoadCore(source, path, directory, options, cancellationToken);
@@ -81,10 +97,10 @@ public static class OnnxImporter
         ExternalDataResolver? resolver = null;
         try
         {
-            if (source.Length > Math.Min(options.MaxModelBytes, Array.MaxLength))
+            if (source.Length > Math.Min(options.MaxModelBytes, int.MaxValue))
             {
                 throw new OnnxImportException(OnnxErrorKind.Unsupported,
-                    $"The model is {source.Length} bytes; the limit is {Math.Min(options.MaxModelBytes, Array.MaxLength)} (a protobuf message holds at most 2^31-1). Keep large weights in external data.", inputName);
+                    $"The model is {source.Length} bytes; the limit is {Math.Min(options.MaxModelBytes, int.MaxValue)} (a protobuf message holds at most 2^31-1). Keep large weights in external data.", inputName);
             }
 
             try

@@ -36,7 +36,7 @@ internal static class FormatWriter
 
             offsets[t] = next;
             tensors.Add(t);
-            next += (t.RawLength + Alignment - 1) / Alignment * Alignment;
+            next += ((long)t.RawLength + Alignment - 1) / Alignment * Alignment;
         }
 
         CollectGraph(model.Graph, Place);

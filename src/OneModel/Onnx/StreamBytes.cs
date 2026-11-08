@@ -20,7 +20,7 @@ internal static class StreamBytes
     public static byte[] ReadAll(Stream stream, long maxBytes, Func<string, byte[], Exception> tooLarge, CancellationToken cancellationToken)
     {
         long limit = Math.Min(maxBytes, Array.MaxLength);
-        string over = $"The stream holds more than {limit} bytes (ModelLoadOptions.MaxModelBytes); keep large weights in external data files.";
+        string over = $"The stream holds more than {limit} bytes (ModelLoadOptions.MaxModelBytes); load from a file path so it can be memory-mapped, or save ONNX weights as external data.";
         try
         {
             if (stream.CanSeek)

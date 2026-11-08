@@ -87,7 +87,7 @@ internal sealed unsafe class ByteSource : IDisposable
 
             if (length > Array.MaxLength)
             {
-                throw new NotSupportedException($"The file is {length} bytes; at most {Array.MaxLength} can be read into memory.");
+                throw new NotSupportedException($"The file is {length} bytes; at most {Array.MaxLength} can be read into memory. Load from a file path with MemoryMap enabled on a platform supporting memory mapping.");
             }
 
             var bytes = new byte[length];

@@ -7,6 +7,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Fixed
 
 - `If` no longer allocates argument arrays or an output-disposal enumerator on each call. Warm runs with caller-owned contiguous tensor inputs/outputs allocate no managed memory when the branches are allocation-free. Concurrent calls lease independent arrays; `Loop`, `Scan` and `SequenceMap` also reuse body argument arrays, though their other iteration bookkeeping still allocates.
+- Mapped OneModel containers can exceed 2 GiB; ONNX external-data offsets remain 64-bit. Unsupported whole-stream and unmapped paths fail with typed errors suggesting the supported alternatives. A single ONNX protobuf still must be smaller than 2 GiB.
 - Checkpoint loading no longer buffers the whole file. Saving and loading use bounded payload buffers and 64-bit file offsets, including checkpoints above 2 GiB. Loading requires a seekable stream; non-seekable inputs receive a typed error. The checkpoint bytes are unchanged.
 
 ### Changed

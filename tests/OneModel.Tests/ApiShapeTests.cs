@@ -151,7 +151,7 @@ public class ApiShapeTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new ModelLoadOptions { MaxNesting = 1000 });
         Assert.Throws<ArgumentOutOfRangeException>(() => new ModelLoadOptions { MaxNesting = 3 });
         Assert.Throws<ArgumentOutOfRangeException>(() => new ModelLoadOptions { MaxModelBytes = 0 });
-        Assert.Throws<ArgumentOutOfRangeException>(() => new ModelLoadOptions { MaxModelBytes = long.MaxValue });
+        Assert.Equal(long.MaxValue, new ModelLoadOptions { MaxModelBytes = long.MaxValue }.MaxModelBytes);
     }
 
     // ---- C6 operators -----------------------------------------------------------------------------------------------------

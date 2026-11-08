@@ -228,7 +228,7 @@ choose between this format and ONNX. Files of 1 MiB or more are memory-mapped (w
 view of the mapping, copied only when a session builds its weights; smaller files, streams and platforms without mapping read the
 file into memory. Alignment to 64 bytes lets a consumer use mapped weights in place with any vector width.
 
-Saving: `ModelFormat.Save(model, path | stream)` and `ModelFormat.Convert(inputPath, outputPath)`, which refuses to write over its input and also accepts a file already in this format. `ModelFormat.Detect(path | bytes)` says whether a file is ONNX, this format or neither by its first bytes. Loading takes `ModelLoadOptions`; its `MaxModelBytes` (default 2^31 − 1) is enforced while a stream is read, so an endless stream fails with an `Unsupported` error instead of exhausting memory.
+Saving: `ModelFormat.Save(model, path | stream)` and `ModelFormat.Convert(inputPath, outputPath)`, which refuses to write over its input and also accepts a file already in this format. `ModelFormat.Detect(path | bytes)` says whether a file is ONNX, this format or neither by its first bytes. Loading takes `ModelLoadOptions`; its `MaxModelBytes` (default `long.MaxValue`) is enforced while a stream is read, so an endless stream fails with an `Unsupported` error instead of exhausting memory.
 
 ## 6. Checks that back this text
 
@@ -237,3 +237,5 @@ Saving: `ModelFormat.Save(model, path | stream)` and `ModelFormat.Convert(inputP
 * `tools/format_read.py`: a reader in Python with numpy only, written from this text; `tools/format_check.py` compares its view of a
   converted model with the ONNX file byte for byte.
 * A fuzz target (`format`) in `fuzz/`.
+
+The container has no 2 GiB per-file limit: file lengths and tensor offsets are signed 64-bit values after validation. Load files above one managed byte array by path with `MemoryMap` enabled; if mapping is unavailable, loading fails with `ModelFormatException(Unsupported)` and a message naming the mapped path. Individual tensor byte sizes remain limited to 2^31 − 1. This changes no version-1 bytes.

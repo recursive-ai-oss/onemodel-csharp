@@ -9,7 +9,7 @@ namespace RecursiveAI.OneModel;
 public sealed class ModelLoadOptions
 {
     private readonly int _maxNesting = 128;
-    private readonly long _maxModelBytes = int.MaxValue;
+    private readonly long _maxModelBytes = long.MaxValue;
 
     /// <summary>
     /// Map files into memory instead of reading them. Tensor data then stays in the page cache and costs no managed memory until it
@@ -40,14 +40,14 @@ public sealed class ModelLoadOptions
     /// <summary>
     /// The most bytes a model file, stream or array may hold. A longer input fails with a typed error (an <c>Unsupported</c> kind of
     /// <c>OnnxImportException</c> or <c>ModelFormatException</c>) as soon as the limit is passed, so an endless stream cannot exhaust
-    /// memory. Default and maximum 2^31-1, the most one protobuf message can hold. Weights beyond that belong in external data files.
+    /// memory. Default long.MaxValue. Mapped OneModel files and ONNX external-data files use 64-bit offsets; a single ONNX protobuf must remain below 2 GiB. Ordinary streams and unmapped files are limited to one managed byte array; load large files by path with MemoryMap enabled.
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">The value is below 1 or above 2^31-1.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The value is below 1.</exception>
     public long MaxModelBytes
     {
         get => _maxModelBytes;
-        init => _maxModelBytes = value is >= 1 and <= int.MaxValue
+        init => _maxModelBytes = value >= 1
             ? value
-            : throw new ArgumentOutOfRangeException(nameof(value), value, "MaxModelBytes must be between 1 and 2^31-1.");
+            : throw new ArgumentOutOfRangeException(nameof(value), value, "MaxModelBytes must be positive.");
     }
 }

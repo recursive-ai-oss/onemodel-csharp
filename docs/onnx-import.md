@@ -140,7 +140,7 @@ These are single-machine, indicative figures, not a gated benchmark.
 
 Everything wrong with the input is one exception type carrying a kind (`Malformed` for bytes that are not valid protobuf, `InvalidModel`
 for valid protobuf that is not a valid model, `Unsupported`, `ExternalData`), the input's name, the byte offset when one is known,
-and the field path (`ModelProto.graph.node[3].attribute[1].t`). Offsets are from the start of the model file or byte array. A file that cannot be opened or read is not an import error: the platform exception (`FileNotFoundException`, ...) propagates unwrapped. `ModelLoadOptions.MaxModelBytes` (default and maximum 2^31 − 1) is enforced while a stream is read, and `MaxNesting` accepts 8 to 250.
+and the field path (`ModelProto.graph.node[3].attribute[1].t`). Offsets are from the start of the model file or byte array. A file that cannot be opened or read is not an import error: the platform exception (`FileNotFoundException`, ...) propagates unwrapped. `ModelLoadOptions.MaxModelBytes` (default `long.MaxValue`, independently capped below 2 GiB for the ONNX protobuf) is enforced while a stream is read, and `MaxNesting` accepts 8 to 250.
 
 ## 8. How the importer is checked
 
@@ -151,3 +151,9 @@ and the field path (`ModelProto.graph.node[3].attribute[1].t`). Offsets are from
 * The hostile inputs in `testdata/onnx/hostile` are named `<kind>-<case>.onnx`; the test suite regenerates them from code and expects
   each to be refused with that kind.
 * `fuzz/` holds libFuzzer targets for the model reader and the tensor reader; `tools/setup_fuzz.sh` and `tools/run_fuzz.sh` run them.
+
+## Large files
+
+The [protobuf encoding specification](https://protobuf.dev/programming-guides/encoding/#size-limit) says: “Protos must be smaller than 2 GiB when serialized.” A single ONNX protobuf above this limit is refused with `OnnxImportException(Unsupported)`, naming external data as the supported alternative. ONNX external-data files may exceed 2 GiB: offsets and lengths are checked in 64-bit arithmetic and mapped views address each tensor separately. A single tensor still holds at most 2^31 − 1 bytes; this does not impose a per-file limit. Unmapped external data reads only the requested tensor range.
+
+OneModel containers also use 64-bit file offsets and may exceed 2 GiB when loaded from a file path with `MemoryMap` enabled. Ordinary streams and unmapped whole files must fit one managed byte array. Unsupported loading paths fail with the format's typed `Unsupported` exception, suggesting a mapped file path or external ONNX weights. `MaxModelBytes` can impose a lower application limit; file lengths are checked before reading or allocating the whole input.
