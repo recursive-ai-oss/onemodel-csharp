@@ -2,7 +2,7 @@
 
 A neural-network runtime for .NET in pure managed C#, with no native binaries and no dependency beyond the shared framework. It loads ONNX models and its own format, optimizes the graph and runs it on SIMD CPU kernels, and it trains models on the same kernels.
 
-**Status:** 1.0. What works:
+What works:
 
 - **Inference:** ONNX import (our own protobuf reader, any opset from 7, external data), graph passes (constant folding, weight prepacking, conv/GEMM/attention fusions), memory planning, thread-safe sessions and the one-line `Model.Load(...).Run(...)`. Coverage of the ONNX backend test suite is published in [docs/conformance.md](docs/conformance.md), gaps included; control flow (`If`, `Loop`, `Scan`), sequences and optionals run.
 - **Data types:** fp32, fp16/bf16 models and weight storage, int8 (dynamic and static quantization, per-channel weights, QDQ graphs).
