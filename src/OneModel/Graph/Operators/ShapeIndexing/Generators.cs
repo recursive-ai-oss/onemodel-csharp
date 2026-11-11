@@ -41,6 +41,9 @@ internal sealed class ConstantOfShapeOp : OpKernel
         }
     }
 
+    /// <summary>The one element the output is filled with, for executors that fill the output themselves.</summary>
+    internal Tensor FillValue => _value;
+
     public override bool SupportsExact => true;
 
     public override void Infer(InferContext ctx)
