@@ -21,6 +21,14 @@ internal interface IExecutionBackend : IDisposable
     string Name { get; }
 
     /// <summary>
+    /// Which graph passes run for a session that offers its steps to this backend. Asked once per pass when the session is created, with the
+    /// pass's name and the lowest optimization level that runs it: null keeps the default (the level and arithmetic mode decide), false skips the
+    /// pass, true runs it also in exact mode. A pass above the session's level never runs. Operators a pass introduces reach
+    /// <see cref="CheckNode"/> and <see cref="ClaimStep"/> like any other; an operator the backend does not take stays on the host.
+    /// </summary>
+    bool? ChoosePass(string passName, OptimizationLevel minLevel) => null;
+
+    /// <summary>
     /// Asked once per node when a session is created, before any shape is known: can this backend ever run the node, given its operator,
     /// attributes and the session's arithmetic mode? Null means it may; otherwise the reason it cannot, in plain words.
     /// </summary>

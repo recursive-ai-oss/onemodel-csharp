@@ -183,6 +183,14 @@ internal sealed class PassGraph
 }
 
 /// <summary>The passes in the order they run, and the rule that picks them. A static table, like the operator table.</summary>
+/// <summary>
+/// Lets the owner of a session override the default choice of passes: null leaves it to the level and mode, false skips the pass, true
+/// runs it (also in exact mode, for a pass that does not preserve bits) provided the level reaches the pass's minimum.
+/// </summary>
+/// <param name="passName">The pass's <see cref="IGraphPass.Name"/>.</param>
+/// <param name="minLevel">The lowest level that runs the pass.</param>
+internal delegate bool? PassChoice(string passName, OptimizationLevel minLevel);
+
 internal static class GraphPasses
 {
     private static readonly IGraphPass[] s_all =
@@ -214,11 +222,14 @@ internal static class GraphPasses
         }
     }
 
-    private static bool Applies(IGraphPass p, OptimizationLevel level, ArithmeticMode mode) =>
-        level >= p.MinLevel && (mode != ArithmeticMode.Exact || p.PreservesBits);
+    private static bool Applies(IGraphPass p, OptimizationLevel level, ArithmeticMode mode, PassChoice? choose = null)
+    {
+        bool? choice = choose?.Invoke(p.Name, p.MinLevel);
+        return choice != false && level >= p.MinLevel && (choice == true || mode != ArithmeticMode.Exact || p.PreservesBits);
+    }
 
     /// <summary>Runs the passes that apply, then drops nodes nothing reads.</summary>
-    public static void Run(PassGraph graph, OptimizationLevel level, CancellationToken ct)
+    public static void Run(PassGraph graph, OptimizationLevel level, CancellationToken ct, PassChoice? choose = null)
     {
         if (level == OptimizationLevel.None)
         {
@@ -228,7 +239,7 @@ internal static class GraphPasses
         foreach (IGraphPass p in s_all)
         {
             ct.ThrowIfCancellationRequested();
-            if (Applies(p, level, graph.Mode))
+            if (Applies(p, level, graph.Mode, choose))
             {
                 p.Run(graph, ct);
                 graph.RemoveDeadNodes();

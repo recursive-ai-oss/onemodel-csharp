@@ -110,6 +110,9 @@ internal sealed class IntegerMatMulOp : OpKernel
         _float = toFloat;
     }
 
+    /// <summary>True for the product with its dequantization fused in (<see cref="MatMulIntegerToFloat"/>).</summary>
+    internal bool ToFloat => _float;
+
     public override bool SupportsExact => true;
 
     private static int AIn => 0;

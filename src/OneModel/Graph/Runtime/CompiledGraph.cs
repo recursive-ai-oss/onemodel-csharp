@@ -73,11 +73,12 @@ internal sealed class CompiledGraph : IDisposable
 
     /// <summary>As above, then runs the graph passes the level and mode select (Graph/Passes) for a session on <paramref name="path"/>.</summary>
     public static CompiledGraph Create(IrGraph graph, OpRegistry registry, ArithmeticMode mode, WeightStorage storage, OptimizationLevel level,
-        KernelPath path, int threads, CancellationToken ct)
+        KernelPath path, int threads, CancellationToken ct, PassChoice? choosePass = null)
     {
         var g = new CompiledGraph();
         try
         {
+            g._choosePass = choosePass;
             g.Build(graph, registry, mode, storage, level, path, threads, [], ct);
             return g;
         }
@@ -148,6 +149,8 @@ internal sealed class CompiledGraph : IDisposable
 
     /// <summary>Hands <paramref name="resource"/> to the graph, which disposes it with the last owner, after every plan has let go.</summary>
     public void Own(IDisposable resource) => _owned.Add(resource);
+
+    private PassChoice? _choosePass;
 
     private void Build(IrGraph graph, OpRegistry registry, ArithmeticMode mode, WeightStorage storage, OptimizationLevel level, KernelPath path,
         int threads, IReadOnlyList<IrValue> captures, CancellationToken ct)
@@ -401,7 +404,7 @@ internal sealed class CompiledGraph : IDisposable
         var pg = new PassGraph(nodes, [.. ValueNames], [.. Constants], InputIds, OutputIds, _kernels, mode, path, threads);
         try
         {
-            GraphPasses.Run(pg, level, ct);
+            GraphPasses.Run(pg, level, ct, _choosePass);
         }
         finally
         {

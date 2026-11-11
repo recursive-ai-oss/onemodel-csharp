@@ -35,6 +35,21 @@ internal sealed class AttentionOp : OpKernel
         _scale = scale;
     }
 
+    /// <summary>The layout of the query input.</summary>
+    internal AttentionLayout QueryLayout => _q;
+
+    /// <summary>The layout of the key input.</summary>
+    internal AttentionLayout KeyLayout => _k;
+
+    /// <summary>The layout of the value input.</summary>
+    internal AttentionLayout ValueLayout => _v;
+
+    /// <summary>The layout of the output.</summary>
+    internal AttentionLayout OutputLayout => _out;
+
+    /// <summary>The factor the scores are multiplied by before the mask is added.</summary>
+    internal float Scale => _scale;
+
     // The blocked kernel has an exact flavour, but the odd-head-dimension fallback does not, and the pass that makes this node
     // does not run in exact mode.
     public override bool SupportsExact => false;
