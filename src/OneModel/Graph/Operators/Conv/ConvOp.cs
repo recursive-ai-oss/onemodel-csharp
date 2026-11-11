@@ -82,6 +82,9 @@ internal sealed class ConvOp : OpKernel
     /// <summary>True when an activation is already fused in.</summary>
     internal bool HasActivation => _activation is not null;
 
+    /// <summary>The fused activation, or null.</summary>
+    internal FusedActivation? Activation => _activation;
+
     private ConvOp(NodeInfo node)
     {
         _attrs = new WindowAttrs(node, hasDilations: true);

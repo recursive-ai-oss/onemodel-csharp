@@ -43,6 +43,9 @@ internal readonly struct ErfUnary : IFloatUnary
 /// <summary>Gelu: 0.5 x (1 + erf(x / sqrt 2)), or the tanh approximation.</summary>
 internal readonly struct GeluUnary(bool tanhForm) : IFloatUnary
 {
+    /// <summary>True for the tanh approximation, false for the erf form.</summary>
+    public bool TanhForm => tanhForm;
+
     public TV Apply<TV, TO>(TV x) where TV : struct where TO : IVecOps<TV> =>
         tanhForm ? Transcendental.GeluTanh<TV, TO>(x) : TO.Fused ? Transcendental.GeluErfFast<TV, TO>(x) : Transcendental.GeluErf<TV, TO>(x);
 }
@@ -50,6 +53,9 @@ internal readonly struct GeluUnary(bool tanhForm) : IFloatUnary
 /// <summary>LeakyRelu: x for x &gt;= 0 (and NaN), alpha * x for x &lt; 0.</summary>
 internal readonly struct LeakyReluUnary(float alpha) : IFloatUnary
 {
+    /// <summary>The slope for negative inputs.</summary>
+    public float Alpha => alpha;
+
     public TV Apply<TV, TO>(TV x) where TV : struct where TO : IVecOps<TV> =>
         TO.Select(TO.LessThan(x, TO.Zero), TO.Mul(x, TO.Splat(alpha)), x);
 }
@@ -57,6 +63,12 @@ internal readonly struct LeakyReluUnary(float alpha) : IFloatUnary
 /// <summary>HardSigmoid: clamp(alpha * x + beta, 0, 1), computed as a rounded product and then a rounded sum.</summary>
 internal readonly struct HardSigmoidUnary(float alpha, float beta) : IFloatUnary
 {
+    /// <summary>The slope.</summary>
+    public float Alpha => alpha;
+
+    /// <summary>The offset.</summary>
+    public float Beta => beta;
+
     public TV Apply<TV, TO>(TV x) where TV : struct where TO : IVecOps<TV> => Clamp01<TV, TO>(TO.Add(TO.Mul(x, TO.Splat(alpha)), TO.Splat(beta)));
 
     internal static TV Clamp01<TV, TO>(TV t) where TV : struct where TO : IVecOps<TV>

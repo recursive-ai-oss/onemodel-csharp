@@ -25,12 +25,21 @@ internal sealed class ReluActivation : FusedActivation
 /// <summary>Clip with both bounds present (Relu6 is Clip(0, 6)).</summary>
 internal sealed class ClipActivation(float lo, float hi) : FusedActivation
 {
+    /// <summary>The lower bound.</summary>
+    public float Lo => lo;
+
+    /// <summary>The upper bound.</summary>
+    public float Hi => hi;
+
     public override void Apply(KernelPath path, bool exact, Span<float> row) => UnaryLoops.Clip<float>(row, row, true, lo, true, hi);
 }
 
 /// <summary>Any <see cref="IFloatUnary"/> function (HardSwish, Sigmoid, HardSigmoid, Gelu, Tanh, LeakyRelu).</summary>
 internal sealed class FloatActivation<TOp>(TOp op) : FusedActivation where TOp : struct, IFloatUnary
 {
+    /// <summary>The function, with its parameters.</summary>
+    public TOp Function => op;
+
     public override void Apply(KernelPath path, bool exact, Span<float> row) => FloatUnary.Run(path, exact, op, row, row);
 }
 
