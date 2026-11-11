@@ -125,7 +125,7 @@ internal sealed class ConvResidualFusionPass : IGraphPass
 
     public void Run(PassGraph g, CancellationToken ct)
     {
-        if (g.Mode == ArithmeticMode.Exact)
+        if (g.Mode == ArithmeticMode.Exact && !g.RequestedByBackend)
         {
             return;
         }

@@ -69,6 +69,12 @@ internal sealed class PassGraph
 
     public int Threads { get; }
 
+    /// <summary>
+    /// True while a pass runs that the session's execution backend asked for by name. A pass that is skipped in exact mode because the
+    /// built-in kernels cannot honour it there runs anyway, when the backend's own kernels can.
+    /// </summary>
+    public bool RequestedByBackend { get; internal set; }
+
     public int ValueCount => _names.Count;
 
     public string NameOf(int id) => _names[id];
@@ -241,7 +247,9 @@ internal static class GraphPasses
             ct.ThrowIfCancellationRequested();
             if (Applies(p, level, graph.Mode, choose))
             {
+                graph.RequestedByBackend = choose?.Invoke(p.Name, p.MinLevel) == true;
                 p.Run(graph, ct);
+                graph.RequestedByBackend = false;
                 graph.RemoveDeadNodes();
             }
         }
