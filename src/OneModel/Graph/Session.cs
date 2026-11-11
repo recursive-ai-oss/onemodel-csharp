@@ -71,16 +71,68 @@ public sealed class Session : IDisposable
     public static Session Create(IrModel model, ModelOptions? options = null, CancellationToken cancellationToken = default) =>
         Create(model, options, OpRegistry.Default, null, cancellationToken);
 
-    internal static Session Create(IrModel model, ModelOptions? options, OpRegistry registry, KernelPath? path, CancellationToken cancellationToken)
+    internal static Session Create(IrModel model, ModelOptions? options, OpRegistry registry, KernelPath? path, CancellationToken cancellationToken) =>
+        Create(model, options, registry, path, null, cancellationToken);
+
+    // As above with an execution backend that is offered every plan's steps. The session takes ownership of the backend (the compiled
+    // graph disposes it after the last plan is gone), also when creation fails.
+    internal static Session Create(IrModel model, ModelOptions? options, OpRegistry registry, KernelPath? path, IExecutionBackend? backend,
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(model);
-        options ??= new ModelOptions();
-        options.Validate();
-        KernelPath chosen = path ?? KernelPaths.Best();
-        int threads = options.IntraOpThreads == 0 ? ParallelFor.DefaultThreads : options.IntraOpThreads;
-        var env = new SessionEnv(options.Mode, chosen, threads, BufferPool.Shared);
-        CompiledGraph graph = CompiledGraph.Create(model.Graph, registry, options.Mode, options.WeightStorage, options.OptimizationLevel, chosen, threads, cancellationToken);
-        return new Session(graph, options, env);
+        try
+        {
+            ArgumentNullException.ThrowIfNull(model);
+            options ??= new ModelOptions();
+            options.Validate();
+            KernelPath chosen = path ?? KernelPaths.Best();
+            int threads = options.IntraOpThreads == 0 ? ParallelFor.DefaultThreads : options.IntraOpThreads;
+            var env = new SessionEnv(options.Mode, chosen, threads, BufferPool.Shared, backend);
+            CompiledGraph graph = CompiledGraph.Create(model.Graph, registry, options.Mode, options.WeightStorage, options.OptimizationLevel, chosen, threads, cancellationToken);
+            if (backend is not null)
+            {
+                graph.Own(backend);
+                backend = null;
+            }
+
+            var session = new Session(graph, options, env);
+            if (env.Backend is { } b)
+            {
+                var declined = new List<NodeDecline>();
+                foreach (CompiledNode node in graph.Nodes)
+                {
+                    if (b.CheckNode(node, options.Mode) is { } reason)
+                    {
+                        declined.Add(new NodeDecline(node.Info.Name, node.Info.OpType, reason));
+                    }
+                }
+
+                session.BackendDeclines = [.. declined];
+            }
+
+            return session;
+        }
+        catch
+        {
+            backend?.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Nodes the backend said at creation it can never run, with the reason. Empty without a backend.</summary>
+    internal ImmutableArray<NodeDecline> BackendDeclines { get; private set; } = [];
+
+    /// <summary>Where each scheduled node runs for inputs of these types and shapes, and the bytes a run moves to and from the backend.</summary>
+    internal (NodePlacement[] Nodes, int Regions, long BytesToBackend, long BytesFromBackend) PlacementOf(ReadOnlySpan<DType> types, ReadOnlySpan<Shape> shapes)
+    {
+        ExecutionPlan p = AcquirePlan(types, shapes);
+        try
+        {
+            return (p.Placements(), p.Regions.Length, p.Program?.BytesToBackendPerRun ?? 0, p.Program?.BytesFromBackendPerRun ?? 0);
+        }
+        finally
+        {
+            p.Release();
+        }
     }
 
     // A body of If, Loop, Scan or SequenceMap: the graph's own inputs, then the outer values it reads, as inputs.

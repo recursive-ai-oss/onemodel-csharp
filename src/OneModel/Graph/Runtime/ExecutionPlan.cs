@@ -7,7 +7,12 @@ using RecursiveAI.OneModel.Tensors;
 namespace RecursiveAI.OneModel.Graph.Runtime;
 
 /// <summary>What a session fixes once: the mode, the instruction set, the thread budget and where memory comes from.</summary>
-internal sealed record SessionEnv(ArithmeticMode Mode, KernelPath Path, int Threads, BufferPool Pool);
+/// <param name="Mode">Fast or exact arithmetic.</param>
+/// <param name="Path">The instruction set of the built-in kernels.</param>
+/// <param name="Threads">The thread budget of one run.</param>
+/// <param name="Pool">Where tensors come from.</param>
+/// <param name="Backend">An execution backend offered the steps of every plan, or null for the built-in kernels alone. The compiled graph owns it.</param>
+internal sealed record SessionEnv(ArithmeticMode Mode, KernelPath Path, int Threads, BufferPool Pool, IExecutionBackend? Backend = null);
 
 internal enum ValueKind : byte
 {
@@ -47,6 +52,12 @@ internal sealed class PlanStep
 
     /// <summary>Slab ranges that become free after this step (used to poison them in checked builds).</summary>
     public (long Offset, long Size)[] Freed { get; set; } = [];
+
+    /// <summary>The backend region that runs this step, or null when the built-in kernels do.</summary>
+    public BackendRegion? Region { get; set; }
+
+    /// <summary>When a backend was offered this step and declined, why; null otherwise.</summary>
+    public string? FallbackReason { get; set; }
 }
 
 /// <summary>
@@ -110,6 +121,12 @@ internal sealed class ExecutionPlan : IDisposable
 
     /// <summary>Slab byte offset of each input's staging area (where a span input is copied to).</summary>
     public long[] StagingOffsets { get; private set; } = [];
+
+    /// <summary>The runs of steps a backend executes, in schedule order; empty without a backend or when it accepted nothing.</summary>
+    public BackendRegion[] Regions { get; private set; } = [];
+
+    /// <summary>The backend's compiled regions, or null when <see cref="Regions"/> is empty.</summary>
+    public IBackendProgram? Program { get; private set; }
 
     public int MaxNodeInputs { get; private set; }
 
@@ -211,6 +228,8 @@ internal sealed class ExecutionPlan : IDisposable
             }
         }
 
+        Program?.Dispose();
+        Program = null;
         foreach (Tensor t in _owned)
         {
             t.Dispose();
@@ -233,6 +252,7 @@ internal sealed class ExecutionPlan : IDisposable
         {
             p.Shape(ct);
             p.Schedule();
+            p.AssignBackend();
             return p;
         }
         catch
@@ -438,6 +458,146 @@ internal sealed class ExecutionPlan : IDisposable
 
         step.State = k.Prepare(new PrepareContext(consts, _owned, Env.Mode, Env.Path, inTypes));
         steps.Add(step);
+    }
+
+    /// <summary>Where every scheduled node runs, in schedule order. Nodes evaluated while the plan was made do not appear.</summary>
+    public NodePlacement[] Placements()
+    {
+        var r = new NodePlacement[Steps.Length];
+        for (int i = 0; i < r.Length; i++)
+        {
+            PlanStep st = Steps[i];
+            r[i] = st.Region is { } reg
+                ? new NodePlacement(st.Node.Info.Name, st.Node.Info.OpType, Env.Backend!.Name, reg.Index, null)
+                : new NodePlacement(st.Node.Info.Name, st.Node.Info.OpType, "cpu", -1, st.FallbackReason);
+        }
+
+        return r;
+    }
+
+    // Offers every step to the backend, then groups the accepted steps that follow each other into regions. Consecutive in the
+    // schedule means a region's inputs are all made before its first step and nothing between its steps needs its results.
+    private void AssignBackend()
+    {
+        IExecutionBackend? backend = Env.Backend;
+        if (backend is null)
+        {
+            return;
+        }
+
+        var accepted = new bool[Steps.Length];
+        for (int i = 0; i < Steps.Length; i++)
+        {
+            PlanStep st = Steps[i];
+            string? reason = st.Dynamic ? "its output shape is only known at run time"
+                : st.IsView ? "it only reinterprets its input in place"
+                : backend.ClaimStep(this, st);
+            accepted[i] = reason is null;
+            st.FallbackReason = reason;
+        }
+
+        // The steps that read each value, to tell which results leave a region.
+        var readers = new List<int>?[Graph.ValueCount];
+        for (int i = 0; i < Steps.Length; i++)
+        {
+            foreach (int id in Steps[i].Node.Inputs)
+            {
+                if (id >= 0)
+                {
+                    (readers[id] ??= []).Add(i);
+                }
+            }
+        }
+
+        var graphOutput = new bool[Graph.ValueCount];
+        foreach (int id in Graph.OutputIds)
+        {
+            graphOutput[id] = true;
+        }
+
+        var regions = new List<BackendRegion>();
+        for (int first = 0; first < Steps.Length; first++)
+        {
+            if (!accepted[first])
+            {
+                continue;
+            }
+
+            int last = first;
+            while (last + 1 < Steps.Length && accepted[last + 1])
+            {
+                last++;
+            }
+
+            var madeHere = new HashSet<int>();
+            var inputs = new List<int>();
+            var constants = new List<int>();
+            var outputs = new List<int>();
+            for (int i = first; i <= last; i++)
+            {
+                foreach (int id in Steps[i].Node.Inputs)
+                {
+                    if (id < 0)
+                    {
+                        continue;
+                    }
+
+                    if (Kinds[id] == ValueKind.Const)
+                    {
+                        if (!constants.Contains(id))
+                        {
+                            constants.Add(id);
+                        }
+                    }
+                    else if (!madeHere.Contains(id) && !inputs.Contains(id))
+                    {
+                        inputs.Add(id);
+                    }
+                }
+
+                foreach (int id in Steps[i].Node.Outputs)
+                {
+                    if (id < 0)
+                    {
+                        continue;
+                    }
+
+                    madeHere.Add(id);
+                    bool leaves = graphOutput[id];
+                    if (!leaves && readers[id] is { } rs)
+                    {
+                        foreach (int r in rs)
+                        {
+                            if (r < first || r > last)
+                            {
+                                leaves = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (leaves)
+                    {
+                        outputs.Add(id);
+                    }
+                }
+            }
+
+            var region = new BackendRegion(regions.Count, first, last, Steps[first..(last + 1)], [.. inputs], [.. constants], [.. outputs]);
+            regions.Add(region);
+            for (int i = first; i <= last; i++)
+            {
+                Steps[i].Region = region;
+            }
+
+            first = last;
+        }
+
+        if (regions.Count > 0)
+        {
+            Regions = [.. regions];
+            Program = backend.Compile(this, Regions);
+        }
     }
 
     private void SetConst(int id, Tensor value, bool owned)

@@ -144,6 +144,10 @@ internal sealed class CompiledGraph : IDisposable
     }
 
     private readonly List<OpKernel> _kernels = [];
+    private readonly List<IDisposable> _owned = [];
+
+    /// <summary>Hands <paramref name="resource"/> to the graph, which disposes it with the last owner, after every plan has let go.</summary>
+    public void Own(IDisposable resource) => _owned.Add(resource);
 
     private void Build(IrGraph graph, OpRegistry registry, ArithmeticMode mode, WeightStorage storage, OptimizationLevel level, KernelPath path,
         int threads, IReadOnlyList<IrValue> captures, CancellationToken ct)
@@ -600,6 +604,12 @@ internal sealed class CompiledGraph : IDisposable
         }
 
         _kernels.Clear();
+        foreach (IDisposable r in _owned)
+        {
+            r.Dispose();
+        }
+
+        _owned.Clear();
         foreach (Tensor c in Constants)
         {
             if (!c.IsEmpty)

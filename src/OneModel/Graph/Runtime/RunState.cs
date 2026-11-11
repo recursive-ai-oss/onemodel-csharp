@@ -88,8 +88,19 @@ internal sealed class RunState : IDisposable
         _arena.Reset();
         try
         {
-            foreach (PlanStep step in _plan.Steps)
+            PlanStep[] steps = _plan.Steps;
+            for (int i = 0; i < steps.Length; i++)
             {
+                PlanStep step = steps[i];
+                if (step.Region is { } region)
+                {
+                    // The backend runs the whole region. Its outputs may reuse slab ranges that earlier steps of the region freed, so
+                    // checked builds do not poison them here.
+                    _plan.Program!.Run(region.Index, Values);
+                    i = region.LastStep;
+                    continue;
+                }
+
                 if (step.Dynamic)
                 {
                     ExecuteDynamic(step);
