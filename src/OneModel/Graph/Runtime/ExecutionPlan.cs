@@ -251,8 +251,9 @@ internal sealed class ExecutionPlan : IDisposable
         try
         {
             p.Shape(ct);
-            p.Schedule();
             p.AssignBackend();
+            p.Schedule();
+            p.CompileBackend();
             return p;
         }
         catch
@@ -475,8 +476,8 @@ internal sealed class ExecutionPlan : IDisposable
         return r;
     }
 
-    // Offers every step to the backend, then groups the accepted steps that follow each other into regions. Consecutive in the
-    // schedule means a region's inputs are all made before its first step and nothing between its steps needs its results.
+    // Offers every step to the backend, orders the steps so the accepted ones run together, and groups them into regions. This runs
+    // before memory planning, because the order decides which values live at the same time.
     private void AssignBackend()
     {
         IExecutionBackend? backend = Env.Backend;
@@ -485,20 +486,142 @@ internal sealed class ExecutionPlan : IDisposable
             return;
         }
 
-        var accepted = new bool[Steps.Length];
-        for (int i = 0; i < Steps.Length; i++)
+        bool views = backend.ClaimsViews;
+        foreach (PlanStep st in Steps)
         {
-            PlanStep st = Steps[i];
-            string? reason = st.Dynamic ? "its output shape is only known at run time"
-                : st.IsView ? "it only reinterprets its input in place"
+            st.FallbackReason = st.Dynamic ? "its output shape is only known at run time"
+                : st.IsView && !views ? "it only reinterprets its input in place"
                 : backend.ClaimStep(this, st);
-            accepted[i] = reason is null;
-            st.FallbackReason = reason;
         }
+
+        // A view has no host copy when the backend holds its source, so a claimed view whose result is read outside its region has
+        // to stay on the host (and then its source leaves the region instead). Declining one can split a region, so repeat until stable.
+        PlanStep[] scheduled = Steps;
+        List<BackendRegion> regions;
+        while (true)
+        {
+            Steps = OrderForRegions(scheduled);
+            regions = FormRegions(out List<PlanStep> strandedViews);
+            if (strandedViews.Count == 0)
+            {
+                break;
+            }
+
+            foreach (PlanStep v in strandedViews)
+            {
+                v.FallbackReason = "it only reinterprets its input in place, and its result is read outside the backend region that holds the input";
+            }
+        }
+
+        _regions = regions;
+        Regions = [.. regions];
+        foreach (BackendRegion r in regions)
+        {
+            for (int i = r.FirstStep; i <= r.LastStep; i++)
+            {
+                Steps[i].Region = r;
+            }
+        }
+    }
+
+    private List<BackendRegion> _regions = [];
+
+    // Hands the regions to the backend once the schedule is final.
+    private void CompileBackend()
+    {
+        if (_regions.Count > 0)
+        {
+            Program = Env.Backend!.Compile(this, Regions);
+        }
+    }
+
+    // A stable reordering of the schedule that runs a step the backend did not take as soon as its inputs exist, and a step it took
+    // only when no host step is ready. Backend steps that were far apart because unrelated host work sat between them end up
+    // adjacent, so they form one region instead of several; dependencies are never broken, so results are unchanged.
+    private PlanStep[] OrderForRegions(PlanStep[] scheduled)
+    {
+        int n = scheduled.Length;
+        bool any = false;
+        foreach (PlanStep st in scheduled)
+        {
+            any |= st.FallbackReason is null;
+        }
+
+        if (!any)
+        {
+            return scheduled;
+        }
+
+        var producer = new int[Graph.ValueCount];
+        Array.Fill(producer, -1);
+        for (int i = 0; i < n; i++)
+        {
+            foreach (int id in scheduled[i].Node.Outputs)
+            {
+                if (id >= 0)
+                {
+                    producer[id] = i;
+                }
+            }
+        }
+
+        var waiting = new int[n];
+        var dependents = new List<int>?[n];
+        for (int i = 0; i < n; i++)
+        {
+            foreach (int id in scheduled[i].Node.Inputs)
+            {
+                int p = id >= 0 ? producer[id] : -1;
+                if (p >= 0 && p != i && !(dependents[p]?.Contains(i) ?? false))
+                {
+                    (dependents[p] ??= []).Add(i);
+                    waiting[i]++;
+                }
+            }
+        }
+
+        var host = new SortedSet<int>();
+        var accepted = new SortedSet<int>();
+        for (int i = 0; i < n; i++)
+        {
+            if (waiting[i] == 0)
+            {
+                (scheduled[i].FallbackReason is null ? accepted : host).Add(i);
+            }
+        }
+
+        var order = new PlanStep[n];
+        for (int k = 0; k < n; k++)
+        {
+            SortedSet<int> from = host.Count > 0 ? host : accepted;
+            int next = from.Min;
+            from.Remove(next);
+            order[k] = scheduled[next];
+            if (dependents[next] is { } ds)
+            {
+                foreach (int d in ds)
+                {
+                    if (--waiting[d] == 0)
+                    {
+                        (scheduled[d].FallbackReason is null ? accepted : host).Add(d);
+                    }
+                }
+            }
+        }
+
+        return order;
+    }
+
+    // Groups the accepted steps that follow each other in the current schedule into regions. Consecutive in the schedule means a
+    // region's inputs are all made before its first step and nothing between its steps needs its results.
+    private List<BackendRegion> FormRegions(out List<PlanStep> strandedViews)
+    {
+        strandedViews = [];
+        int count = Steps.Length;
 
         // The steps that read each value, to tell which results leave a region.
         var readers = new List<int>?[Graph.ValueCount];
-        for (int i = 0; i < Steps.Length; i++)
+        for (int i = 0; i < count; i++)
         {
             foreach (int id in Steps[i].Node.Inputs)
             {
@@ -516,15 +639,15 @@ internal sealed class ExecutionPlan : IDisposable
         }
 
         var regions = new List<BackendRegion>();
-        for (int first = 0; first < Steps.Length; first++)
+        for (int first = 0; first < count; first++)
         {
-            if (!accepted[first])
+            if (Steps[first].FallbackReason is not null)
             {
                 continue;
             }
 
             int last = first;
-            while (last + 1 < Steps.Length && accepted[last + 1])
+            while (last + 1 < count && Steps[last + 1].FallbackReason is null)
             {
                 last++;
             }
@@ -579,25 +702,19 @@ internal sealed class ExecutionPlan : IDisposable
                     if (leaves)
                     {
                         outputs.Add(id);
+                        if (Steps[i].IsView)
+                        {
+                            strandedViews.Add(Steps[i]);
+                        }
                     }
                 }
             }
 
-            var region = new BackendRegion(regions.Count, first, last, Steps[first..(last + 1)], [.. inputs], [.. constants], [.. outputs]);
-            regions.Add(region);
-            for (int i = first; i <= last; i++)
-            {
-                Steps[i].Region = region;
-            }
-
+            regions.Add(new BackendRegion(regions.Count, first, last, Steps[first..(last + 1)], [.. inputs], [.. constants], [.. outputs]));
             first = last;
         }
 
-        if (regions.Count > 0)
-        {
-            Regions = [.. regions];
-            Program = backend.Compile(this, Regions);
-        }
+        return regions;
     }
 
     private void SetConst(int id, Tensor value, bool owned)

@@ -46,6 +46,10 @@ public class ExecutionBackendTests
 
         public FakeBackend(params string[] ops) => _ops = [.. ops];
 
+        public bool Views { get; init; }
+
+        public bool ClaimsViews => Views;
+
         public string Name => "fake";
 
         public string? CheckNode(CompiledNode node, ArithmeticMode mode) =>
@@ -76,6 +80,14 @@ public class ExecutionBackendTests
                 foreach (PlanStep step in regions[region].Steps)
                 {
                     CompiledNode n = step.Node;
+                    if (step.IsView)
+                    {
+                        // A claimed view has no host storage of its own: it is a reshaped alias of its input.
+                        Assert.True(values[n.Inputs[n.Kernel.ViewOfInput]].TryReshape(step.OutShapes[0], out Tensor view));
+                        values[n.Outputs[0]] = view;
+                        continue;
+                    }
+
                     var ins = new Tensor[n.Inputs.Length];
                     for (int i = 0; i < ins.Length; i++)
                     {
@@ -206,5 +218,97 @@ public class ExecutionBackendTests
         var fake = new FakeBackend();
         Assert.Throws<SessionException>(() => CreateSession(model, new ModelOptions(), fake));
         Assert.Equal(1, fake.Disposed);
+    }
+
+    // m1 = MatMul(x, w); h = Add(x, b) does not depend on m1; r = Relu(m1); y = Add(r, h). Without reordering the independent Add
+    // splits the two device steps into two regions.
+    [Fact]
+    public void IndependentHostStepsAreMovedAheadSoDeviceStepsShareARegion()
+    {
+        var rng = new Random(3);
+        float[] Weights(int n) => [.. Enumerable.Range(0, n).Select(_ => (float)rng.NextDouble() - 0.5f)];
+        byte[] model = new ModelBuilder()
+            .Input("x", 1, "N", 16).Output("y", 1, "N", 16)
+            .Initializer("w", Weights(256), 16, 16)
+            .Initializer("b", Weights(16), 16)
+            .Node("MatMul", ["x", "w"], ["m1"])
+            .Node("Add", ["x", "b"], ["h"])
+            .Node("Relu", ["m1"], ["r"])
+            .Node("Add", ["r", "h"], ["y"])
+            .Build();
+        var options = new ModelOptions { OptimizationLevel = OptimizationLevel.None, IntraOpThreads = 2 };
+        float[] x = Input(5, 16), expected = new float[80], actual = new float[80];
+        using (Session plain = CreateSession(model, options, null))
+        {
+            plain.Run("x", x.AsSpan(), [5, 16], "y", expected.AsSpan());
+        }
+
+        var fake = new FakeBackend("MatMul", "Relu");
+        using Session s = CreateSession(model, options, fake);
+        s.Run("x", x.AsSpan(), [5, 16], "y", actual.AsSpan());
+        Assert.Equal(SessionTests.Hash(expected), SessionTests.Hash(actual));
+
+        var (nodes, regions, _, _) = s.PlacementOf([DType.F32], [Shape.Create([5, 16])]);
+        Assert.Equal(1, regions);
+        Assert.Equal(["Add", "MatMul", "Relu", "Add"], nodes.Select(n => n.OpType));
+        Assert.Equal([-1, 0, 0, -1], nodes.Select(n => n.Region));
+    }
+
+    // x -> MatMul -> Reshape -> Relu -> y: the Reshape is a view of a value the backend holds, so it stays inside the region.
+    [Fact]
+    public void AClaimedViewStaysInsideItsRegion()
+    {
+        var rng = new Random(4);
+        byte[] model = new ModelBuilder()
+            .Input("x", 1, 4, 8).Output("y", 1, 8, 4)
+            .Initializer("w", [.. Enumerable.Range(0, 64).Select(_ => (float)rng.NextDouble() - 0.5f)], 8, 8)
+            .Initializer("shape", [8L, 4L], 2)
+            .Node("MatMul", ["x", "w"], ["m"])
+            .Node("Reshape", ["m", "shape"], ["v"])
+            .Node("Relu", ["v"], ["y"])
+            .Build();
+        var options = new ModelOptions { OptimizationLevel = OptimizationLevel.None, IntraOpThreads = 2 };
+        float[] x = Input(4, 8), expected = new float[32], actual = new float[32];
+        using (Session plain = CreateSession(model, options, null))
+        {
+            plain.Run("x", x.AsSpan(), [4, 8], "y", expected.AsSpan());
+        }
+
+        var fake = new FakeBackend("MatMul", "Relu", "Reshape") { Views = true };
+        using Session s = CreateSession(model, options, fake);
+        s.Run("x", x.AsSpan(), [4, 8], "y", actual.AsSpan());
+        Assert.Equal(SessionTests.Hash(expected), SessionTests.Hash(actual));
+        var (nodes, regions, _, _) = s.PlacementOf([DType.F32], [Shape.Create([4, 8])]);
+        Assert.Equal(1, regions);
+        Assert.All(nodes, n => Assert.Equal("fake", n.Backend));
+    }
+
+    // A view the host reads (here it is the graph output) cannot be claimed: it stays on the host, and its source leaves the region.
+    [Fact]
+    public void AClaimedViewReadOutsideItsRegionStaysOnTheHost()
+    {
+        var rng = new Random(4);
+        byte[] model = new ModelBuilder()
+            .Input("x", 1, 4, 8).Output("v", 1, 8, 4)
+            .Initializer("w", [.. Enumerable.Range(0, 64).Select(_ => (float)rng.NextDouble() - 0.5f)], 8, 8)
+            .Initializer("shape", [8L, 4L], 2)
+            .Node("MatMul", ["x", "w"], ["m"])
+            .Node("Reshape", ["m", "shape"], ["v"])
+            .Build();
+        var options = new ModelOptions { OptimizationLevel = OptimizationLevel.None, IntraOpThreads = 2 };
+        float[] x = Input(4, 8), expected = new float[32], actual = new float[32];
+        using (Session plain = CreateSession(model, options, null))
+        {
+            plain.Run("x", x.AsSpan(), [4, 8], "v", expected.AsSpan());
+        }
+
+        var fake = new FakeBackend("MatMul", "Reshape") { Views = true };
+        using Session s = CreateSession(model, options, fake);
+        s.Run("x", x.AsSpan(), [4, 8], "v", actual.AsSpan());
+        Assert.Equal(SessionTests.Hash(expected), SessionTests.Hash(actual));
+        var (nodes, regions, _, _) = s.PlacementOf([DType.F32], [Shape.Create([4, 8])]);
+        Assert.Equal(1, regions);
+        Assert.Equal(["fake", "cpu"], nodes.Select(n => n.Backend));
+        Assert.Contains("read outside", nodes[1].Reason);
     }
 }

@@ -7,7 +7,8 @@ namespace RecursiveAI.OneModel.Graph.Runtime;
 /// <summary>
 /// An execution backend runs some of a plan's steps somewhere other than the built-in CPU kernels. The plan offers each shaped step
 /// to the backend, groups the accepted steps that follow each other into <see cref="BackendRegion"/>s, and hands the regions back
-/// to be compiled once per plan. A region is the unit of transfer: its inputs are made available to the backend before it runs and
+/// to be compiled once per plan. The plan moves steps the backend did not take ahead of ones it did, as far as their inputs allow, so that
+/// accepted steps are adjacent and form few regions. A region is the unit of transfer: its inputs are made available to the backend before it runs and
 /// its outputs are back in host memory when it returns, so nothing crosses between host and backend inside a region.
 /// </summary>
 /// <remarks>
@@ -26,8 +27,15 @@ internal interface IExecutionBackend : IDisposable
     string? CheckNode(CompiledNode node, ArithmeticMode mode);
 
     /// <summary>
-    /// Asked once per statically shaped, non-view step when a plan is built, in schedule order, with the plan's value types, shapes and
-    /// constants available. Null accepts the step; otherwise the reason it stays on the host.
+    /// Whether the backend wants to be offered view steps (operators that only reinterpret their input's storage, such as Reshape) as well.
+    /// A claimed view must give its output the same storage as its input. A claimed view whose result is read outside its region stays on
+    /// the host instead, because the backend's storage has no host copy of the source to view.
+    /// </summary>
+    bool ClaimsViews => false;
+
+    /// <summary>
+    /// Asked once per statically shaped step when a plan is built (view steps only when <see cref="ClaimsViews"/>), in schedule order, with
+    /// the plan's value types, shapes and constants available. Null accepts the step; otherwise the reason it stays on the host.
     /// </summary>
     string? ClaimStep(ExecutionPlan plan, PlanStep step);
 
