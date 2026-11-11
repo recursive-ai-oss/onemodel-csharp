@@ -49,6 +49,9 @@ internal sealed class HalfAdapterKernel : OpKernel
     /// <summary>Wraps <paramref name="kernel"/>; <paramref name="keepCompact"/> marks the inputs whose half-precision constants stay compact.</summary>
     public static OpKernel Wrap(string opType, OpKernel kernel, bool[] keepCompact) => new HalfAdapterKernel(kernel, opType, keepCompact);
 
+    /// <summary>The kernel this adapter runs on binary32 copies, for an executor that handles the operator itself and needs its settings.</summary>
+    internal OpKernel Inner => _inner;
+
     public override bool SupportsExact => _inner.SupportsExact;
 
     public override int InPlaceInput => _inner.InPlaceInput;
