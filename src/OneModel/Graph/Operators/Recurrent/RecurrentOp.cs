@@ -66,6 +66,36 @@ internal abstract class RecurrentOp : OpKernel
 
     public override bool SupportsExact => true;
 
+    // The layer's attributes as the node declared them, with the activations resolved (names, alpha and beta defaulted), for other
+    // executors of a plan that run the layer with their own kernels and must agree with this one on what it means.
+
+    /// <summary>RNN, GRU or LSTM.</summary>
+    internal RecurrentCell Cell => _cell;
+
+    /// <summary>1, or 2 for a bidirectional layer.</summary>
+    internal int Directions => _dirs;
+
+    /// <summary>True for a one-direction layer that runs from the last step to the first.</summary>
+    internal bool ReverseOnly => _reverseFirst;
+
+    /// <summary>True when X and Y are batch-major (layout 1).</summary>
+    internal bool Layout1 => _layout1;
+
+    /// <summary>The clip bound, 0 for none.</summary>
+    internal float Clip => _clip;
+
+    /// <summary>LSTM only: couple the forget gate to the input gate.</summary>
+    internal bool InputForget => _inputForget;
+
+    /// <summary>GRU only: apply the recurrence weights' bias before the reset gate.</summary>
+    internal bool LinearBeforeReset => _linearBeforeReset;
+
+    /// <summary>Activations per direction (3 for an LSTM, 2 for a GRU, 1 for an RNN).</summary>
+    internal int ActivationsPerDirection => _actsPer;
+
+    /// <summary>The resolved activations, <see cref="ActivationsPerDirection"/> for each direction in turn.</summary>
+    internal ReadOnlySpan<RecurrentActivation> Activations => _acts;
+
     public override void Infer(InferContext ctx)
     {
         int g = RecurrentKernel.Gates(_cell);
