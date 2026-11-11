@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using RecursiveAI.OneModel.Tensors;
 
 namespace RecursiveAI.OneModel.Graph.Runtime;
@@ -101,38 +102,77 @@ internal sealed class RunState : IDisposable
                     continue;
                 }
 
-                if (step.Dynamic)
-                {
-                    ExecuteDynamic(step);
-                }
-                else if (step.IsView)
-                {
-                    CompiledNode n = step.Node;
-                    Tensor src = Values[n.Inputs[n.Kernel.ViewOfInput]];
-                    if (n.Outputs[0] >= 0)
-                    {
-                        Values[n.Outputs[0]] = MakeView(src, step.OutShapes[0], n);
-                    }
-                }
-                else
-                {
-                    ExecuteStatic(step);
-                }
-
-#if CHECKED
-                PoisonFreed(step);
-#endif
+                ExecuteHostStep(step);
             }
         }
         finally
         {
-            foreach (Tensor t in _runOwned)
-            {
-                t.Dispose();
-            }
-
-            _runOwned.Clear();
+            ReleaseRunOwned();
         }
+    }
+
+    /// <summary>
+    /// As <see cref="Execute"/>, but a backend region is awaited instead of waited for, so a host that cannot block (a browser's single
+    /// thread) lets the backend finish between awaits. Host steps run synchronously on the calling thread.
+    /// </summary>
+    public async ValueTask ExecuteAsync()
+    {
+        _arena.Reset();
+        try
+        {
+            PlanStep[] steps = _plan.Steps;
+            for (int i = 0; i < steps.Length; i++)
+            {
+                PlanStep step = steps[i];
+                if (step.Region is { } region)
+                {
+                    await _plan.Program!.RunAsync(region.Index, Values).ConfigureAwait(true);
+                    i = region.LastStep;
+                    continue;
+                }
+
+                ExecuteHostStep(step);
+            }
+        }
+        finally
+        {
+            ReleaseRunOwned();
+        }
+    }
+
+    private void ExecuteHostStep(PlanStep step)
+    {
+        if (step.Dynamic)
+        {
+            ExecuteDynamic(step);
+        }
+        else if (step.IsView)
+        {
+            CompiledNode n = step.Node;
+            Tensor src = Values[n.Inputs[n.Kernel.ViewOfInput]];
+            if (n.Outputs[0] >= 0)
+            {
+                Values[n.Outputs[0]] = MakeView(src, step.OutShapes[0], n);
+            }
+        }
+        else
+        {
+            ExecuteStatic(step);
+        }
+
+#if CHECKED
+        PoisonFreed(step);
+#endif
+    }
+
+    private void ReleaseRunOwned()
+    {
+        foreach (Tensor t in _runOwned)
+        {
+            t.Dispose();
+        }
+
+        _runOwned.Clear();
     }
 
     /// <summary>Forgets the caller's tensors and the values shaped at run time, so a pooled state keeps nothing alive.</summary>

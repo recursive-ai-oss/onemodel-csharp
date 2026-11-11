@@ -61,6 +61,16 @@ internal interface IBackendProgram : IDisposable
     /// </summary>
     void Run(int region, Tensor[] values);
 
+    /// <summary>
+    /// As <see cref="Run"/> for a host that must not block while the backend finishes, such as a browser's single thread: the returned task
+    /// completes when every output is filled. The default runs <see cref="Run"/> to completion.
+    /// </summary>
+    System.Threading.Tasks.ValueTask RunAsync(int region, Tensor[] values)
+    {
+        Run(region, values);
+        return default;
+    }
+
     /// <summary>Bytes copied from the host into the backend by one run, summed over regions (constants are copied once and not counted).</summary>
     long BytesToBackendPerRun { get; }
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using RecursiveAI.OneModel.Graph.Runtime;
 using RecursiveAI.OneModel.Kernels;
 using RecursiveAI.OneModel.Onnx;
@@ -268,6 +269,96 @@ public sealed class Session : IDisposable
                 }
 
                 state.Execute();
+                Deliver(state, outputNames, outputs);
+            }
+            finally
+            {
+                state.Clear();
+                plan.ReturnState(state);
+                plan.Release();
+            }
+        }
+        finally
+        {
+            if (temps is not null)
+            {
+                foreach (Tensor t in temps)
+                {
+                    if (!t.IsEmpty)
+                    {
+                        t.Dispose();
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// As <see cref="Run(ReadOnlySpan{string}, ReadOnlySpan{Tensor}, ReadOnlySpan{string}, Span{Tensor})"/>, for a host that cannot block on its execution
+    /// backend. Regions the backend runs are awaited; everything else runs on the calling thread. Same inputs, same results, same errors.
+    /// </summary>
+    internal async ValueTask RunAsync(string[] inputNames, Tensor[] inputs, string[] outputNames, Tensor[] outputs)
+    {
+        ThrowIfDisposed();
+        if (inputNames.Length != inputs.Length || outputNames.Length != outputs.Length)
+        {
+            throw Invalid("The name and tensor lists must have the same length.");
+        }
+
+        int nIn = _graph.InputIds.Length;
+        if (inputs.Length != nIn)
+        {
+            throw Invalid($"The model has {nIn} input(s) ({InputNameList()}) but {inputs.Length} were supplied.");
+        }
+
+        int[] order = new int[nIn];
+        DType[] types = new DType[nIn];
+        Shape[] shapes = new Shape[nIn];
+        Tensor[]? temps = null;
+        try
+        {
+            Array.Fill(order, -1);
+            for (int i = 0; i < nIn; i++)
+            {
+                if (!_graph.InputIndex.TryGetValue(inputNames[i], out int slot))
+                {
+                    throw Invalid($"The model has no input named '{inputNames[i]}'. Its inputs are {InputNameList()}.");
+                }
+
+                if (order[slot] >= 0)
+                {
+                    throw Invalid($"Input '{inputNames[i]}' was supplied twice.");
+                }
+
+                order[slot] = i;
+                Tensor t = inputs[i];
+                if (t.IsEmpty)
+                {
+                    throw Invalid($"Input '{inputNames[i]}' is an empty tensor.");
+                }
+
+                if (!t.IsContiguous || t.IsBlocked)
+                {
+                    temps ??= new Tensor[nIn];
+                    t = temps[i] = t.Contiguous(_env.Pool);
+                }
+
+                CheckInput(slot, t.DType, t.Shape);
+                types[slot] = t.DType;
+                shapes[slot] = t.Shape;
+            }
+
+            ExecutionPlan plan = AcquirePlan(types, shapes);
+            RunState state = plan.RentState();
+            try
+            {
+                for (int slot = 0; slot < nIn; slot++)
+                {
+                    int i = order[slot];
+                    state.Values[_graph.InputIds[slot]] = temps?[i].IsEmpty == false ? temps[i] : inputs[i];
+                }
+
+                await state.ExecuteAsync().ConfigureAwait(true);
                 Deliver(state, outputNames, outputs);
             }
             finally
