@@ -109,7 +109,7 @@ jobs:
   gpu:
     # Hosted runners have no GPU: the GPU package's tests run on Mesa's software Vulkan driver (lavapipe) with the Khronos validation layer,
     # whose messages fail a test. That proves correctness and validation-cleanliness, not speed; hardware is checked by hand.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # the validation layer pinned in tools/ci/fetch-validation-layer.sh is an Ubuntu 24.04 package
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
