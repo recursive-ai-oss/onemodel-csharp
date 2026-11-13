@@ -12,7 +12,8 @@ namespace RecursiveAI.OneModel.Graph.Runtime;
 /// <param name="Threads">The thread budget of one run.</param>
 /// <param name="Pool">Where tensors come from.</param>
 /// <param name="Backend">An execution backend offered the steps of every plan, or null for the built-in kernels alone. The compiled graph owns it.</param>
-internal sealed record SessionEnv(ArithmeticMode Mode, KernelPath Path, int Threads, BufferPool Pool, IExecutionBackend? Backend = null);
+/// <param name="RequireBackend">Building a plan fails when the backend leaves any scheduled step to the built-in kernels.</param>
+internal sealed record SessionEnv(ArithmeticMode Mode, KernelPath Path, int Threads, BufferPool Pool, IExecutionBackend? Backend = null, bool RequireBackend = false);
 
 internal enum ValueKind : byte
 {
@@ -510,6 +511,29 @@ internal sealed class ExecutionPlan : IDisposable
             foreach (PlanStep v in strandedViews)
             {
                 v.FallbackReason = "it only reinterprets its input in place, and its result is read outside the backend region that holds the input";
+            }
+        }
+
+        if (Env.RequireBackend)
+        {
+            var left = new List<string>();
+            var ops = new List<string>();
+            foreach (PlanStep st in Steps)
+            {
+                if (st.FallbackReason is { } why)
+                {
+                    left.Add($"{st.Node.Info.Describe()}: {why}");
+                    if (!ops.Contains(st.Node.Info.OpType))
+                    {
+                        ops.Add(st.Node.Info.OpType);
+                    }
+                }
+            }
+
+            if (left.Count > 0)
+            {
+                throw new SessionException(SessionErrorKind.DeviceUnsupported,
+                    $"The device was required but {left.Count} operator(s) cannot run on it for these input shapes: {string.Join("; ", left)}.", null, [.. ops]);
             }
         }
 

@@ -21,6 +21,14 @@ public enum SessionErrorKind
     /// <summary>The caller's inputs or outputs do not fit the model: unknown name, wrong element type, wrong shape, wrong buffer size.</summary>
     InvalidInput,
 
+    /// <summary>
+    /// <see cref="ComputeDevice.Gpu"/> was requested but cannot be used: the GPU package is not registered, no suitable device exists,
+    /// or <see cref="ModelOptions.RequireGpu"/> is set and operators cannot run there (<see cref="SessionException.Operators"/> lists them).
+    /// </summary>
+    DeviceUnsupported,
+
+    /// <summary>The device failed while preparing or running: it ran out of memory, was lost, or lacks a capability a kernel needs. The inner exception has the details.</summary>
+    DeviceFailure,
 }
 
 /// <summary>Raised for every failure of the graph layer that is the model's or the caller's doing rather than a bug.</summary>

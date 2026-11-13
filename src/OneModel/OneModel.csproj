@@ -21,6 +21,9 @@
     <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Fuzz" />
     <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Micro" />
     <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Training" />
+    <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Gpu" />
+    <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Gpu.Tests" />
+    <InternalsVisibleTo Include="GpuReport" />
     <InternalsVisibleTo Include="AotSmoke" />
     <InternalsVisibleTo Include="WasmSmoke" />
   </ItemGroup>

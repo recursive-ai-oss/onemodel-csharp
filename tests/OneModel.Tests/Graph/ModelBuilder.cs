@@ -60,7 +60,7 @@ internal sealed class ModelBuilder
         return this;
     }
 
-    /// <summary>Adds a node. Attributes are (name, value) pairs where value is long, float, string, long[] or a tensor message from <see cref="TensorValue"/>.</summary>
+    /// <summary>Adds a node. Attributes are (name, value) pairs where value is long, float, string, long[], float[], string[] or a tensor message from <see cref="TensorValue"/>.</summary>
     public ModelBuilder Node(string opType, string[] inputs, string[] outputs, params (string Name, object Value)[] attributes)
     {
         var w = new Msg();
@@ -105,6 +105,22 @@ internal sealed class ModelBuilder
                     }
 
                     a.Varint(20, 7);
+                    break;
+                case float[] fs:
+                    foreach (float f in fs)
+                    {
+                        a.Fixed32(7, BitConverter.SingleToUInt32Bits(f));
+                    }
+
+                    a.Varint(20, 6);
+                    break;
+                case string[] strs:
+                    foreach (string str in strs)
+                    {
+                        a.Bytes(9, Encoding.UTF8.GetBytes(str));
+                    }
+
+                    a.Varint(20, 8);
                     break;
                 case TensorValue t:
                     a.Bytes(5, t.Bytes);

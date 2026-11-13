@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Runs a model on the CPU and on the GPU and prints the parity, placement, memory and timing rows. Not shipped. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>GpuReport</RootNamespace>
+    <AssemblyName>GpuReport</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+    <ProjectReference Include="../../src/OneModel.Gpu/OneModel.Gpu.csproj" />
+  </ItemGroup>
+
+</Project>

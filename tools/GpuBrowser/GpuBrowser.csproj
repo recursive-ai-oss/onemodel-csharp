@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+
+  <!-- Runs a model on the GPU package in a browser (WebGPU) and reports parity against reference outputs computed on the desktop,
+       placement, repeatability and timing. A test tool: not shipped. Driven by tools/gpu_browser.sh. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>GpuBrowser</RootNamespace>
+    <AssemblyName>GpuBrowser</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <WasmEnableSIMD>true</WasmEnableSIMD>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <WasmEnableWebcil>false</WasmEnableWebcil>
+    <!-- Ahead-of-time compilation requires trimming. -->
+    <PublishTrimmed Condition="'$(RunAOTCompilation)' != 'true'">false</PublishTrimmed>
+    <!-- Whisper-class weights need more than the default 2 GiB of linear memory. -->
+    <EmccMaximumHeapSize>4294967296</EmccMaximumHeapSize>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+    <ProjectReference Include="../../src/OneModel.Gpu/OneModel.Gpu.csproj" />
+  </ItemGroup>
+
+</Project>

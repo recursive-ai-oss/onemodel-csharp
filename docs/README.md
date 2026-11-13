@@ -18,12 +18,14 @@ Looking for how to use the library? See the [usage guide](guide/README.md).
 | exp, log, tanh, erf, sigmoid, GELU: polynomials and error | [exact-transcendentals.md](exact-transcendentals.md) |
 | Reference oracles, pinned versions, comparison metrics | [oracles.md](oracles.md) |
 | Benchmark method | [bench-method.md](bench-method.md) |
+| GPU speed against ONNX Runtime | [bench.md](bench.md) |
 | Performance against ONNX Runtime (1.0 measurements) | [performance.md](performance.md) |
 | Convolution in fast mode: tiles, gathering, prepacked weights, threads | [kernels-conv.md](kernels-conv.md) |
 | Depthwise convolution: phase planes, lane layout, bits | [kernels-depthwise.md](kernels-depthwise.md) |
 | Half-precision storage: conversions, the widening adapter, compact weights | [fp16.md](fp16.md) |
 | ONNX import: protobuf reading, tensors, graph resolution, external data, errors | [onnx-import.md](onnx-import.md) |
 | Operator contract, plans, sessions, memory reuse | [graph-runtime.md](graph-runtime.md) |
+| Running on the GPU: placement, regions, exact mode, device memory, errors | [gpu.md](gpu.md) |
 | Reference models: method, operators used, results | [reference-models.md](reference-models.md) |
 | Graph passes: what each rewrites, levels, bit preservation | [graph-passes.md](graph-passes.md) |
 | Normalisation, softmax, reduction, arg-reduction and cumulative-sum operators | [ops-norms.md](ops-norms.md) |

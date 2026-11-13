@@ -67,10 +67,11 @@
     <Copyright>Copyright (c) Recursive AI, LLC</Copyright>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <!-- The one place the package version lives. -->
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/recursive-ai-oss/onemodel-csharp</RepositoryUrl>
     <PackageProjectUrl>https://recursiveai.org/onemodel/</PackageProjectUrl>
+    <PackageIcon>icon.png</PackageIcon>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>
@@ -79,5 +80,9 @@
          version (a package with no published version yet sets none). -->
     <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsShippedProject)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
 
 </Project>

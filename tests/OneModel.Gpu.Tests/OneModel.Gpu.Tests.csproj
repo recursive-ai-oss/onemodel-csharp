@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>$(PackagePrefix).$(LibName).Gpu.Tests</RootNamespace>
+    <AssemblyName>$(PackagePrefix).$(LibName).Gpu.Tests</AssemblyName>
+    <IsTestProject>true</IsTestProject>
+    <TestingPlatformCommandLineArguments>--results-directory "$(ArtifactsPath)/TestResults"</TestingPlatformCommandLineArguments>
+    <NoWarn>$(NoWarn);xUnit1051;xUnit1031</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System" />
+    <Using Include="System.Collections.Generic" />
+    <Using Include="System.IO" />
+    <Using Include="System.Linq" />
+    <Using Include="System.Threading" />
+    <Using Include="System.Threading.Tasks" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Builds small ONNX models for the tests. -->
+    <Compile Include="../OneModel.Tests/Graph/ModelBuilder.cs" Link="ModelBuilder.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+    <ProjectReference Include="../../src/OneModel.Gpu/OneModel.Gpu.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -125,3 +125,24 @@ internal readonly record struct NodePlacement(string NodeName, string OpType, st
 /// <param name="OpType">The operator type.</param>
 /// <param name="Reason">Why, in plain words.</param>
 internal readonly record struct NodeDecline(string NodeName, string OpType, string Reason);
+
+/// <summary>The one place an optional backend package registers itself, so the core never references it.</summary>
+internal static class ExecutionBackends
+{
+    private static Func<ModelOptions, IExecutionBackend>? s_gpu;
+
+    /// <summary>Called by the GPU package's explicit registration.</summary>
+    internal static void RegisterGpu(Func<ModelOptions, IExecutionBackend> factory) => System.Threading.Volatile.Write(ref s_gpu, factory);
+
+    /// <summary>Whether a GPU package has registered.</summary>
+    internal static bool GpuRegistered => System.Threading.Volatile.Read(ref s_gpu) is not null;
+
+    internal static IExecutionBackend CreateGpu(ModelOptions options)
+    {
+        Func<ModelOptions, IExecutionBackend>? factory = System.Threading.Volatile.Read(ref s_gpu);
+        return factory is null
+            ? throw new SessionException(SessionErrorKind.DeviceUnsupported,
+                "ModelOptions.Device is Gpu but no GPU package is registered. Reference RecursiveAI.OneModel.Gpu and call OneModelGpu.Register() before creating the session.")
+            : factory(options);
+    }
+}

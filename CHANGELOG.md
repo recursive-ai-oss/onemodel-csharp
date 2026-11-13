@@ -2,6 +2,26 @@
 
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-11-12
+
+A new package, `RecursiveAI.OneModel.Gpu`, and the options to use it. Additive: no change to the CPU path; inference and training results are unchanged bit for bit.
+
+### Added
+
+- `RecursiveAI.OneModel.Gpu`: runs a session's operators on the GPU through `RecursiveAI.OneGpu` 1.0.0 (Vulkan, Metal, browser WebGPU), with per-operator CPU fallback. Register it once with `OneModelGpu.Register(GpuOptions?)`. Transformers (attention, layer norm, GELU, gather, masks), convolution networks (conv, transposed conv, pooling, resize), recurrent layers, and float32, float16 and int8 (dynamic quantization, `ConvInteger`, quantize-dequantize) models run on the device; the reference set runs as one region. Operators and rules: `docs/gpu.md`; speed against ONNX Runtime's GPU providers: `docs/bench.md`.
+- `ModelOptions.Device` (`ComputeDevice.Cpu` by default, or `Gpu`) and `ModelOptions.RequireGpu`, which fails session creation with `SessionErrorKind.DeviceUnsupported` and every unsupported operator named.
+- `Session.GetDiagnostics`, returning `SessionDiagnostics` and `NodeDiagnostic`: where each operator runs, the reason each CPU operator stayed there, the number of device regions and the bytes copied to and from the device per run. `SessionErrorKind.DeviceFailure` for a device that runs out of memory or is lost.
+- `OneModelGpu.RunAsync` (awaits the device instead of blocking, which a browser needs), `OneModelGpu.GetInfo` and `ResetTimings` (adapter, kernel variants, device memory, timings), `OneModelGpu.PrepareDeviceAsync` (the browser's asynchronous device creation) and `GpuOptions` (adapter, validation, timings, fusion switches).
+- GPU exact mode: kernels with a fixed summation order and no atomics, so two runs on one device and driver give the same bits. It is not bit-identical across devices or to the CPU, which `docs/gpu.md` states.
+
+### Changed
+
+- Nothing for the CPU. A session with `Device = ComputeDevice.Gpu` applies only the graph rewrites the device runs.
+
+### Known limits
+
+- On an Apple M2, ResNet-50 in float32 is 2.16 (batch 1) and 2.21 (batch 8) times slower than Core ML on the GPU (`docs/bench.md`). Windows with an Intel GPU was measured for information only.
+
 ## [1.2.0] - 2026-11-08
 
 Everything since 1.0.0, the previous nuget.org release: the 1.1.0 speed work, trainable imported graphs and the other training additions of 1.2.0-preview.1, and the loading fixes of 1.2.0-preview.2 (details in those sections below). No breaking change; inference and training results are unchanged bit for bit except where 1.1.0 documents fast-mode convolution differences within tolerance.

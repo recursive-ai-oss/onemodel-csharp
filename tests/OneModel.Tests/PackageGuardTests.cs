@@ -32,10 +32,24 @@ public partial class PackageGuardTests
         foreach (string p in projects)
         {
             string text = File.ReadAllText(p);
-            Assert.DoesNotContain("<PackageReference", text, StringComparison.Ordinal);
             Assert.DoesNotContain("<PackageVersion", text, StringComparison.Ordinal);
+            if (Path.GetFileName(p) == "OneModel.Gpu.csproj")
+            {
+                // The accelerator package may reference the family's own GPU packages and nothing else.
+                foreach (Match m in PackageReferenceInclude().Matches(text))
+                {
+                    Assert.StartsWith("RecursiveAI.OneGpu", m.Groups[1].Value, StringComparison.Ordinal);
+                }
+
+                continue;
+            }
+
+            Assert.DoesNotContain("<PackageReference", text, StringComparison.Ordinal);
         }
     }
+
+    [GeneratedRegex("<PackageReference\\s+Include=\"([^\"]+)\"")]
+    private static partial Regex PackageReferenceInclude();
 
     [Fact]
     public void SourceCodeHasNoPInvoke()

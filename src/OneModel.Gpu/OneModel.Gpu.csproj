@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>$(PackagePrefix).$(LibName).Gpu</AssemblyName>
+    <RootNamespace>$(PackagePrefix).$(LibName).Gpu</RootNamespace>
+    <PackageId>$(PackagePrefix).$(LibName).Gpu</PackageId>
+    <Description>Runs RecursiveAI.OneModel models on the GPU: Vulkan, Metal and browser WebGPU from pure C#, with per-operator CPU fallback.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageReadmeFile>PACKAGE.md</PackageReadmeFile>
+    <PackageTags>onnx;neural-network;inference;gpu;vulkan;metal;webgpu;nativeaot;trimmable</PackageTags>
+    <PackageReleaseNotes>See CHANGELOG.md in the repository.</PackageReleaseNotes>
+    <!-- The only package references allowed here are the family's own GPU packages (checked by Directory.Build.targets). -->
+    <AllowFamilyGpuPackages>true</AllowFamilyGpuPackages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../OneModel/OneModel.csproj" />
+    <PackageReference Include="RecursiveAI.OneGpu" />
+    <PackageReference Include="RecursiveAI.OneGpu.Backends" />
+    <PackageReference Include="RecursiveAI.OneGpu.Kernels" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="$(PackagePrefix).$(LibName).Gpu.Tests" />
+    <InternalsVisibleTo Include="GpuReport" />
+    <InternalsVisibleTo Include="GpuBrowser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="PACKAGE.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE-MIT" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE-APACHE" Pack="true" PackagePath="/" />
+    <None Include="../../THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

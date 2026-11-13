@@ -3,6 +3,7 @@
 A neural-network runtime for .NET in pure managed C#, with no native binaries and no dependency beyond the shared framework.
 
 - **RecursiveAI.OneModel:** ONNX import, graph optimization and SIMD CPU kernels (AVX2, AVX-512, NEON, portable SIMD) for inference in fp32, fp16/bf16 and int8; thread-safe sessions; an opt-in exact mode with bit-identical results on every platform; its own memory-mappable model format. NativeAOT-, trim- and WebAssembly-compatible.
+- **RecursiveAI.OneModel.Gpu:** the same sessions on the GPU (Vulkan, Metal, browser WebGPU), with per-operator CPU fallback.
 - **RecursiveAI.OneModel.Training:** reverse-mode autodiff, modules, losses, SGD/Adam/AdamW, data loading, checkpoints, and tracing a trained module into a graph.
 
 ```csharp

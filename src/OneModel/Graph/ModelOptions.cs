@@ -35,6 +35,19 @@ public enum WeightStorage
     BFloat16 = 2,
 }
 
+/// <summary>Where a session runs the operators it can.</summary>
+public enum ComputeDevice
+{
+    /// <summary>The built-in CPU kernels. The default.</summary>
+    Cpu = 0,
+
+    /// <summary>
+    /// A graphics processor, through the <c>RecursiveAI.OneModel.Gpu</c> package, which must be registered first
+    /// (<c>OneModelGpu.Register()</c>). Operators it has no kernel for run on the CPU unless <see cref="ModelOptions.RequireGpu"/> is set.
+    /// </summary>
+    Gpu = 1,
+}
+
 /// <summary>Settings fixed when a <see cref="Session"/> is created.</summary>
 public sealed class ModelOptions
 {
@@ -64,8 +77,41 @@ public sealed class ModelOptions
     /// </summary>
     public int MaxCachedPlans { get; init; } = 16;
 
+    /// <summary>
+    /// Where the session runs operators. Default <see cref="ComputeDevice.Cpu"/>. With <see cref="ComputeDevice.Gpu"/> every operator
+    /// the GPU package has a kernel for, with the model's element type and attributes, runs there and the rest stay on the CPU; tensors
+    /// cross between the two only at the borders of runs of GPU operators. <see cref="Session.GetDiagnostics"/> lists each operator's
+    /// placement and the reason for each one left on the CPU.
+    /// </summary>
+    /// <remarks>
+    /// Results on the GPU are not the CPU's bits. <see cref="ArithmeticMode.Fast"/> uses the fastest kernels. <see cref="ArithmeticMode.Exact"/>
+    /// uses kernels with a fixed summation order and no atomics, so two runs on the same GPU and driver give the same bits, but another
+    /// GPU or driver may differ in the last bits: the exact mode's promise of identical bits on every machine holds for the CPU only.
+    /// An operator with no such kernel stays on the CPU in exact mode. With <see cref="ComputeDevice.Gpu"/> only the graph
+    /// rewrites whose fused operators the device runs are applied; the CPU's packed-weight rewrites are not.
+    /// </remarks>
+    public ComputeDevice Device { get; init; } = ComputeDevice.Cpu;
+
+    /// <summary>
+    /// Makes <see cref="ComputeDevice.Gpu"/> all or nothing: creating the session fails with <see cref="SessionErrorKind.DeviceUnsupported"/>,
+    /// naming every operator that cannot run on the GPU and why, instead of leaving those on the CPU. Default false. Requires
+    /// <see cref="Device"/> to be <see cref="ComputeDevice.Gpu"/>. A reason that depends on input shapes (a size above a device limit)
+    /// is only known when a shape is first run, and fails that run the same way.
+    /// </summary>
+    public bool RequireGpu { get; init; }
+
     internal void Validate()
     {
+        if (!Enum.IsDefined(Device))
+        {
+            throw new ArgumentOutOfRangeException(nameof(Device), Device, "Unknown device.");
+        }
+
+        if (RequireGpu && Device != ComputeDevice.Gpu)
+        {
+            throw new ArgumentException("RequireGpu needs Device = ComputeDevice.Gpu.", nameof(RequireGpu));
+        }
+
         if (!Enum.IsDefined(Mode))
         {
             throw new ArgumentOutOfRangeException(nameof(Mode), Mode, "Unknown execution mode.");

@@ -7,10 +7,13 @@
   <Folder Name="/src/">
     <Project Path="src/OneModel/OneModel.csproj" />
     <Project Path="src/OneModel.Training/OneModel.Training.csproj" />
+    <Project Path="src/OneModel.Gpu/OneModel.Gpu.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OneModel.Tests/OneModel.Tests.csproj" />
+    <Project Path="tests/OneModel.Gpu.Tests/OneModel.Gpu.Tests.csproj" />
     <Project Path="tests/AotSmoke/AotSmoke.csproj" />
+    <Project Path="tests/GpuAotSmoke/GpuAotSmoke.csproj" />
     <Project Path="tests/WasmSmoke/WasmSmoke.csproj" />
     <Project Path="tests/GuideSamples/GuideSamples.csproj" />
     <Project Path="tests/OnnxSweep/OnnxSweep.csproj" />
@@ -23,6 +26,8 @@
     <Project Path="tools/CrnnFinetune/CrnnFinetune.csproj" />
     <Project Path="tools/GoldenDemo/GoldenDemo.csproj" />
     <Project Path="tools/GoldenModels/GoldenModels.csproj" />
+    <Project Path="tools/GpuBrowser/GpuBrowser.csproj" />
+    <Project Path="tools/GpuReport/GpuReport.csproj" />
   </Folder>
   <Folder Name="/fuzz/">
     <Project Path="fuzz/OneModel.Fuzz/OneModel.Fuzz.csproj" />

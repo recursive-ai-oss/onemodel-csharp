@@ -5,6 +5,8 @@
   <Target Name="OneModelPackageGuard" BeforeTargets="CollectPackageReferences;ResolvePackageAssets;BeforeBuild" Condition="'$(IsShippedProject)' == 'true'">
     <ItemGroup>
       <_GuardPackageRef Include="@(PackageReference)" Condition="'%(PackageReference.IsImplicitlyDefined)' != 'true'" />
+      <!-- The accelerator package may reference the family's own GPU packages (RecursiveAI.OneGpu*) and nothing else. -->
+      <_GuardPackageRef Remove="@(_GuardPackageRef)" Condition="'$(AllowFamilyGpuPackages)' == 'true' and $([System.String]::Copy('%(_GuardPackageRef.Identity)').StartsWith('RecursiveAI.OneGpu'))" />
       <_GuardProjectRef Include="@(ProjectReference)" />
     </ItemGroup>
     <Error Condition="'@(_GuardPackageRef)' != ''"

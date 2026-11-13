@@ -10,7 +10,7 @@ public enum ArithmeticMode
     Fast = 0,
 
     /// <summary>
-    /// Opt-in. Every result is bit-identical across operating systems, CPUs, instruction sets and thread counts. Creating a session
+    /// Opt-in. Every result is bit-identical across operating systems, CPUs, instruction sets and thread counts (on the CPU; a GPU session's exact mode is reproducible on one device and driver only, see <see cref="Graph.ModelOptions.Device"/>). Creating a session
     /// fails if the model uses an operator that has no exact kernel.
     /// </summary>
     Exact = 1,

@@ -72,13 +72,29 @@ public sealed class Session : IDisposable
     public static Session Create(IrModel model, ModelOptions? options = null, CancellationToken cancellationToken = default) =>
         Create(model, options, OpRegistry.Default, null, cancellationToken);
 
-    internal static Session Create(IrModel model, ModelOptions? options, OpRegistry registry, KernelPath? path, CancellationToken cancellationToken) =>
-        Create(model, options, registry, path, null, cancellationToken);
+    internal static Session Create(IrModel model, ModelOptions? options, OpRegistry registry, KernelPath? path, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        options ??= new ModelOptions();
+        options.Validate();
+        if (options.Device != ComputeDevice.Gpu)
+        {
+            return Create(model, options, registry, path, null, cancellationToken);
+        }
+
+        // The backend chooses which of the level's passes it can use the results of.
+        IExecutionBackend backend = ExecutionBackends.CreateGpu(options);
+        return CreateCore(model, options, registry, path, backend, options.OptimizationLevel, cancellationToken);
+    }
 
     // As above with an execution backend that is offered every plan's steps. The session takes ownership of the backend (the compiled
     // graph disposes it after the last plan is gone), also when creation fails.
     internal static Session Create(IrModel model, ModelOptions? options, OpRegistry registry, KernelPath? path, IExecutionBackend? backend,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        CreateCore(model, options, registry, path, backend, (options ?? new ModelOptions()).OptimizationLevel, cancellationToken);
+
+    private static Session CreateCore(IrModel model, ModelOptions? options, OpRegistry registry, KernelPath? path, IExecutionBackend? backend,
+        OptimizationLevel level, CancellationToken cancellationToken)
     {
         try
         {
@@ -87,8 +103,9 @@ public sealed class Session : IDisposable
             options.Validate();
             KernelPath chosen = path ?? KernelPaths.Best();
             int threads = options.IntraOpThreads == 0 ? ParallelFor.DefaultThreads : options.IntraOpThreads;
-            var env = new SessionEnv(options.Mode, chosen, threads, BufferPool.Shared, backend);
-            CompiledGraph graph = CompiledGraph.Create(model.Graph, registry, options.Mode, options.WeightStorage, options.OptimizationLevel, chosen, threads, cancellationToken);
+            var env = new SessionEnv(options.Mode, chosen, threads, BufferPool.Shared, backend, options.RequireGpu);
+            CompiledGraph graph = CompiledGraph.Create(model.Graph, registry, options.Mode, options.WeightStorage, level, chosen, threads, cancellationToken,
+                backend is null ? null : backend.ChoosePass);
             if (backend is not null)
             {
                 graph.Own(backend);
@@ -99,15 +116,43 @@ public sealed class Session : IDisposable
             if (env.Backend is { } b)
             {
                 var declined = new List<NodeDecline>();
-                foreach (CompiledNode node in graph.Nodes)
+                var required = new List<NodeDecline>();
+                bool[] mayFold = MayFold(graph);
+                for (int ni = 0; ni < graph.Nodes.Length; ni++)
                 {
+                    CompiledNode node = graph.Nodes[ni];
                     if (b.CheckNode(node, options.Mode) is { } reason)
                     {
-                        declined.Add(new NodeDecline(node.Info.Name, node.Info.OpType, reason));
+                        var d = new NodeDecline(node.Info.Name, node.Info.OpType, reason);
+                        declined.Add(d);
+                        if (!mayFold[ni])
+                        {
+                            required.Add(d);
+                        }
                     }
                 }
 
                 session.BackendDeclines = [.. declined];
+
+                // A declined node whose inputs are all known before the run may be evaluated once while planning and then never run, so it
+                // is not named here; the plan checks again, with the folding done, for the shapes it is built for.
+                declined = required;
+                if (options.RequireGpu && declined.Count > 0)
+                {
+                    var ops = new List<string>();
+                    foreach (NodeDecline d in declined)
+                    {
+                        if (!ops.Contains(d.OpType))
+                        {
+                            ops.Add(d.OpType);
+                        }
+                    }
+
+                    string detail = string.Join("; ", declined.ConvertAll(d => $"{(d.NodeName.Length > 0 ? d.NodeName + " " : "")}({d.OpType}): {d.Reason}"));
+                    session.Dispose();
+                    throw new SessionException(SessionErrorKind.DeviceUnsupported,
+                        $"The device was required but {declined.Count} node(s) cannot run on it: {detail}.", null, [.. ops]);
+                }
             }
 
             return session;
@@ -117,6 +162,121 @@ public sealed class Session : IDisposable
             backend?.Dispose();
             throw;
         }
+    }
+
+    // Which nodes a plan could evaluate while planning: those that read only constants and the results of such nodes, and the nodes
+    // that make a value from shapes alone. A node that reads a graph input's data cannot be one of them.
+    private static bool[] MayFold(CompiledGraph graph)
+    {
+        var known = new bool[graph.ValueCount];
+        for (int i = 0; i < known.Length; i++)
+        {
+            known[i] = !graph.Constants[i].IsEmpty;
+        }
+
+        var may = new bool[graph.Nodes.Length];
+        for (int ni = 0; ni < may.Length; ni++)
+        {
+            CompiledNode node = graph.Nodes[ni];
+            bool all = true;
+            foreach (int id in node.Inputs)
+            {
+                if (id >= 0 && !known[id])
+                {
+                    all = false;
+                    break;
+                }
+            }
+
+            may[ni] = all || node.Info.OpType is "Shape" or "Size";
+            if (may[ni])
+            {
+                foreach (int id in node.Outputs)
+                {
+                    if (id >= 0)
+                    {
+                        known[id] = true;
+                    }
+                }
+            }
+        }
+
+        return may;
+    }
+
+    /// <summary>The backend's compiled program for inputs like <paramref name="inputs"/>, building the plan if needed; null without a device region.</summary>
+    internal IBackendProgram? ProgramOf(IReadOnlyDictionary<string, Tensor> inputs)
+    {
+        ThrowIfDisposed();
+        int nIn = _graph.InputIds.Length;
+        var types = new DType[nIn];
+        var shapes = new Shape[nIn];
+        for (int slot = 0; slot < nIn; slot++)
+        {
+            string name = _graph.Inputs[slot].Name;
+            if (!inputs.TryGetValue(name, out Tensor t))
+            {
+                throw Invalid($"The model has an input named '{name}' that was not supplied. Its inputs are {InputNameList()}.");
+            }
+
+            CheckInput(slot, t.DType, t.Shape);
+            types[slot] = t.DType;
+            shapes[slot] = t.Shape;
+        }
+
+        ExecutionPlan p = AcquirePlan(types, shapes);
+        try
+        {
+            return p.Program;
+        }
+        finally
+        {
+            p.Release();
+        }
+    }
+
+    /// <summary>The execution backend this session offers its steps to, or null.</summary>
+    internal IExecutionBackend? Backend => _env.Backend;
+
+    /// <summary>
+    /// Says where each operator runs for inputs like <paramref name="inputs"/> (their element types and shapes; the values are not used):
+    /// on the device or on the CPU, why each CPU operator stayed there, and how many bytes a run moves between the two. Builds and
+    /// caches the execution plan for those shapes if there is none yet.
+    /// </summary>
+    /// <param name="inputs">Every model input by name, as for <c>Run</c>.</param>
+    /// <returns>The placement of every operator that runs (operators evaluated once while planning, such as shape arithmetic on constants, are not listed).</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="inputs"/> is null.</exception>
+    /// <exception cref="SessionException"><see cref="SessionErrorKind.InvalidInput"/> for an unknown or missing name, wrong element type or shape;
+    /// <see cref="SessionErrorKind.DeviceUnsupported"/> when <see cref="ModelOptions.RequireGpu"/> is set and these shapes need an operator the device cannot run.</exception>
+    /// <exception cref="ObjectDisposedException">The session was disposed.</exception>
+    public SessionDiagnostics GetDiagnostics(IReadOnlyDictionary<string, Tensor> inputs)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(inputs);
+        int nIn = _graph.InputIds.Length;
+        var types = new DType[nIn];
+        var shapes = new Shape[nIn];
+        for (int slot = 0; slot < nIn; slot++)
+        {
+            string name = _graph.Inputs[slot].Name;
+            if (!inputs.TryGetValue(name, out Tensor t))
+            {
+                throw Invalid($"The model has an input named '{name}' that was not supplied. Its inputs are {InputNameList()}.");
+            }
+
+            CheckInput(slot, t.DType, t.Shape);
+            types[slot] = t.DType;
+            shapes[slot] = t.Shape;
+        }
+
+        var (nodes, regions, toBackend, fromBackend) = PlacementOf(types, shapes);
+        var list = new NodeDiagnostic[nodes.Length];
+        for (int i = 0; i < list.Length; i++)
+        {
+            list[i] = new NodeDiagnostic(nodes[i].NodeName, nodes[i].OpType, nodes[i].Backend, nodes[i].Region, nodes[i].Reason);
+        }
+
+        return new SessionDiagnostics(_env.Backend?.Name ?? "cpu", [.. list], regions, toBackend, fromBackend);
     }
 
     /// <summary>Nodes the backend said at creation it can never run, with the reason. Empty without a backend.</summary>

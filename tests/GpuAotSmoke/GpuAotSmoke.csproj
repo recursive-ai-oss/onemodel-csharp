@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Publishes the GPU package with NativeAOT and runs a small model on the device. CI-style check: any trim or AOT warning fails the publish. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>$(PackagePrefix).$(LibName).GpuAotSmoke</RootNamespace>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OneModel/OneModel.csproj" />
+    <ProjectReference Include="../../src/OneModel.Gpu/OneModel.Gpu.csproj" />
+    <!-- The conv case builds its model in code with the tests' writer. -->
+    <Compile Include="../OneModel.Tests/Graph/ModelBuilder.cs" Link="ModelBuilder.cs" />
+    <EmbeddedResource Include="../../testdata/graphs/mlp.onnx" LogicalName="mlp.onnx" />
+    <EmbeddedResource Include="../../testdata/graphs/reference.json" LogicalName="reference.json" />
+  </ItemGroup>
+
+</Project>

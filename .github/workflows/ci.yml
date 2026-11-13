@@ -37,13 +37,14 @@ jobs:
       - name: Restore
         shell: bash
         run: |
-          for p in tests/OneModel.Tests tests/AotSmoke tests/GuideSamples bench/Micro fuzz/OneModel.Fuzz; do dotnet restore "$p"; done
+          for p in tests/OneModel.Tests tests/OneModel.Gpu.Tests tests/AotSmoke tests/GpuAotSmoke tests/GuideSamples bench/Micro fuzz/OneModel.Fuzz; do dotnet restore "$p"; done
       - name: Build and test (Release, then Checked)
         shell: bash
         run: |
           for c in Release Checked; do
-            for p in tests/OneModel.Tests tests/AotSmoke tests/GuideSamples bench/Micro fuzz/OneModel.Fuzz; do dotnet build "$p" -c "$c" --no-restore; done
+            for p in tests/OneModel.Tests tests/OneModel.Gpu.Tests tests/AotSmoke tests/GpuAotSmoke tests/GuideSamples bench/Micro fuzz/OneModel.Fuzz; do dotnet build "$p" -c "$c" --no-restore; done
             dotnet test --project tests/OneModel.Tests -c "$c" --no-build
+            dotnet build src/OneModel.Gpu -c "$c" --no-restore
           done
       # The usage guide's code blocks are copied from tests/GuideSamples; they must be current and the samples must run.
       - name: Guide examples run
@@ -87,6 +88,10 @@ jobs:
       - name: Publish AOT smoke app (warnings are errors)
         shell: bash
         run: dotnet publish tests/AotSmoke -c Release -r ${{ matrix.rid }} -o "$RUNNER_TEMP/smoke" -warnaserror
+      # Only the GPU package's NativeAOT publish: the runners have no GPU, so the run is in the gpu job below.
+      - name: Publish the GPU smoke app (warnings are errors)
+        shell: bash
+        run: dotnet publish tests/GpuAotSmoke -c Release -r ${{ matrix.rid }} -o "$RUNNER_TEMP/gpu-smoke" -warnaserror
       - name: Run AOT smoke app
         shell: bash
         run: |
@@ -100,6 +105,32 @@ jobs:
           dotnet publish tools/GoldenModels -c Release -r ${{ matrix.rid }} -p:PublishAot=true -o "$RUNNER_TEMP/golden-aot"
           ext=""; [ "${{ runner.os }}" = Windows ] && ext=".exe"
           APP="$RUNNER_TEMP/golden-aot/GoldenModels$ext" tools/golden_ci.sh aot
+
+  gpu:
+    # Hosted runners have no GPU: the GPU package's tests run on Mesa's software Vulkan driver (lavapipe) with the Khronos validation layer,
+    # whose messages fail a test. That proves correctness and validation-cleanliness, not speed; hardware is checked by hand.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Artifacts directory
+        run: echo "ONEMODEL_ARTIFACTS=$RUNNER_TEMP/artifacts" >> "$GITHUB_ENV"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Install the Vulkan software driver, the validation layer and the Native AOT toolchain
+        run: |
+          sudo apt-get update
+          # The layer version is pinned in tools/ci/fetch-validation-layer.sh, the one place local runs read too.
+          layer=$(sed -n 's/^LAYER_PACKAGE_VERSION="\(.*\)"$/\1/p' tools/ci/fetch-validation-layer.sh)
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers "vulkan-validationlayers=$layer" clang zlib1g-dev
+      - name: Restore
+        run: dotnet restore tests/OneModel.Gpu.Tests && dotnet restore tests/GpuAotSmoke
+      - name: GPU tests on lavapipe (validation layer on, no messages allowed)
+        run: VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json tools/ci/gpu-tests.sh
+      - name: GPU NativeAOT smoke (warnings are errors)
+        run: VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json tools/ci/gpu-aot-smoke.sh "$RUNNER_TEMP/gpu-smoke"
 
   wasm:
     runs-on: ubuntu-latest
@@ -145,6 +176,7 @@ jobs:
         run: |
           dotnet pack src/OneModel -c Release -o "$RUNNER_TEMP/packages"
           dotnet pack src/OneModel.Training -c Release -o "$RUNNER_TEMP/packages"
+          dotnet pack src/OneModel.Gpu -c Release -o "$RUNNER_TEMP/packages"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages
